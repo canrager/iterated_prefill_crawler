@@ -15,7 +15,7 @@ Mapping out sensitive topics of a language model. Reasoning models conduct an in
 ## Setup
 
 ```
-# git clone the project
+git clone https://github.com/canrager/iterated_prefill_crawler.git
 cd thought_crawl
 pip install -e .
 python -m spacy download en_core_web_sm
