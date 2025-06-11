@@ -1,0 +1,15 @@
+# Environment
+__pycache__/
+*.lock
+*.python-version
+*.out
+
+!artifacts/input/.gitkeep
+!artifacts/interim/.gitkeep
+!artifacts/result/.gitkeep
+!artifacts/log/.gitkeep
+!exp/prototypes/.gitkeep
+
+# Directories
+artifacts
+exp/prototypes
