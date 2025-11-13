@@ -1,0 +1,4 @@
+model_path: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+quantization_bits: null
+device: "cuda:0"
+cache_dir: "/home/can/models/"

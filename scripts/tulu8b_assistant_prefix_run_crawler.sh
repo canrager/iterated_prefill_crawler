@@ -13,26 +13,27 @@ cd $PROJECT_ROOT
 
 # Create artifacts/log directory if it doesn't exist
 mkdir -p "$PROJECT_ROOT/artifacts/log"
-# Generate time./schr   stamp for log filename
+# Generate timestamp for log filename
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="$PROJECT_ROOT/artifacts/log/crawler_debug_${TIMESTAMP}.log"
+SESSION_NAME="crawler_tulu8b_ap_${TIMESTAMP}"
 
 echo "Log Dir: $LOG_FILE"
+echo "Tmux Session: $SESSION_NAME"
 
-# Run the crawler script with nohup and write to the log file
-nohup python exp/run_crawler.py \
-    --device "cuda" \
-    --cache_dir "/share/u/models/" \
-    --model_path "allenai/Llama-3.1-Tulu-3-8B-SFT" \
-    --quantization_bits "none" \
-    --prompt_injection_location "assistant_prefix" \
-    > "$LOG_FILE" 2>&1 &
+# Run the crawler script in a tmux session
+tmux new-session -d -s "$SESSION_NAME" \
+    "cd $PROJECT_ROOT && python exp/run_crawler.py \
+    --device 'cuda' \
+    --cache_dir '/home/can/models/' \
+    --model_path 'allenai/Llama-3.1-Tulu-3-8B-SFT' \
+    --quantization_bits 'none' \
+    --prompt_injection_location 'assistant_prefix' \
+    2>&1 | tee '$LOG_FILE'"
     # --debug \
     # --not_use_openai_embeddings \
 
-# Store the process ID
-PID=$!
-echo "PID: $PID"
+echo "Attach to session with: tmux attach-session -t $SESSION_NAME"
 
 # Add any additional arguments as needed
 # Example: --load_fname "path/to/saved/state" if you want to resume from a saved state

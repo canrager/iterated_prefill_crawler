@@ -1,0 +1,7 @@
+model_path: "google/gemma-3-12b-it"
+quantization_bits: null
+device: "cuda:0"
+cache_dir: "/home/can/models/"
+env:
+  TORCH_COMPILE_DISABLE: "1"
+  TORCHDYNAMO_DISABLE: "1"

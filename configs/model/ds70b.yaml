@@ -1,0 +1,4 @@
+model_path: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
+quantization_bits: 0
+device: "cuda"
+cache_dir: "/disk/u/models/"

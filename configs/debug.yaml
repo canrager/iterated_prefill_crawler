@@ -1,0 +1,14 @@
+defaults:
+  - config
+  - _self_
+
+# Override crawler settings for debug mode
+num_crawl_steps: 2
+generation_batch_size: 10
+max_topic_string_length: 200
+max_generated_tokens: 200
+max_crawl_topics: 10000
+prompt_languages:
+  - english
+
+verbose: true

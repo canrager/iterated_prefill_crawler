@@ -579,6 +579,7 @@ class Crawler:
                 max_new_tokens=100,
                 temperature=1,
                 verbose=verbose,
+                cfg=self.config,
             )
 
             refused_to_make_query = [self.is_refusal(query) for query in queries]
@@ -600,6 +601,7 @@ class Crawler:
                     [query.split("ssistant")[-1].strip(" <>|:") for query in queries],
                     max_new_tokens=100,
                     temperature=1,
+                    cfg=self.config
                 )
                 refused_to_answer_query = [
                     self.is_refusal(answer) for answer in answers
@@ -912,6 +914,7 @@ class Crawler:
                     tokenization_template=self.config.tokenization_template,
                     num_samples_per_topic=self.config.num_samples_per_topic,
                     verbose=verbose,
+                    cfg=self.config,
                     **prefills,
                 )
 

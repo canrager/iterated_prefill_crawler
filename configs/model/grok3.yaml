@@ -1,0 +1,4 @@
+model_path: "grok-3"
+quantization_bits: null
+device: "cpu"
+cache_dir: "/Users/canrager/Desktop"

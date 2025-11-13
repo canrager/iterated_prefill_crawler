@@ -1,0 +1,4 @@
+model_path: "meta-llama/Llama-3.3-70B-Instruct"
+quantization_bits: 8
+device: "cuda:7"
+cache_dir: "/disk/u/models/"

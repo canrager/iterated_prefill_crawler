@@ -235,12 +235,14 @@ class CrawlerConfig:
     tokenization_template: str = "chat"
 
     # Generation parameters
+    model_path: str = "allenai/Llama-3.1-Tulu-3-8B-SFT"
     temperature: float = 0.6
     num_samples_per_topic: int = 6
     num_crawl_steps: int = 10
     generation_batch_size: int = 100
     max_topic_string_length: int = 100
     max_crawl_topics: int = 10000
+    max_context_tokens: int = 500  # Total context window limit (prompt + generation)
     max_generated_tokens: int = 180
     refusal_max_new_tokens: int = 25
     max_extracted_topics_per_generation: int = 15

@@ -16,22 +16,23 @@ mkdir -p "$PROJECT_ROOT/artifacts/log"
 # Generate timestamp for log filename
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="$PROJECT_ROOT/artifacts/log/crawler_debug_${TIMESTAMP}.log"
+SESSION_NAME="crawler_meta8b_${TIMESTAMP}"
 
 echo "Log Dir: $LOG_FILE"
+echo "Tmux Session: $SESSION_NAME"
 
-# Run the crawler script with nohup and write to the log file
-nohup python exp/run_crawler.py \
-    --device "cuda:0" \
-    --cache_dir "/home/can/models/" \
-    --model_path "meta-llama/Llama-3.1-8B-Instruct" \
-    --quantization_bits "none" \
-    --prompt_injection_location "thought_prefix" \
-    "$@" \
-    > "$LOG_FILE" 2>&1 &
+# Run the crawler script in a tmux session
+tmux new-session -d -s "$SESSION_NAME" \
+    "cd $PROJECT_ROOT && python exp/run_crawler.py \
+    --device 'cuda:0' \
+    --cache_dir '/home/can/models/' \
+    --model_path 'meta-llama/Llama-3.1-8B-Instruct' \
+    --quantization_bits 'none' \
+    --prompt_injection_location 'thought_prefix' \
+    $@ \
+    2>&1 | tee '$LOG_FILE'"
 
-# Store the process ID
-PID=$!
-echo "PID: $PID"
+echo "Attach to session with: tmux attach-session -t $SESSION_NAME"
 
 # Add any additional arguments as needed
 # Example: --load_fname "path/to/saved/state" if you want to resume from a saved state

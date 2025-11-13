@@ -9,6 +9,8 @@ from torch.nn import functional as F
 from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
 import anthropic
 import os
+from vllm import LLM, SamplingParams
+from vllm.inputs.data import TokensPrompt
 
 from core.tokenization_utils import custom_decoding, custom_batch_encoding
 from core.project_config import INPUT_DIR
@@ -90,6 +92,7 @@ def batch_complete_R1(
     texts: List[str],
     max_new_tokens: int = 150,
     temperature: float = 0.6,
+    cfg = None
 ):
     """
     Complete the generated text using the R1 model.
@@ -105,7 +108,7 @@ def batch_complete_R1(
             temperature=temperature,
         )
     generated_texts = custom_decoding(
-        model.config._name_or_path, tokenizer, outputs, skip_special_tokens=True
+        cfg.model_path, tokenizer, outputs, skip_special_tokens=True
     )
     return generated_texts
 
@@ -119,6 +122,7 @@ def batch_generate_from_tokens(
     skip_special_tokens: bool = False,
     temperature: Optional[float] = None,
     verbose: bool = False,
+    cfg=None,
 ):
     """
     Generate text based on the input prompt.
@@ -162,10 +166,69 @@ def batch_generate_from_tokens(
             print("====================")
             print("".join([f"{s}[{i}]" for i, s in zip(output, decoded)]))
 
-    model_name = model.config._name_or_path
+    model_name = cfg.model_path
     generated_texts = custom_decoding(
         model_name, tokenizer, outputs, skip_special_tokens
     )
+
+    return generated_texts
+
+
+def batch_generate_from_tokens_vllm(
+    model: LLM,
+    tokenizer: AutoTokenizer,
+    input_ids_BL: List[List[int]],
+    max_generation_length: int = 1000,
+    max_new_tokens: Optional[int] = None,
+    skip_special_tokens: bool = False,
+    temperature: Optional[float] = None,
+    verbose: bool = False,
+    cfg=None,
+):
+    """
+    Generate text using vLLM backend.
+
+    Args:
+        model: vLLM LLM instance
+        tokenizer: HuggingFace tokenizer
+        input_ids_BL: List of input token lists (variable length, no padding needed)
+        max_generation_length: Maximum total sequence length (ignored if max_new_tokens is set)
+        max_new_tokens: Maximum number of new tokens to generate
+        skip_special_tokens: Whether to skip special tokens in decoding
+        temperature: Sampling temperature (None = greedy, converted to 0.0)
+        verbose: Print debug information
+
+    Returns:
+        List[str]: Generated texts
+    """
+    # Convert None temperature to greedy (0.0)
+    if temperature is None:
+        temperature = 0.0
+
+    # Set up sampling parameters
+    sampling_params = SamplingParams(
+        temperature=temperature,
+        max_tokens=max_new_tokens if max_new_tokens is not None else max_generation_length,
+        skip_special_tokens=skip_special_tokens,
+    )
+
+    # vLLM handles variable-length sequences natively - no padding needed!
+    # Wrap token IDs in TokensPrompt format for vLLM 0.11.0+
+    prompts = [TokensPrompt(prompt_token_ids=ids) for ids in input_ids_BL]
+
+    outputs = model.generate(
+        prompts=prompts,
+        sampling_params=sampling_params,
+    )
+
+    # Extract generated text from vLLM outputs
+    generated_texts = [output.outputs[0].text for output in outputs]
+
+    if verbose:
+        for i, (input_ids, output) in enumerate(zip(input_ids_BL, outputs)):
+            print("====================")
+            print(f"Input tokens: {input_ids}")
+            print(f"Generated: {output.outputs[0].text}")
 
     return generated_texts
 
@@ -228,6 +291,7 @@ def batch_generate(
     verbose: bool = False,
     skip_special_tokens: bool = False,
     remote: bool = False,
+    cfg = None
 ) -> List[str]:
     """Given a list of seed topics, return a list of raw model generations,
     self.config.num_samples_per_topic determines number of generations for identical input topics.
@@ -259,7 +323,7 @@ def batch_generate(
             generated_texts.append(generation)
         return generated_texts
 
-    model_name = model.config._name_or_path
+    model_name = cfg.model_path
     user_messages = [user_message_template.format(topic) for topic in selected_topics]
     input_ids = custom_batch_encoding(
         model_name=model_name,
@@ -285,18 +349,37 @@ def batch_generate(
             )
             generated_texts.extend(batch_generations)
     else:
-        for _ in range(num_samples_per_topic):
-            batch_generations = batch_generate_from_tokens(
-                model=model,
-                tokenizer=tokenizer,
-                input_ids_BL=input_ids,
-                max_generation_length=None,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                skip_special_tokens=skip_special_tokens,
-                verbose=False,
-            )
-            generated_texts.extend(batch_generations)
+        # Dispatch to vLLM or transformers based on model type
+        if isinstance(model, LLM):
+            # vLLM backend
+            for _ in range(num_samples_per_topic):
+                batch_generations = batch_generate_from_tokens_vllm(
+                    model=model,
+                    tokenizer=tokenizer,
+                    input_ids_BL=input_ids,
+                    max_generation_length=None,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    skip_special_tokens=skip_special_tokens,
+                    verbose=False,
+                    cfg=cfg
+                )
+                generated_texts.extend(batch_generations)
+        else:
+            # Transformers backend
+            for _ in range(num_samples_per_topic):
+                batch_generations = batch_generate_from_tokens(
+                    model=model,
+                    tokenizer=tokenizer,
+                    input_ids_BL=input_ids,
+                    max_generation_length=None,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    skip_special_tokens=skip_special_tokens,
+                    verbose=False,
+                    cfg=cfg
+                )
+                generated_texts.extend(batch_generations)
 
     if verbose:
         input_tokens = custom_decoding(

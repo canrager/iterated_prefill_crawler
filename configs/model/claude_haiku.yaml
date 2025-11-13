@@ -1,0 +1,4 @@
+model_path: "claude-3-5-haiku-latest"
+quantization_bits: null
+device: null
+cache_dir: "/share/u/models/"

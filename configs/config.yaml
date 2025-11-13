@@ -1,0 +1,36 @@
+# Model settings
+model_path: "allenai/Llama-3.1-Tulu-3-8B-SFT"
+quantization_bits: null
+device: "cuda"
+cache_dir: "/home/can/models/"
+
+# Model and runtime settings
+prompt_injection_location: thought_prefix
+use_openai_embeddings: true
+load_fname: null
+backend: vllm  # "transformers" or "vllm"
+
+# vLLM-specific settings (only used when backend: vllm)
+vllm_tensor_parallel_size: 1
+vllm_gpu_memory_utilization: 0.9
+vllm_max_model_len: null  # null = use model default
+
+# Crawler configuration (production defaults)
+temperature: 0.6
+num_samples_per_topic: 1
+num_crawl_steps: 1000
+generation_batch_size: 2
+max_topic_string_length: 100
+max_context_tokens: 500  # Total context window limit (prompt + generation)
+max_generated_tokens: 100
+max_extracted_topics_per_generation: 10
+max_crawl_topics: 1_000_000
+tokenization_template: chat
+do_filter_refusals: true
+do_force_thought_skip: false
+prompt_languages:
+  - english
+  - chinese
+refusal_max_new_tokens: 25
+
+verbose: false

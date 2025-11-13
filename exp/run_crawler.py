@@ -1,144 +1,98 @@
 import os
+
+# Set environment variable to force spawn method before any imports
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+
+import multiprocessing
+# Set multiprocessing start method to 'spawn' for CUDA compatibility
+# MUST be set before importing torch or any CUDA libraries
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass  # Already set
+
 import torch
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
 from core.crawler import Crawler, get_run_name
 from core.crawler_config import CrawlerConfig
 from core.llm_utils import load_model_and_tokenizer, load_filter_models, load_from_path
 from core.project_config import INTERIM_DIR, RESULT_DIR
-import argparse
-
-DEFAULT_CONFIG = {
-    "crawler": CrawlerConfig(
-        temperature=0.6,
-        num_samples_per_topic=1,
-        num_crawl_steps=1000,
-        generation_batch_size=2,
-        max_topic_string_length=100,
-        max_generated_tokens=100,
-        max_extracted_topics_per_generation=10,
-        max_crawl_topics=1_000_000,
-        tokenization_template="chat",
-        do_filter_refusals=True,
-        do_force_thought_skip=False,
-        prompt_languages=["english", "chinese"],
-        refusal_max_new_tokens=25,
-    ),
-    "misc": {
-        "verbose": False,
-    },
-}
-
-DEBUG_CONFIG = {
-    "crawler": CrawlerConfig(
-        temperature=0.6,
-        num_samples_per_topic=1,
-        num_crawl_steps=2,
-        generation_batch_size=10,
-        max_topic_string_length=200,
-        max_generated_tokens=200,
-        max_extracted_topics_per_generation=10,
-        max_crawl_topics=10000,
-        tokenization_template="chat",
-        do_filter_refusals=True,
-        do_force_thought_skip=False,
-        prompt_languages=["english"],
-    ),
-    "misc": {
-        "verbose": True,
-    },
-}
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--cache_dir", type=str, default=None)
-    parser.add_argument("--load_fname", type=str, default=None)
-    parser.add_argument("--debug", action="store_true")
-    parser.add_argument(
-        "--model_path",
-        type=str,
-        default="deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
-        help="Path to the model to use for crawling",
+@hydra.main(version_base=None, config_path="../configs", config_name="config")
+def main(cfg: DictConfig) -> None:
+    # Set environment variables if specified (for gemma3)
+    if "env" in cfg and cfg.env is not None:
+        for key, value in cfg.env.items():
+            os.environ[key] = value
+
+    # Build crawler config from hydra config
+    crawler_config = CrawlerConfig(
+        temperature=cfg.temperature,
+        num_samples_per_topic=cfg.num_samples_per_topic,
+        num_crawl_steps=cfg.num_crawl_steps,
+        generation_batch_size=cfg.generation_batch_size,
+        max_topic_string_length=cfg.max_topic_string_length,
+        max_context_tokens=cfg.max_context_tokens,
+        max_generated_tokens=cfg.max_generated_tokens,
+        max_extracted_topics_per_generation=cfg.max_extracted_topics_per_generation,
+        max_crawl_topics=cfg.max_crawl_topics,
+        tokenization_template=cfg.tokenization_template,
+        do_filter_refusals=cfg.do_filter_refusals,
+        do_force_thought_skip=cfg.do_force_thought_skip,
+        prompt_languages=list(cfg.prompt_languages),
+        refusal_max_new_tokens=cfg.refusal_max_new_tokens,
+        model_path=cfg.model_path,
+        device=cfg.device,
     )
-    parser.add_argument(
-        "--quantization_bits",
-        type=str,
-        default="none",
-        choices=["none", "4", "8"],
-        help="Quantization bits for model loading (none for no quantization, 4 or 8 for quantization)",
-    )
-    parser.add_argument(
-        "--prompt_injection_location",
-        type=str,
-        choices=[
-            "user_all",
-            "user_suffix",
-            "assistant_prefix",
-            "thought_prefix",
-            "thought_suffix",
-        ],
-        help="Where to inject the prompt in the conversation",
-    )
-    parser.add_argument(
-        "--not_use_openai_embeddings",
-        action="store_true",
-        help="Do not use OpenAI embeddings for filtering",
-    )
-    args = parser.parse_args()
-
-    # Convert quantization_bits from string to appropriate type
-    if args.quantization_bits == "none":
-        args.quantization_bits = None
-    else:
-        args.quantization_bits = int(args.quantization_bits)
-
-    if args.debug:
-        exp_config = DEBUG_CONFIG
-    else:
-        exp_config = DEFAULT_CONFIG
-
-    # Setting device for tensors and smaller models
-    exp_config["crawler"].device = args.device
 
     # Initialize models
-    if not any(keyword in args.model_path for keyword in ["claude", "grok"]):
+    if not any(keyword in cfg.model_path for keyword in ["claude", "grok"]):
         model_crawl, tokenizer_crawl = load_model_and_tokenizer(
-            args.model_path,
-            device=args.device,
-            cache_dir=args.cache_dir,
-            quantization_bits=args.quantization_bits,
+            cfg.model_path,
+            device=cfg.device,
+            cache_dir=cfg.cache_dir,
+            quantization_bits=cfg.quantization_bits,
+            backend=cfg.backend,
+            vllm_tensor_parallel_size=cfg.vllm_tensor_parallel_size if cfg.backend == "vllm" else 1,
+            vllm_gpu_memory_utilization=cfg.vllm_gpu_memory_utilization if cfg.backend == "vllm" else 0.9,
+            vllm_max_model_len=crawler_config.max_context_tokens if cfg.backend == "vllm" else None,
         )
     else:
-        model_crawl = args.model_path
+        model_crawl = cfg.model_path
         tokenizer_crawl = None
 
     filter_models = load_filter_models(
-        args.cache_dir, args.device, load_openai=not args.not_use_openai_embeddings
+        cfg.cache_dir, cfg.device, load_openai=cfg.use_openai_embeddings
     )
 
     # Get crawler name
     run_name = get_run_name(
-        args.model_path, exp_config["crawler"], args.prompt_injection_location
+        cfg.model_path, crawler_config, cfg.prompt_injection_location
     )
-    # Add quantization info to run name
-    run_name = f"{run_name}_q{args.quantization_bits}"
+    # Add backend and quantization info to run name
+    if cfg.backend == "vllm":
+        run_name = f"{run_name}_vllm"
+    else:
+        run_name = f"{run_name}_hf_q{cfg.quantization_bits}"
     crawler_log_filename = os.path.join(INTERIM_DIR, f"{run_name}.json")
     print(f"Run name: {run_name}")
     print(f"Saving to: {crawler_log_filename}\n\n")
 
     # Create Crawler or load from checkpoint
-    if args.load_fname is None:
+    if cfg.load_fname is None:
         crawler = Crawler(
-            crawler_config=exp_config["crawler"], save_filename=crawler_log_filename
+            crawler_config=crawler_config, save_filename=crawler_log_filename
         )
     else:
-        load_dir = os.path.join(INTERIM_DIR, args.load_fname)
+        load_dir = os.path.join(INTERIM_DIR, cfg.load_fname)
         crawler = Crawler.load(
             load_from_filename=load_dir,
             save_to_filename=crawler_log_filename,
         )
-        crawler.config = exp_config["crawler"]  # adapt the config to the new parameters
+        crawler.config = crawler_config  # adapt the config to the new parameters
         crawler.config.initial_topics = (
             []
         )  # no initial topics, we do not need to seed as we're not starting from scratch
@@ -148,9 +102,13 @@ if __name__ == "__main__":
         model=model_crawl,
         tokenizer=tokenizer_crawl,
         filter_models=filter_models,
-        prompt_injection_location=args.prompt_injection_location,
-        verbose=exp_config["misc"]["verbose"],
+        prompt_injection_location=cfg.prompt_injection_location,
+        verbose=cfg.verbose,
     )
 
     plot_filename = os.path.join(RESULT_DIR, f"{run_name}.png")
     crawler.stats.visualize_cumulative_topic_count(plot_filename)
+
+
+if __name__ == "__main__":
+    main()

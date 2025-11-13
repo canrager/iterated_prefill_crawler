@@ -20,6 +20,7 @@ from transformers import (
 from openai import OpenAI
 from core.project_config import INPUT_DIR, MODELS_DIR
 import spacy
+from vllm import LLM
 
 
 def load_model_and_tokenizer(
@@ -28,17 +29,40 @@ def load_model_and_tokenizer(
     device: str,
     quantization_bits: int = None,
     tokenizer_only: bool = False,
+    backend: str = "transformers",
+    vllm_tensor_parallel_size: int = 1,
+    vllm_gpu_memory_utilization: float = 0.9,
+    vllm_max_model_len: Optional[int] = None,
 ):
     """
     Load a huggingface model and tokenizer.
 
     Args:
-        device (str): Device to load the model on ('auto', 'cuda', 'cpu', etc.)
-        cache_dir (str, optional): Directory to cache the downloaded model
+        model_name: HuggingFace model name or path
+        cache_dir: Directory to cache the downloaded model
+        device: Device to load the model on ('auto', 'cuda', 'cpu', etc.)
+        quantization_bits: Quantization bits (4, 8, or None)
+        tokenizer_only: If True, only load tokenizer
+        backend: "transformers" or "vllm"
+        vllm_tensor_parallel_size: Number of GPUs for vLLM tensor parallelism
+        vllm_gpu_memory_utilization: GPU memory fraction for vLLM
+        vllm_max_model_len: Max sequence length for vLLM (None = use model default)
     """
     if any(model_name.startswith(prefix) for prefix in ["claude", "gpt"]):
         return model_name, None
 
+    # vLLM backend
+    if backend == "vllm":
+        return load_vllm_model(
+            model_name=model_name,
+            cache_dir=cache_dir,
+            tensor_parallel_size=vllm_tensor_parallel_size,
+            gpu_memory_utilization=vllm_gpu_memory_utilization,
+            max_model_len=vllm_max_model_len,
+            dtype="bfloat16",
+        )
+
+    # Transformers backend (default)
     # Load tokenizer and model
     tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
 
@@ -107,6 +131,46 @@ def load_from_path(path: str, device: str):
     if "gemma-3" not in path:
         model = torch.compile(model)
     return model, tokenizer
+
+
+def load_vllm_model(
+    model_name: str,
+    cache_dir: str = None,
+    tensor_parallel_size: int = 1,
+    gpu_memory_utilization: float = 0.9,
+    max_model_len: Optional[int] = None,
+    dtype: str = "bfloat16",
+):
+    """
+    Load a model using vLLM for efficient inference.
+
+    Args:
+        model_name: HuggingFace model name or path
+        cache_dir: Directory to cache the downloaded model
+        tensor_parallel_size: Number of GPUs to use for tensor parallelism
+        gpu_memory_utilization: Fraction of GPU memory to use (0.0-1.0)
+        max_model_len: Maximum sequence length (None = use model default)
+        dtype: Data type for model weights (default: "bfloat16")
+
+    Returns:
+        LLM: vLLM model instance
+        AutoTokenizer: HuggingFace tokenizer
+    """
+    # Load tokenizer separately (vLLM also loads it internally but we need it for preprocessing)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
+
+    # Initialize vLLM model
+    llm = LLM(
+        model=model_name,
+        download_dir=cache_dir,
+        tensor_parallel_size=tensor_parallel_size,
+        gpu_memory_utilization=gpu_memory_utilization,
+        dtype=dtype,
+        max_model_len=max_model_len,
+        trust_remote_code=True,  # Some models need this
+    )
+
+    return llm, tokenizer
 
 
 def load_openai_client():
