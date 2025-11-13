@@ -24,7 +24,7 @@ nohup python exp/run_crawler.py \
     --device "cuda" \
     --cache_dir "/share/u/models/" \
     --model_path "allenai/Llama-3.1-Tulu-3-8B-SFT" \
-    --quantization_bits 0 \
+    --quantization_bits "none" \
     --prompt_injection_location "assistant_prefix" \
     > "$LOG_FILE" 2>&1 &
     # --debug \

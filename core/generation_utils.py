@@ -470,8 +470,7 @@ def query_llm_api(
             + assistant_prefill
         )
         temperature = 1
-        with open(os.path.join(INPUT_DIR, "oai.txt"), "r") as f:
-            api_key = f.read()
+        api_key = os.environ.get("OPENAI_API_KEY")
         return query_openai(
             prompt, api_key, model_name, system_prompt, verbose, max_tokens, temperature
         )

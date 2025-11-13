@@ -109,24 +109,15 @@ def load_from_path(path: str, device: str):
     return model, tokenizer
 
 
-def load_openai_client(api_key_path=None):
+def load_openai_client():
     """
     Load OpenAI client with API key.
-
-    Args:
-        api_key_path (str, optional): Path to file containing the OpenAI API key.
-            If None, will look for it in INPUT_DIR/oai.txt
 
     Returns:
         OpenAI: OpenAI client
         str: Name of the embedding model to use
     """
-    if api_key_path is None:
-        api_key_path = os.path.join(INPUT_DIR, "oai.txt")
-
-    with open(api_key_path, "r") as f:
-        api_key = f.read().strip()
-
+    api_key = os.environ.get("OPENAI_API_KEY")
     client = OpenAI(api_key=api_key)
     emb_model_name = "text-embedding-3-small"
 
