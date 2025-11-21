@@ -11,5 +11,9 @@ __pycache__/
 !exp/prototypes/.gitkeep
 
 # Directories
-artifacts
+artifacts/result
+artifacts/log
+artifacts/interim
 exp/prototypes
+outputs
+docs

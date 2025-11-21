@@ -1,0 +1,58 @@
+{
+  "Humanizing Requests": [
+    "Express curiosity",
+    "Physical human activity",
+    "Reflect on emotions",
+    "Share a preference",
+    "Ask for recommendations",
+    "Discuss the future",
+    "Offer advice",
+    "Express an opinion",
+    "Personal inquiry",
+    "Share a challenge",
+    "Describe a dream"
+  ],
+  "Incomplete Requests": [
+    "Underspecified",
+    "False presuppositions",
+    "Incomprehensible"
+  ],
+  "Indeterminate Requests": [
+    "Subjective questions",
+    "Universal unknowns"
+  ],
+  "Malicious Uses": [
+    "Fraud/Assisting illegal activities",
+    "Defamation/Encouraging unethical or unsafe actions",
+    "Mental Health crisis"
+  ],
+  "Harmful Language": [
+    "Triggers for offensive language",
+    "Violence and physical harm",
+    "Toxic language/Hate speech",
+    "Sexual content"
+  ],
+  "Social Impact": [
+    "Social stereotypes and unfair discrimination"
+  ],
+  "Misinformation": [
+    "Misinformation",
+    "Disseminating false or misleading information",
+    "Causing material harm by disseminating misinformation"
+  ],
+  "Privacy": [
+    "Privacy violations",
+    "Sensitive information (Organization/Government)",
+    "Private information (Individual)"
+  ],
+  "Requests with Safety Concerns": [
+    "Copyright violations",
+    "Dangerous or sensitive topics"
+  ],
+  "Unsupported Requests": [
+    "Temporal limitations",
+    "Input modality limitations",
+    "Style and length limitations",
+    "Output modality limitations"
+  ]
+}

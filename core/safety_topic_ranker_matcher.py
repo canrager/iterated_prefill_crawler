@@ -317,6 +317,173 @@ def match_ranked_topics_with_gt_jsonl(
 
     return ranked_topics, []
 
+def match_crawler_log_with_gt(
+    run_title: str,
+    crawler_log_path: str,
+    gt_topics_files: Dict[str, str],
+    llm_judge_name: str,
+    verbose: bool = False,
+    force_recompute: bool = False,
+    debug: bool = False,
+) -> Tuple[Dict, Dict]:
+    """Match topics directly from crawler log with ground truth topics.
+
+    This function operates on the crawler log file directly, using the t.summary field
+    of all head_refusal topics for matching against ground truth.
+
+    Args:
+        run_title: Title of the crawl run
+        crawler_log_path: Path to the crawler log JSON file
+        gt_topics_files: Dict mapping dataset name to ground truth file name
+        llm_judge_name: Name of the LLM model to use for matching
+        verbose: Whether to print verbose output
+        force_recompute: Whether to force recomputation even if results exist
+        debug: Whether to run in debug mode (limits topics processed)
+
+    Returns:
+        Tuple of (matched_topics_dict, gt_topic_to_first_occurrence_dict)
+    """
+    start_time = time.time()
+
+    # Load existing results if not force_recompute
+    output_file = os.path.join(RESULT_DIR, f"crawler_log_matched_{run_title}.json")
+    if os.path.exists(output_file) and not force_recompute:
+        print(f"Loading existing results from {output_file}")
+        with open(output_file, "r") as f:
+            results = json.load(f)
+        return results["matched_topics"], results["gt_topic_to_first_occurrence"]
+
+    # Load crawler log
+    if not os.path.exists(crawler_log_path):
+        raise FileNotFoundError(f"Crawler log not found at: {crawler_log_path}")
+
+    with open(crawler_log_path, "r") as f:
+        crawler_data = json.load(f)
+
+    # Extract head refusal topics with summaries
+    head_refusal_topics = crawler_data["queue"]["topics"]["head_refusal_topics"]
+
+    # Build a dict of topic_summary -> topic_data
+    crawled_topics = {}
+    for topic in head_refusal_topics:
+        summary = topic.get("summary")
+        if summary is None:
+            # Fallback to shortened or english if summary not available
+            summary = topic.get("shortened") or topic.get("english") or topic.get("raw")
+
+        # Use summary as key (if duplicate summaries exist, keep first occurrence)
+        if summary not in crawled_topics:
+            crawled_topics[summary] = {
+                "id": topic["id"],
+                "raw": topic["raw"],
+                "english": topic["english"],
+                "summary": summary,
+                "is_chinese": topic.get("is_chinese", False),
+                "parent_id": topic.get("parent_id", None),
+                "is_match": False,
+                "ground_truth_matches": []
+            }
+
+    print(f"Loaded {len(crawled_topics)} unique head refusal topics from crawler log")
+
+    # Load ground truth topics
+    gt_topic_to_first_occurrence_id = {}
+
+    for gt_dataset, gt_file in gt_topics_files.items():
+        gt_topics_dir = os.path.join(INPUT_DIR, f"{gt_file}.json")
+        if not os.path.exists(gt_topics_dir):
+            raise FileNotFoundError(f"Ground truth topics file not found at: {gt_topics_dir}")
+        with open(gt_topics_dir, "r") as f:
+            gt_topics_dict = json.load(f)
+
+        # Process each category and its topics
+        for gt_category, gt_topics in gt_topics_dict.items():
+            print(f"\nProcessing category: {gt_category}")
+
+            cnt = 0
+            for gt_topic in tqdm(gt_topics, desc=f"Matching {gt_category} topics"):
+                cnt += 1
+                if debug and cnt > 3:
+                    break
+
+                gt_topic_str = f"{gt_dataset}:{gt_category}:{gt_topic}"
+                gt_topic_to_first_occurrence_id[gt_topic_str] = None
+
+                # Compare against all crawled topic summaries
+                is_match, matched_topics = compare_topics(
+                    gt_topic,
+                    list(crawled_topics.keys()),
+                    llm_judge_name,
+                    verbose
+                )
+
+                # Update matched crawled topics
+                for topic_summary in matched_topics:
+                    if topic_summary in crawled_topics:
+                        crawled_topics[topic_summary]["ground_truth_matches"].append(gt_topic_str)
+                        crawled_topics[topic_summary]["is_match"] = True
+
+                        # Track first occurrence of this ground truth topic
+                        topic_id = crawled_topics[topic_summary]["id"]
+                        if (gt_topic_to_first_occurrence_id[gt_topic_str] is None or
+                            gt_topic_to_first_occurrence_id[gt_topic_str] > topic_id):
+                            gt_topic_to_first_occurrence_id[gt_topic_str] = topic_id
+
+            if debug:
+                break
+
+    total_duration = time.time() - start_time
+    print(f"\nTotal experiment completed in {total_duration:.2f} seconds")
+
+    # Prepare results
+    results = {
+        "matched_topics": crawled_topics,
+        "gt_topic_to_first_occurrence": gt_topic_to_first_occurrence_id
+    }
+
+    # Save results
+    with open(output_file, "w") as f:
+        json.dump(results, f, indent=2)
+
+    # Save unmatched topics
+    unmatched_topics = [
+        summary for summary, data in crawled_topics.items()
+        if not data["is_match"]
+    ]
+    unmatched_file = os.path.join(RESULT_DIR, f"unmatched_crawler_topics_{run_title}.json")
+    with open(unmatched_file, "w") as f:
+        json.dump(unmatched_topics, f, indent=2)
+
+    # Save matched count summary
+    num_matched = sum(1 for data in crawled_topics.values() if data["is_match"])
+    num_gt_topics = len(gt_topic_to_first_occurrence_id)
+    num_gt_matched = sum(1 for v in gt_topic_to_first_occurrence_id.values() if v is not None)
+
+    summary = {
+        "total_crawled_topics": len(crawled_topics),
+        "matched_crawled_topics": num_matched,
+        "unmatched_crawled_topics": len(unmatched_topics),
+        "total_gt_topics": num_gt_topics,
+        "matched_gt_topics": num_gt_matched,
+        "unmatched_gt_topics": num_gt_topics - num_gt_matched,
+        "crawled_match_rate": num_matched / len(crawled_topics) if crawled_topics else 0,
+        "gt_coverage_rate": num_gt_matched / num_gt_topics if num_gt_topics else 0
+    }
+
+    summary_file = os.path.join(RESULT_DIR, f"crawler_log_match_summary_{run_title}.json")
+    with open(summary_file, "w") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"\nResults saved to {output_file}")
+    print(f"Unmatched topics saved to {unmatched_file}")
+    print(f"Summary saved to {summary_file}")
+    print(f"\nMatch Summary:")
+    print(f"  Crawled topics: {summary['matched_crawled_topics']}/{summary['total_crawled_topics']} matched ({summary['crawled_match_rate']:.1%})")
+    print(f"  Ground truth: {summary['matched_gt_topics']}/{summary['total_gt_topics']} covered ({summary['gt_coverage_rate']:.1%})")
+
+    return crawled_topics, gt_topic_to_first_occurrence_id
+
+
 def match_crawled_topics_with_gt(
     run_title: str,
     gt_topics_files: Dict[str, str],

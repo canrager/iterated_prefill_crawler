@@ -21,7 +21,10 @@ class Topic:
     is_refusal: bool = None
     cossim_to_head: float = None
     cluster_idx: int = None
-    responses: List[str] = None
+    refusal_check_queries: List[str] = None
+    refusal_check_responses: List[str] = None
+    prompt: str = None
+    summary: str = None
 
     def to_dict(self):
         return {
@@ -36,10 +39,10 @@ class Topic:
             "cossim_to_head": self.cossim_to_head,
             "cluster_idx": self.cluster_idx,
             "parent_id": self.parent_id,
-            "responses": self.responses,
-            "cluster_idx": self.cluster_idx,
-            "parent_id": self.parent_id,
-            "responses": self.responses,
+            "refusal_check_queries": self.refusal_check_queries,
+            "refusal_check_responses": self.refusal_check_responses,
+            "prompt": self.prompt,
+            "summary": self.summary
         }
 
 
@@ -56,6 +59,15 @@ class TopicQueue:
         self.num_topics_per_cluster: List[int] = []
         self.num_head_refusal_topics: int = 0
         self.num_total_topics: int = 0
+
+    @property
+    def head_refusal_topic_strings(self):
+        # l = []
+        # for t in self.head_refusal_topics:
+        #     s = t.chinese if t.is_chinese else t.english
+        #     l.append(s)
+        l = [t.summary for t in self.head_refusal_topics]
+        return l
 
     # Adding new topics and deduplication
     def add_new_cluster_head(self, topic: Topic):

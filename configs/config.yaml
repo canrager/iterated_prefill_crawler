@@ -5,8 +5,9 @@ device: "cuda"
 cache_dir: "/home/can/models/"
 
 # Model and runtime settings
-prompt_injection_location: thought_prefix
+prompt_injection_location: user_seeding # options
 use_openai_embeddings: true
+cossim_thresh: 0.91
 load_fname: null
 backend: vllm  # "transformers" or "vllm"
 
@@ -28,9 +29,14 @@ max_crawl_topics: 1_000_000
 tokenization_template: chat
 do_filter_refusals: true
 do_force_thought_skip: false
+llm_judge_name: "gpt-5-nano"
+max_concurrent_summarizations: 10
 prompt_languages:
   - english
   - chinese
-refusal_max_new_tokens: 25
+max_refusal_check_generated_tokens: 25
+num_refusal_checks_per_topic: 6
+is_refusal_threshold: 0.5
+seed_warmup_steps: 10
 
 verbose: false

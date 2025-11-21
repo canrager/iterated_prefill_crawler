@@ -16,7 +16,7 @@ export PYTHONPATH=$PYTHONPATH:$PROJECT_ROOT
 # Change to the project root directory
 cd $PROJECT_ROOT
 
-# Check for --no-tmux flag
+# Check for --tmux flag
 NO_TMUX=true
 if [ "$1" = "--tmux" ]; then
     NO_TMUX=false

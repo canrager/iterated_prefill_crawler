@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from tqdm import trange
 import time
+import asyncio
 import nnsight
 from nnsight import LanguageModel
 import torch
@@ -325,7 +326,7 @@ def batch_generate(
 
     model_name = cfg.model_path
     user_messages = [user_message_template.format(topic) for topic in selected_topics]
-    input_ids = custom_batch_encoding(
+    input_ids, input_strs = custom_batch_encoding(
         model_name=model_name,
         tokenizer=tokenizer,
         user_messages=user_messages,
@@ -389,7 +390,7 @@ def batch_generate(
             print(
                 f"===========================\n====input: {i}\n\n==== output:\n {o}\n\n"
             )
-    return generated_texts
+    return generated_texts, input_strs
 
 
 # Embedding related functions
@@ -511,7 +512,7 @@ if __name__ == "__main__":
     USER_MESSAGE_TEMPLATE = "What is the {}?"
     THINKING_MESSAGE = "I know that."
 
-    generated_texts = batch_generate(
+    generated_texts, input_strs = batch_generate(
         model=model,
         tokenizer=tokenizer,
         selected_topics=TOPICS,
@@ -763,3 +764,345 @@ def query_grok(
     if verbose:
         print(f"\nFailed to get valid response from Grok after {max_retries} attempts")
     return ""
+
+
+# ============================================================================
+# Async API Query Functions for Batch Processing
+# ============================================================================
+
+
+async def async_query_openai(
+    prompt: str,
+    api_key: str,
+    model_name: str,
+    system_prompt: Optional[str] = None,
+    verbose: bool = False,
+    max_tokens: int = 10000,
+    temperature: float = 1,
+) -> str:
+    """Async version of query_openai for concurrent requests"""
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=api_key)
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        if verbose:
+            print(f"\nAttempt {attempt + 1}/{max_retries}")
+            print("-" * 40)
+
+        try:
+            message = await client.chat.completions.create(
+                model=model_name,
+                max_completion_tokens=max_tokens,
+                temperature=temperature,
+                messages=[
+                    {"role": "developer", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+
+            response = message.choices[0].message.content
+            if verbose:
+                print("RESPONSE:")
+                print("-" * 40)
+                print(response)
+                print("-" * 40)
+
+            await asyncio.sleep(0.1)  # Small delay to avoid rate limits
+            return response
+        except Exception as e:
+            print(f"OpenAI API error: {e}")
+            if attempt < max_retries - 1:
+                if verbose:
+                    print(f"Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+            continue
+
+    if verbose:
+        print(f"\nFailed to get valid response after {max_retries} attempts")
+    return ""
+
+
+async def async_query_anthropic(
+    prompt: str,
+    api_key: str,
+    llm_judge_name: str,
+    system_prompt: str = "",
+    assistant_prefill: str = "",
+    verbose: bool = False,
+    max_tokens: int = 1000,
+    temperature: float = 1,
+) -> str:
+    """Async version of query_anthropic for concurrent requests"""
+    client = anthropic.AsyncAnthropic(
+        api_key=api_key,
+        default_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
+    )
+
+    message_args = {}
+    message_args["messages"] = [{"role": "user", "content": prompt.strip()}]
+    if assistant_prefill != "":
+        message_args["messages"].append(
+            {"role": "assistant", "content": assistant_prefill.strip()}
+        )
+    if system_prompt != "":
+        message_args["system"] = [
+            {
+                "type": "text",
+                "text": system_prompt.strip(),
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+    if verbose:
+        print(f"Message args: {message_args}")
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        if verbose:
+            print(f"\nAttempt {attempt + 1}/{max_retries}")
+            print("-" * 40)
+
+        try:
+            message = await client.messages.create(
+                model=llm_judge_name,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                **message_args,
+            )
+
+            response = message.content[0].text
+            if verbose:
+                print("RESPONSE:")
+                print("-" * 40)
+                print(response)
+                print("-" * 40)
+
+            await asyncio.sleep(0.1)
+            return response
+        except Exception as e:
+            print(f"Anthropic API error: {e}")
+            if attempt < max_retries - 1:
+                if verbose:
+                    print(f"Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+            continue
+
+    if verbose:
+        print(f"\nFailed to get valid response after {max_retries} attempts")
+    return ""
+
+
+async def async_query_grok(
+    prompt: str,
+    api_key: str,
+    model_name: str,
+    system_prompt: Optional[str] = None,
+    assistant_prefill: str = "",
+    verbose: bool = False,
+    max_tokens: int = 10000,
+    temperature: float = 1,
+) -> str:
+    """Async version of query_grok for concurrent requests"""
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url="https://api.x.ai/v1",
+    )
+
+    max_retries = 3
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    for attempt in range(max_retries):
+        if verbose:
+            print(f"\nAttempt {attempt + 1}/{max_retries} for Grok API")
+            print("-" * 40)
+            print(f"Messages: {messages}")
+            print("-" * 40)
+
+        try:
+            completion = await client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+            response = completion.choices[0].message.content
+            if verbose:
+                print("GROK RESPONSE:")
+                print("-" * 40)
+                print(response)
+                print("-" * 40)
+
+            await asyncio.sleep(0.1)
+            return response
+        except Exception as e:
+            print(f"Grok API error: {e}")
+            if attempt < max_retries - 1:
+                if verbose:
+                    print(f"Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+            continue
+
+    if verbose:
+        print(f"\nFailed to get valid response from Grok after {max_retries} attempts")
+    return ""
+
+
+async def async_query_llm_api(
+    model_name: str,
+    prompt: str,
+    assistant_prefill: str = "",
+    system_prompt: str = "",
+    verbose: bool = False,
+    max_tokens: int = 10000,
+) -> str:
+    """Async dispatcher for LLM API queries"""
+    if "claude" in model_name:
+        temperature = 1
+        with open(os.path.join(INPUT_DIR, "ant.txt"), "r") as f:
+            api_key = f.read()
+        return await async_query_anthropic(
+            prompt,
+            api_key,
+            model_name,
+            system_prompt,
+            assistant_prefill,
+            verbose,
+            max_tokens,
+            temperature,
+        )
+    elif "gpt" in model_name:
+        assert assistant_prefill == "", (
+            "Assistant prefill is not supported for GPT. Argument assistant_prefill is: "
+            + assistant_prefill
+        )
+        temperature = 1
+        api_key = os.environ.get("OPENAI_API_KEY")
+        return await async_query_openai(
+            prompt, api_key, model_name, system_prompt, verbose, max_tokens, temperature
+        )
+    elif "grok" in model_name:
+        temperature = 1
+        with open(os.path.join(INPUT_DIR, "grok.txt"), "r") as f:
+            api_key = f.read()
+        return await async_query_grok(
+            prompt,
+            api_key,
+            model_name,
+            system_prompt,
+            assistant_prefill,
+            verbose,
+            max_tokens,
+            temperature,
+        )
+    else:
+        raise ValueError(
+            f"Model {model_name} not supported, must contain 'claude', 'gpt', or 'grok'"
+        )
+
+
+async def async_summarize_single_topic(
+    topic_raw: str,
+    llm_judge_name: str,
+    system_prompt: str,
+    verbose: bool = False,
+) -> Tuple[str, Optional[str], Optional[str]]:
+    """
+    Async function to summarize a single topic.
+
+    Returns:
+        Tuple of (topic_raw, summary, error_message)
+    """
+    content_prompt = f"""Given a topic phrase, extract the core concept being addressed. Be specific and concise, using 1-3 keywords.
+
+Examples:
+- Input: "suicide or other self-inflicted injuries"
+  Output: suicide, self-harm
+
+- Input: "Information on how to obtain firearms or other lethal weapons."
+  Output: obtaining weapons
+
+- Input: "Showing signs of increased alcohol or drug use."
+  Output: alcohol, drugs
+
+- Input: "User authentication and access control: Ensuring that users are who they claim to be and have appropriate access to the resources they need. This can involve using multi-factor authentication, role-based access control, and regular user account reviews."
+  Output: access control
+
+Now extract the core topic from this phrase:
+Input: "{topic_raw}"
+Output:"""
+
+    try:
+        summary = await async_query_llm_api(
+            model_name=llm_judge_name,
+            system_prompt=system_prompt,
+            prompt=content_prompt,
+            verbose=verbose,
+        )
+        summary = summary.strip()
+
+        if verbose:
+            print(f"Summarized topic:")
+            print(f"  Raw: {topic_raw}")
+            print(f"  Summary: {summary}")
+
+        return (topic_raw, summary, None)
+    except Exception as e:
+        error_msg = f"Error summarizing topic '{topic_raw}': {e}"
+        print(error_msg)
+        return (topic_raw, None, error_msg)
+
+
+async def async_batch_summarize_topics(
+    topics_raw: List[str],
+    llm_judge_name: str,
+    system_prompt: str,
+    max_concurrent: int = 10,
+    verbose: bool = False,
+) -> List[Tuple[str, Optional[str], Optional[str]]]:
+    """
+    Batch summarize multiple topics concurrently with rate limiting.
+
+    Args:
+        topics_raw: List of raw topic strings to summarize
+        llm_judge_name: Name of the LLM model to use
+        system_prompt: System prompt for the LLM
+        max_concurrent: Maximum number of concurrent requests
+        verbose: Whether to print debug information
+
+    Returns:
+        List of tuples: (topic_raw, summary, error_message)
+    """
+    # Create semaphore to limit concurrency
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def rate_limited_summarize(topic_raw: str):
+        async with semaphore:
+            return await async_summarize_single_topic(
+                topic_raw, llm_judge_name, system_prompt, verbose
+            )
+
+    # Create tasks for all topics
+    tasks = [rate_limited_summarize(topic_raw) for topic_raw in topics_raw]
+
+    # Run all tasks concurrently
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Process results and handle any exceptions
+    processed_results = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            error_msg = f"Exception during summarization: {result}"
+            print(error_msg)
+            processed_results.append((topics_raw[i], None, error_msg))
+        else:
+            processed_results.append(result)
+
+    return processed_results

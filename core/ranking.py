@@ -240,7 +240,7 @@ def run_parallel_ranking_experiment(
         batch_pairs = all_pairs[i : i + batch_size]
         batch_prompts = [build_prompt(t1, t2) for t1, t2 in batch_pairs]
 
-        responses = batch_generate(
+        responses, input_strs = batch_generate(
             model=model,
             tokenizer=tokenizer,
             selected_topics=batch_prompts,

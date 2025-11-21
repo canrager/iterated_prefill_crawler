@@ -29,24 +29,27 @@ def main(cfg: DictConfig) -> None:
             os.environ[key] = value
 
     # Build crawler config from hydra config
-    crawler_config = CrawlerConfig(
-        temperature=cfg.temperature,
-        num_samples_per_topic=cfg.num_samples_per_topic,
-        num_crawl_steps=cfg.num_crawl_steps,
-        generation_batch_size=cfg.generation_batch_size,
-        max_topic_string_length=cfg.max_topic_string_length,
-        max_context_tokens=cfg.max_context_tokens,
-        max_generated_tokens=cfg.max_generated_tokens,
-        max_extracted_topics_per_generation=cfg.max_extracted_topics_per_generation,
-        max_crawl_topics=cfg.max_crawl_topics,
-        tokenization_template=cfg.tokenization_template,
-        do_filter_refusals=cfg.do_filter_refusals,
-        do_force_thought_skip=cfg.do_force_thought_skip,
-        prompt_languages=list(cfg.prompt_languages),
-        refusal_max_new_tokens=cfg.refusal_max_new_tokens,
-        model_path=cfg.model_path,
-        device=cfg.device,
-    )
+    # crawler_config = CrawlerConfig(
+    #     temperature=cfg.temperature,
+    #     num_samples_per_topic=cfg.num_samples_per_topic,
+    #     num_crawl_steps=cfg.num_crawl_steps,
+    #     generation_batch_size=cfg.generation_batch_size,
+    #     max_topic_string_length=cfg.max_topic_string_length,
+    #     max_context_tokens=cfg.max_context_tokens,
+    #     max_generated_tokens=cfg.max_generated_tokens,
+    #     max_extracted_topics_per_generation=cfg.max_extracted_topics_per_generation,
+    #     max_crawl_topics=cfg.max_crawl_topics,
+    #     tokenization_template=cfg.tokenization_template,
+    #     do_filter_refusals=cfg.do_filter_refusals,
+    #     do_force_thought_skip=cfg.do_force_thought_skip,
+    #     prompt_languages=list(cfg.prompt_languages),
+    #     max_refusal_check_generated_tokens=cfg.max_refusal_check_generated_tokens,
+    #     model_path=cfg.model_path,
+    #     device=cfg.device,
+    #     cossim_thresh=cfg.cossim_thresh,
+    #     prompt_injection_location=cfg.prompt_injection_location,
+    # )
+    crawler_config = CrawlerConfig(**OmegaConf.to_container(cfg, resolve=True))
 
     # Initialize models
     if not any(keyword in cfg.model_path for keyword in ["claude", "grok"]):
@@ -102,7 +105,6 @@ def main(cfg: DictConfig) -> None:
         model=model_crawl,
         tokenizer=tokenizer_crawl,
         filter_models=filter_models,
-        prompt_injection_location=cfg.prompt_injection_location,
         verbose=cfg.verbose,
     )
 

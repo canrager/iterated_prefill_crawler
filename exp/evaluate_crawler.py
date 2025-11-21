@@ -18,7 +18,7 @@ from core.analysis_utils import (
 )
 from core.ranking import rank_topics
 from core.wordcloud_utils import generate_wordcloud_from_ranking
-from core.safety_topic_ranker_matcher import match_crawled_topics_with_gt
+from core.safety_topic_ranker_matcher import match_crawled_topics_with_gt, match_crawler_log_with_gt
 
 
 
@@ -57,7 +57,7 @@ def print_stats(run_title: str, crawl_data: Dict[str, Any], num_printed_refusals
 
         print(f"{t['raw']}")
         print(f"{t['english']}")
-        for r in t['responses']:
+        for r in t['refusal_check_responses']:
             print(r)
         print("--------------------------------\n\n")
 
@@ -66,7 +66,7 @@ def print_stats(run_title: str, crawl_data: Dict[str, Any], num_printed_refusals
         if t['is_chinese']:
             head_chinese_cnt += 1
         # print(f"{t['text']}")
-        # print(f"{t['responses']}")
+        # print(f"{t['refusal_check_responses']}")
         # print()
     if head_cnt > 0:
         print(f"Head chinese ratio in run {run_title}: {head_chinese_cnt / head_cnt}")
@@ -88,10 +88,10 @@ def print_refusal_thoughtsupp_correlation(crawl_data: Dict[str, Any]):
             cur_refusal = True
             refusal_ids.add(topic_id)
             
-        num_responses = len(t['responses'])
+        num_responses = len(t['refusal_check_responses'])
         num_thoughtsupp = 0
         cur_thoughtsupp = False
-        for r in t['responses']:
+        for r in t['refusal_check_responses']:
             # thoughtsupp_pattern = "<think>\n\n</think>"
             thoughtsupp_pattern = "</think>"
             if thoughtsupp_pattern in r:
@@ -103,7 +103,7 @@ def print_refusal_thoughtsupp_correlation(crawl_data: Dict[str, Any]):
         if not cur_refusal and cur_thoughtsupp:
             print(f"{t['text']}")
             print(f"{t['english']}")
-            print(f"{t['responses']}")
+            print(f"{t['refusal_check_responses']}")
             print("#########################\n\n")
 
 
@@ -146,11 +146,11 @@ def write_head_refusal_topics(run_title: str, run_path: str, crawl_data: Dict[st
         json.dump(list(head_refusal_topics_engl_list.keys()), f)
     print(f"Wrote head refusal topics to {head_refusal_topics_engl_fname}")
 
-    head_responses_str = "\n\n##########################################\n\n".join([f"Topic ID: {t['id']}\nRaw Query: {t['raw']}\nTranslation: {t['english']}\nResponses: {'\n'.join(t['responses'])}" for t in crawl_data["queue"]["topics"]["head_topics"]])
+    head_responses_str = "\n\n##########################################\n\n".join([f"Topic ID: {t['id']}\nRaw Query: {t['raw']}\nTranslation: {t['english']}\nResponses: {'\n'.join(t['refusal_check_responses'])}" for t in crawl_data["queue"]["topics"]["head_topics"]])
     with open(os.path.join(RESULT_DIR, f"head_responses_{run_title}__{run_path}.txt"), "w") as f:
         f.write(head_responses_str)
 
-    head_refusal_responses_str = "\n\n##########################################\n\n".join([f"Topic ID: {t['id']}\nRaw Query: {t['raw']}\nTranslation: {t['english']}\nResponses: {'\n'.join(t['responses'])}" for t in crawl_data["queue"]["topics"]["head_refusal_topics"]])
+    head_refusal_responses_str = "\n\n##########################################\n\n".join([f"Topic ID: {t['id']}\nRaw Query: {t['raw']}\nTranslation: {t['english']}\nResponses: {'\n'.join(t['refusal_check_responses'])}" for t in crawl_data["queue"]["topics"]["head_refusal_topics"]])
     with open(os.path.join(RESULT_DIR, f"head_refusal_responses_{run_title}__{run_path}.txt"), "w") as f:
         f.write(head_refusal_responses_str)
 
@@ -340,18 +340,26 @@ if __name__ == "__main__":
             plot_label="DeepSeek-R1-0605-Llama-8B",
             model_name="deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
         ),
+        CrawlName(
+            title="tulu-3-1120",
+            path="crawler_log_20251120_110342_Llama-3.1-Tulu-3-8B-SFT_1samples_1000crawls_Truefilter_user_seedingprompt_vllm.json",
+            acronym="T",
+            plot_label="tulu-3-1120",
+            model_name="allenai/Llama-3.1-Tulu-3-8B-SFT"
+        ),
     ]
     all_crawl_names_dict = {name.title: name for name in all_crawl_names}
 
     available_analysis_modes = [
-        'full', 
+        'full',
         'list_only',
-        'rank_only', 
-        'match_only', 
-        'cluster_only', 
-        'across_runs_only', 
-        'summary_across_runs_only', 
-        'convergence_across_runs_only'
+        'rank_only',
+        'match_only',
+        'match_crawler_log_only',
+        'cluster_only',
+        'across_runs_only',
+        'summary_across_runs_only',
+        'convergence_across_runs_only',
         'rank_match_ROC'
     ]
     available_ranking_modes = [
@@ -373,7 +381,7 @@ if __name__ == "__main__":
 
     #########################################
     # Manual arg override
-    args.analysis_mode = "list_only"
+    args.analysis_mode = "match_crawler_log_only"
     args.ranking_mode = "individual"
     args.force_recompute = True
     args.debug = False
@@ -392,7 +400,9 @@ if __name__ == "__main__":
         # "0508-claude-haiku-thought-prefix"
         # "0206-gemma3-12b-thought-prefix-qNone"
         # "0603-mistral-thought-prefix-q8"
-        "deepseek-r1-0605-llama-8b"
+        # "deepseek-r1-0605-llama-8b"
+
+        "tulu-3-1120"
     ]
 
     gt_fnames = {
@@ -485,6 +495,20 @@ if __name__ == "__main__":
             # # Plot precision-recall curve
             # print("Plotting precision-recall curve...")
             # plot_precision_recall_curve(run_title=names.title, save_fig=True)
+
+        if analysis_mode in ['match_crawler_log_only']:
+            ## Ground truth evaluation directly from crawler log
+            print("Running ground truth matching on crawler log...")
+            crawler_log_path = os.path.join(INTERIM_DIR, names.path)
+            match_crawler_log_with_gt(
+                run_title=names.title,
+                crawler_log_path=crawler_log_path,
+                gt_topics_files=gt_fnames,
+                llm_judge_name=llm_judge_name,
+                verbose=True,
+                force_recompute=force_recompute,
+                debug=debug
+            )
 
     # # Process across runs if requested and applicable
     if analysis_mode in ['full', 'across_runs_only', 'summary_across_runs_only']:

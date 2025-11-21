@@ -178,61 +178,6 @@ def custom_encoding_r1(
 
     return token_ids
 
-
-def custom_batch_encoding(
-    model_name: str,
-    tokenizer: AutoTokenizer,
-    user_messages: List[str],
-    thinking_message: str = "",
-    user_suffix: str = "",
-    assistant_prefill: str = "",
-    force_thought_skip: bool = False,
-    template: str = "chat",
-) -> List[int]:
-    """
-    Custom batch encoding for the model.
-    """
-    if match_chat_template(model_name, "r1-reasoning"):
-        token_ids = [
-            custom_encoding_r1(
-                model_name=model_name,
-                tokenizer=tokenizer,
-                user_message=user_message,
-                thinking_message=thinking_message,
-                user_suffix=user_suffix,
-                assistant_prefill=assistant_prefill,
-                force_thought_skip=force_thought_skip,
-                template=template,
-            )
-            for user_message in user_messages
-        ]
-        return token_ids
-    elif match_chat_template(model_name, "llama-instruct") or match_chat_template(model_name, "mistral"):
-        token_ids = custom_batch_encoding_Meta_Mistral(
-            tokenizer=tokenizer,
-            user_messages=user_messages,
-            thinking_message=thinking_message,
-            user_suffix=user_suffix,
-            assistant_prefill=assistant_prefill,
-            force_thought_skip=force_thought_skip,
-            template=template,
-        )
-        return token_ids
-    elif match_chat_template(model_name, "gemma-3"):
-        token_ids = custom_batch_encoding_Gemma3(
-            tokenizer=tokenizer,
-            user_messages=user_messages,
-            thinking_message=thinking_message,
-            user_suffix=user_suffix,
-            assistant_prefill=assistant_prefill,
-            force_thought_skip=force_thought_skip,
-            template=template,
-        )
-        return token_ids
-    else:
-        raise ValueError(f"Unsupported model: {model_name}.")
-
-
 def custom_batch_encoding_Meta_Mistral(
     tokenizer: AutoTokenizer,
     user_messages: List[str],
@@ -270,8 +215,7 @@ def custom_batch_encoding_Meta_Mistral(
         if system_message != "":
             message_list.append({"role": "system", "content":  system_message})
         message_list.append({"role": "user", "content": user_message})
-        if assistant_message != "":
-            message_list.append({"role": "assistant", "content": assistant_message})
+        message_list.append({"role": "assistant", "content": assistant_message})
 
         chat_ids = tokenizer.apply_chat_template(
             message_list,
@@ -363,6 +307,63 @@ def custom_decoding(
         clean_up_tokenization_spaces=False,
     )
     return generated_texts
+
+
+def custom_batch_encoding(
+    model_name: str,
+    tokenizer: AutoTokenizer,
+    user_messages: List[str],
+    thinking_message: str = "",
+    user_suffix: str = "",
+    assistant_prefill: str = "",
+    force_thought_skip: bool = False,
+    template: str = "chat",
+) -> List[int]:
+    """
+    Custom batch encoding for the model.
+    """
+    if match_chat_template(model_name, "r1-reasoning"):
+        token_ids = [
+            custom_encoding_r1(
+                model_name=model_name,
+                tokenizer=tokenizer,
+                user_message=user_message,
+                thinking_message=thinking_message,
+                user_suffix=user_suffix,
+                assistant_prefill=assistant_prefill,
+                force_thought_skip=force_thought_skip,
+                template=template,
+            )
+            for user_message in user_messages
+        ]
+    elif match_chat_template(model_name, "llama-instruct") or match_chat_template(model_name, "mistral"):
+        token_ids = custom_batch_encoding_Meta_Mistral(
+            tokenizer=tokenizer,
+            user_messages=user_messages,
+            thinking_message=thinking_message,
+            user_suffix=user_suffix,
+            assistant_prefill=assistant_prefill,
+            force_thought_skip=force_thought_skip,
+            template=template,
+        )
+    elif match_chat_template(model_name, "gemma-3"):
+        token_ids = custom_batch_encoding_Gemma3(
+            tokenizer=tokenizer,
+            user_messages=user_messages,
+            thinking_message=thinking_message,
+            user_suffix=user_suffix,
+            assistant_prefill=assistant_prefill,
+            force_thought_skip=force_thought_skip,
+            template=template,
+        )
+    else:
+        raise ValueError(f"Unsupported model: {model_name}.")
+
+    input_strs = custom_decoding(
+        model_name, tokenizer, token_ids, skip_special_tokens=False, pad_token_id=None
+    )
+
+    return token_ids, input_strs
 
 
 if __name__ == "__main__":

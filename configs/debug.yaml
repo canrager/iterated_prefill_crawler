@@ -12,3 +12,6 @@ prompt_languages:
   - english
 
 verbose: true
+
+prompt_injection_location: user_seeding # options
+
