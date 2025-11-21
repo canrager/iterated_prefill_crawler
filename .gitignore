@@ -15,4 +15,5 @@ artifacts/result
 artifacts/log
 artifacts/interim
 exp/prototypes
+outputs
 docs
