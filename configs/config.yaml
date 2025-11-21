@@ -5,8 +5,9 @@ device: "cuda"
 cache_dir: "/home/can/models/"
 
 # Model and runtime settings
-prompt_injection_location: user_seeding # options
+prompt_injection_location: assistant_prefix # user_seeding # options
 use_openai_embeddings: true
+use_spacy: false  # Enable spacy semantic filtering
 cossim_thresh: 0.91
 load_fname: null
 backend: vllm  # "transformers" or "vllm"
@@ -14,7 +15,7 @@ backend: vllm  # "transformers" or "vllm"
 # vLLM-specific settings (only used when backend: vllm)
 vllm_tensor_parallel_size: 1
 vllm_gpu_memory_utilization: 0.9
-vllm_max_model_len: null  # null = use model default
+vllm_max_model_len: 1000  # null = use model default
 
 # Crawler configuration (production defaults)
 temperature: 0.6
@@ -22,7 +23,7 @@ num_samples_per_topic: 1
 num_crawl_steps: 1000
 generation_batch_size: 2
 max_topic_string_length: 100
-max_context_tokens: 500  # Total context window limit (prompt + generation)
+max_context_tokens: 1000  # Total context window limit (prompt + generation)
 max_generated_tokens: 100
 max_extracted_topics_per_generation: 10
 max_crawl_topics: 1_000_000
@@ -35,7 +36,7 @@ prompt_languages:
   - english
   - chinese
 max_refusal_check_generated_tokens: 25
-num_refusal_checks_per_topic: 6
+num_refusal_checks_per_topic: 10
 is_refusal_threshold: 0.5
 seed_warmup_steps: 10
 

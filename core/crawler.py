@@ -381,7 +381,7 @@ class Crawler:
         tokenizer_zh_en: AutoTokenizer,
         model_en_zh: AutoModelForSeq2SeqLM,
         tokenizer_en_zh: AutoTokenizer,
-        model_spacy_en: Language,
+        model_spacy_en: Language | None,
         input_strs: List[str],
         generations: List[str],
         parent_ids: List[int],
@@ -401,7 +401,8 @@ class Crawler:
             model_zh_en, tokenizer_zh_en, model_en_zh, tokenizer_en_zh, formatted_topics
         )
         self._regex_filter(formatted_topics)
-        self._semantic_filter(model_spacy_en, formatted_topics)
+        if self.config.use_spacy and model_spacy_en is not None:
+            self._semantic_filter(model_spacy_en, formatted_topics)
         self._remove_words(formatted_topics)
         self._split_at_comma(formatted_topics, model_en_zh, tokenizer_en_zh)
 

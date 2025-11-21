@@ -265,6 +265,7 @@ class CrawlerConfig:
 
     # Model and runtime settings
     use_openai_embeddings: bool = False
+    use_spacy: bool = False
     load_fname: str = None
     backend: str = "transformers"  # "transformers" or "vllm"
 

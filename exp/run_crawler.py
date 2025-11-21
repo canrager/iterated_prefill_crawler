@@ -68,7 +68,7 @@ def main(cfg: DictConfig) -> None:
         tokenizer_crawl = None
 
     filter_models = load_filter_models(
-        cfg.cache_dir, cfg.device, load_openai=cfg.use_openai_embeddings
+        cfg.cache_dir, cfg.device, load_openai=cfg.use_openai_embeddings, load_spacy=cfg.use_spacy
     )
 
     # Get crawler name

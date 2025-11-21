@@ -285,6 +285,21 @@ class BenchmarkEvaluator:
                 stats["overall"]["total_generations"]
             )
 
+        # Create ranked list of subcategories by refusal rate (descending)
+        ranked_subcategories = []
+        for subcategory_key, subcategory_stats in stats["by_subcategory"].items():
+            ranked_subcategories.append({
+                "subcategory": subcategory_key,
+                "refusal_rate": subcategory_stats["refusal_rate"],
+                "total_prompts": subcategory_stats["total_prompts"],
+                "total_generations": subcategory_stats["total_generations"],
+                "total_refusals": subcategory_stats["total_refusals"]
+            })
+
+        # Sort by refusal rate descending
+        ranked_subcategories.sort(key=lambda x: x["refusal_rate"], reverse=True)
+        stats["ranked_subcategories"] = ranked_subcategories
+
         return stats
 
     def save_results(self, results: Dict):
@@ -320,6 +335,10 @@ class BenchmarkEvaluator:
             print(f"  {category}:")
             print(f"    Prompts: {cat_stats['total_prompts']}")
             print(f"    Refusal Rate: {cat_stats['refusal_rate']:.2%}")
+
+        print(f"\nTop 10 Subcategories by Refusal Rate:")
+        for i, subcat in enumerate(stats["ranked_subcategories"][:10], 1):
+            print(f"  {i}. {subcat['subcategory']}: {subcat['refusal_rate']:.2%} ({subcat['total_refusals']}/{subcat['total_generations']})")
 
         print("\n" + "="*80)
 

@@ -224,7 +224,7 @@ def load_embedding_model(cache_dir: str, device: str):
 
 
 def load_filter_models(
-    cache_dir: Optional[str] = None, device: str = "auto", load_openai: bool = True
+    cache_dir: Optional[str] = None, device: str = "auto", load_openai: bool = True, load_spacy: bool = False
 ):
     if cache_dir is None:
         cache_dir = MODELS_DIR
@@ -247,19 +247,21 @@ def load_filter_models(
 
     # NLP model for formatting / subject extraction
     # needs python -m spacy download en_core_web_sm
-    try:
-        # Check if the model is already downloaded
-        if not spacy.util.is_package("en_core_web_sm"):
-            print("Downloading spaCy model 'en_core_web_sm'...")
-            import subprocess
+    model_spacy_en = None
+    if load_spacy:
+        try:
+            # Check if the model is already downloaded
+            if not spacy.util.is_package("en_core_web_sm"):
+                print("Downloading spaCy model 'en_core_web_sm'...")
+                import subprocess
 
-            subprocess.check_call(
-                [sys.executable, "-m", "spacy", "download", "en_core_web_sm"]
-            )
-        model_spacy_en = spacy.load("en_core_web_sm")
-    except Exception as e:
-        print(f"Warning: Could not load or download spaCy model: {e}")
-        model_spacy_en = None
+                subprocess.check_call(
+                    [sys.executable, "-m", "spacy", "download", "en_core_web_sm"]
+                )
+            model_spacy_en = spacy.load("en_core_web_sm")
+        except Exception as e:
+            print(f"Warning: Could not load or download spaCy model: {e}")
+            model_spacy_en = None
 
     return {
         "tokenizer_zh_en": tokenizer_zh_en,

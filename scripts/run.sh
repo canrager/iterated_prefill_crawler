@@ -45,8 +45,9 @@ else
     echo ""
 
     # Run the crawler script in a tmux session
+    # Export OPENAI_API_KEY to the tmux environment
     tmux new-session -d -s "$SESSION_NAME" \
-        "cd $PROJECT_ROOT && $PYTHON_CMD 2>&1 | tee '$LOG_FILE'"
+        "export OPENAI_API_KEY='$OPENAI_API_KEY' && cd $PROJECT_ROOT && $PYTHON_CMD 2>&1 | tee '$LOG_FILE'"
 
     echo "Crawler started in tmux session: $SESSION_NAME"
     echo "Attach to session with: tmux attach-session -t $SESSION_NAME"
