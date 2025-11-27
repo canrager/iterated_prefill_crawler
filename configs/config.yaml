@@ -2,7 +2,7 @@
 # model_path: "allenai/Llama-3.1-Tulu-3-8B-SFT"
 model_path: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 # model_path: "perplexity-ai/r1-1776-distill-llama-70b"
-# model_path: "meta-llama/Llama-3.1-8B"
+# model_path: "meta-llama/Llama-3.1-8B-Instruct"
 quantization_bits: null
 device: "cuda"
 cache_dir: "models"  # Relative to project root parent, will be created if non-existent
@@ -18,7 +18,7 @@ deduplication_method: "exact"  # "embedding", "openai", or "exact" (default)
 
 # vLLM-specific settings (only used when backend: vllm)
 vllm_tensor_parallel_size: 1
-vllm_gpu_memory_utilization: 0.9
+vllm_gpu_memory_utilization: 0.8
 vllm_max_model_len: 1000  # null = use model default
 
 # Crawler configuration (production defaults)
