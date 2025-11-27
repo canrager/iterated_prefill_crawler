@@ -23,7 +23,7 @@ echo "Log Dir: $LOG_FILE"
 nohup python exp/run_crawler.py \
     --model_path "claude-3-5-haiku-latest" \
     --cache_dir "/share/u/models/" \
-    --prompt_injection_location "thought_prefix" \
+    --prefill_mode "thought_prefix" \
     > "$LOG_FILE" 2>&1 &
 
 # Store the process ID

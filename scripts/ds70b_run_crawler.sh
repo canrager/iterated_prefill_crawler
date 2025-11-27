@@ -25,7 +25,7 @@ nohup python exp/run_crawler.py \
     --cache_dir "/disk/u/models/" \
     --model_path "deepseek-ai/DeepSeek-R1-Distill-Llama-70B" \
     --quantization_bits 0 \
-    --prompt_injection_location "thought_prefix" \
+    --prefill_mode "thought_prefix" \
     "$@" \
     > "$LOG_FILE" 2>&1 &
 

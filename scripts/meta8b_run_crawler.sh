@@ -28,7 +28,7 @@ tmux new-session -d -s "$SESSION_NAME" \
     --cache_dir '/home/can/models/' \
     --model_path 'meta-llama/Llama-3.1-8B-Instruct' \
     --quantization_bits 'none' \
-    --prompt_injection_location 'thought_prefix' \
+    --prefill_mode 'thought_prefix' \
     $@ \
     2>&1 | tee '$LOG_FILE'"
 

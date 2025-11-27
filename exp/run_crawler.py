@@ -4,10 +4,11 @@ import os
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import multiprocessing
+
 # Set multiprocessing start method to 'spawn' for CUDA compatibility
 # MUST be set before importing torch or any CUDA libraries
 try:
-    multiprocessing.set_start_method('spawn', force=True)
+    multiprocessing.set_start_method("spawn", force=True)
 except RuntimeError:
     pass  # Already set
 
@@ -18,7 +19,7 @@ from omegaconf import DictConfig, OmegaConf
 from core.crawler import Crawler, get_run_name
 from core.crawler_config import CrawlerConfig
 from core.llm_utils import load_model_and_tokenizer, load_filter_models, load_from_path
-from core.project_config import INTERIM_DIR, RESULT_DIR
+from core.project_config import INTERIM_DIR, RESULT_DIR, resolve_cache_dir
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
@@ -47,20 +48,26 @@ def main(cfg: DictConfig) -> None:
     #     model_path=cfg.model_path,
     #     device=cfg.device,
     #     cossim_thresh=cfg.cossim_thresh,
-    #     prompt_injection_location=cfg.prompt_injection_location,
+    #     prefill_mode=cfg.prefill_mode,
     # )
     crawler_config = CrawlerConfig(**OmegaConf.to_container(cfg, resolve=True))
+
+    # Resolve cache_dir relative to ROOT_DIR.parent and create if needed
+    cache_dir_path = resolve_cache_dir(cfg.cache_dir)
+    cache_dir_str = str(cache_dir_path)
 
     # Initialize models
     if not any(keyword in cfg.model_path for keyword in ["claude", "grok"]):
         model_crawl, tokenizer_crawl = load_model_and_tokenizer(
             cfg.model_path,
             device=cfg.device,
-            cache_dir=cfg.cache_dir,
+            cache_dir=cache_dir_str,
             quantization_bits=cfg.quantization_bits,
             backend=cfg.backend,
             vllm_tensor_parallel_size=cfg.vllm_tensor_parallel_size if cfg.backend == "vllm" else 1,
-            vllm_gpu_memory_utilization=cfg.vllm_gpu_memory_utilization if cfg.backend == "vllm" else 0.9,
+            vllm_gpu_memory_utilization=(
+                cfg.vllm_gpu_memory_utilization if cfg.backend == "vllm" else 0.9
+            ),
             vllm_max_model_len=crawler_config.max_context_tokens if cfg.backend == "vllm" else None,
         )
     else:
@@ -68,13 +75,11 @@ def main(cfg: DictConfig) -> None:
         tokenizer_crawl = None
 
     filter_models = load_filter_models(
-        cfg.cache_dir, cfg.device, load_openai=cfg.use_openai_embeddings, load_spacy=cfg.use_spacy
+        cache_dir_str, cfg.device, load_openai=cfg.use_openai_embeddings, load_spacy=cfg.use_spacy
     )
 
     # Get crawler name
-    run_name = get_run_name(
-        cfg.model_path, crawler_config, cfg.prompt_injection_location
-    )
+    run_name = get_run_name(cfg.model_path, crawler_config, cfg.prefill_mode)
     # Add backend and quantization info to run name
     if cfg.backend == "vllm":
         run_name = f"{run_name}_vllm"
@@ -86,9 +91,7 @@ def main(cfg: DictConfig) -> None:
 
     # Create Crawler or load from checkpoint
     if cfg.load_fname is None:
-        crawler = Crawler(
-            crawler_config=crawler_config, save_filename=crawler_log_filename
-        )
+        crawler = Crawler(crawler_config=crawler_config, save_filename=crawler_log_filename)
     else:
         load_dir = os.path.join(INTERIM_DIR, cfg.load_fname)
         crawler = Crawler.load(

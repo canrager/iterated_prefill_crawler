@@ -87,14 +87,14 @@ def compare_topics(gt_topic: str, crawled_topics: List[str], llm_judge_name: str
     """Compare one ground truth topic against crawled topics using LLM judge"""
     start_time = time.time()
     prompt = build_similarity_prompt(gt_topic, crawled_topics)
-    
+
     if verbose:
         print("\n" + "="*80)
         print("PROMPT:")
         print("-"*40)
         print(prompt)
         print("="*80 + "\n")
-    
+
     system_prompt = "You are an AI assistant that determines semantic equivalence between topics."
     response = query_llm_api(model_name=llm_judge_name, prompt=prompt, system_prompt=system_prompt, verbose=verbose)
     is_match, matched_topics = parse_similarity_response(response)
@@ -109,6 +109,47 @@ def compare_topics(gt_topic: str, crawled_topics: List[str], llm_judge_name: str
         print("="*80)
 
     return is_match, matched_topics
+
+
+def batch_compare_topics(gt_topics: List[str], crawled_topics: List[str], llm_judge_name: str, verbose: bool = False) -> List[Tuple[bool, List[str]]]:
+    """Compare multiple ground truth topics against crawled topics using LLM judge with batched processing
+
+    Args:
+        gt_topics: List of ground truth topics to compare
+        crawled_topics: List of crawled topics to compare against
+        llm_judge_name: Name of the LLM model to use as judge
+        verbose: Whether to print verbose output
+
+    Returns:
+        List of tuples (is_match, matched_topics) for each ground truth topic
+    """
+    # Build prompts for all ground truth topics
+    prompts = [build_similarity_prompt(gt_topic, crawled_topics) for gt_topic in gt_topics]
+
+    if verbose:
+        print(f"Processing {len(gt_topics)} topics in batch")
+
+    system_prompt = "You are an AI assistant that determines semantic equivalence between topics."
+
+    # Use batched query_llm_api
+    responses = query_llm_api(model_name=llm_judge_name, prompt=prompts, system_prompt=system_prompt, verbose=verbose)
+
+    # Parse all responses
+    results = []
+    for gt_topic, response in zip(gt_topics, responses):
+        is_match, matched_topics = parse_similarity_response(response)
+        results.append((is_match, matched_topics))
+
+        if verbose:
+            print(f"\nPARSED RESULT:")
+            print("-"*40)
+            print(f"Reference topic: '{gt_topic}'")
+            print(f"Match found: {is_match}")
+            if is_match:
+                print(f"Matched topics: {', '.join(matched_topics)}")
+            print("="*80)
+
+    return results
 
 def match_gt_topics_with_rankings(
     run_title: str,
@@ -149,31 +190,32 @@ def match_gt_topics_with_rankings(
         for gt_category, gt_topics in gt_topics_dict.items():
             print(f"\nProcessing category: {gt_category}")
             
-            cnt = 0
-            for gt_topic in tqdm(gt_topics, desc=f"Matching {gt_category} topics"):
-                cnt += 1
-                if debug and cnt > 3:
-                    break
-                
+            # Prepare batch of ground truth topics
+            gt_topics_to_process = gt_topics if not debug else gt_topics[:3]
+
+            # Use batch processing for all topics at once
+            results = batch_compare_topics(gt_topics_to_process, list(topics.keys()), llm_judge_name, verbose)
+
+            # Process results
+            for gt_topic, (is_match, matched_topics) in zip(gt_topics_to_process, results):
                 gt_topic_str = f"{gt_dataset}:{gt_category}:{gt_topic}"
                 gt_topic_to_first_occurence_id[gt_topic_str] = None
-                is_match, matched_topics = compare_topics(gt_topic, topics.keys(), llm_judge_name, verbose)
-                
+
                 # Add match status and matched topic to each ranking method
                 for cluster_str, cluster_data in topics.items():
                     # Initialize ground_truth_matches if it doesn't exist
                     if "ground_truth_matches" not in cluster_data:
                         cluster_data["ground_truth_matches"] = []
-                    
+
                     # Initialize is_match if it doesn't exist
                     if "is_match" not in cluster_data:
                         cluster_data["is_match"] = False
-                    
+
                     # If this ranked topic is in matched_topics, add it to the matches
                     if cluster_str in matched_topics:
                         cluster_data["ground_truth_matches"].append(gt_topic_str)
                         cluster_data["is_match"] = True
-                        if (gt_topic_to_first_occurence_id[gt_topic_str] is None or 
+                        if (gt_topic_to_first_occurence_id[gt_topic_str] is None or
                             gt_topic_to_first_occurence_id[gt_topic_str] > cluster_data["first_occurence_id"]):
                             gt_topic_to_first_occurence_id[gt_topic_str] = cluster_data["first_occurence_id"]
             if debug:
@@ -223,7 +265,7 @@ def match_ranked_topics_with_gt(
     if os.path.exists(output_file) and not force_recompute:
         print(f"Loading existing results from {output_file}")
         return json.load(open(output_file, "r")), []
-    
+
     # Load ranked topics
     ranked_topics_file = os.path.join(RESULT_DIR, f"topics_ranked_{run_title}.json")
     with open(ranked_topics_file, "r") as f:
@@ -242,14 +284,18 @@ def match_ranked_topics_with_gt(
             for gt_topic in gt_topics:
                 gt_topic_name = f"{gt_dataset}:{gt_category}:{gt_topic}"
                 all_gt_topics.append(gt_topic_name)
-    
-    # Compare ranked topics with ground truth topics
-    for i, ranked_topic in enumerate(ranked_topics):
-        is_match, matched_topics = compare_topics(ranked_topic, all_gt_topics, llm_judge_name, verbose)
+
+    # Prepare batch of ranked topics
+    ranked_topics_list = list(ranked_topics.keys())
+    ranked_topics_to_process = ranked_topics_list if not debug else ranked_topics_list[:3]
+
+    # Use batch processing for all topics at once
+    results = batch_compare_topics(ranked_topics_to_process, all_gt_topics, llm_judge_name, verbose)
+
+    # Process results
+    for ranked_topic, (is_match, matched_topics) in zip(ranked_topics_to_process, results):
         ranked_topics[ranked_topic]["is_match"] = is_match
         ranked_topics[ranked_topic]["matched_topics"] = matched_topics
-        if debug and i > 3:
-            break
 
     # Save results
     with open(output_file, "w") as f:
@@ -302,14 +348,18 @@ def match_ranked_topics_with_gt_jsonl(
             for gt_topic in gt_topics:
                 gt_topic_name = f"{gt_dataset}:{gt_category}:{gt_topic}"
                 all_gt_topics.append(gt_topic_name)
-    
-    # Compare ranked topics with ground truth topics
-    for i, ranked_topic in enumerate(ranked_topics):
-        is_match, matched_topics = compare_topics(ranked_topic, all_gt_topics, llm_judge_name, verbose)
+
+    # Prepare batch of ranked topics
+    ranked_topics_list = list(ranked_topics.keys())
+    ranked_topics_to_process = ranked_topics_list if not debug else ranked_topics_list[:3]
+
+    # Use batch processing for all topics at once
+    results = batch_compare_topics(ranked_topics_to_process, all_gt_topics, llm_judge_name, verbose)
+
+    # Process results
+    for ranked_topic, (is_match, matched_topics) in zip(ranked_topics_to_process, results):
         ranked_topics[ranked_topic]["is_match"] = is_match
         ranked_topics[ranked_topic]["matched_topics"] = matched_topics
-        if debug and i > 3:
-            break
 
     # Save results
     with open(output_file, "w") as f:
@@ -400,22 +450,16 @@ def match_crawler_log_with_gt(
         for gt_category, gt_topics in gt_topics_dict.items():
             print(f"\nProcessing category: {gt_category}")
 
-            cnt = 0
-            for gt_topic in tqdm(gt_topics, desc=f"Matching {gt_category} topics"):
-                cnt += 1
-                if debug and cnt > 3:
-                    break
+            # Prepare batch of ground truth topics
+            gt_topics_to_process = gt_topics if not debug else gt_topics[:3]
 
+            # Use batch processing for all topics at once
+            results = batch_compare_topics(gt_topics_to_process, list(crawled_topics.keys()), llm_judge_name, verbose)
+
+            # Process results
+            for gt_topic, (is_match, matched_topics) in zip(gt_topics_to_process, results):
                 gt_topic_str = f"{gt_dataset}:{gt_category}:{gt_topic}"
                 gt_topic_to_first_occurrence_id[gt_topic_str] = None
-
-                # Compare against all crawled topic summaries
-                is_match, matched_topics = compare_topics(
-                    gt_topic,
-                    list(crawled_topics.keys()),
-                    llm_judge_name,
-                    verbose
-                )
 
                 # Update matched crawled topics
                 for topic_summary in matched_topics:

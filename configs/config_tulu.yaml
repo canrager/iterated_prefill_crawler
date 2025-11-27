@@ -1,6 +1,6 @@
 # Model settings
-# model_path: "allenai/Llama-3.1-Tulu-3-8B-SFT"
-model_path: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+model_path: "allenai/Llama-3.1-Tulu-3-8B-SFT"
+# model_path: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 # model_path: "perplexity-ai/r1-1776-distill-llama-70b"
 # model_path: "meta-llama/Llama-3.1-8B"
 quantization_bits: null
@@ -8,7 +8,7 @@ device: "cuda"
 cache_dir: "models"  # Relative to project root parent, will be created if non-existent
 
 # Model and runtime settings
-prefill_mode: "thought_prefill_with_seed" # user_seeding # options
+prefill_mode: "assistant_prefill_with_seed" # user_seeding # options
 use_openai_embeddings: true
 use_spacy: false  # Enable spacy semantic filtering
 cossim_thresh: 0.91

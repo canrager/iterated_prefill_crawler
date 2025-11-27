@@ -122,7 +122,6 @@ def custom_encoding_r1(
     tokenizer: AutoTokenizer,
     user_message: str,
     thinking_message: str = "",
-    user_suffix: str = "",
     assistant_prefill: str = "",
     force_thought_skip: bool = False,
     template: str = "chat",
@@ -133,10 +132,6 @@ def custom_encoding_r1(
 
     # Verify arguments and get special tokens
     st = get_special_tokens(model_name)
-
-    # Encode user message
-    if user_suffix != "":
-        user_message = user_message + " " + user_suffix
 
     user_tokens = tokenizer.encode(user_message, add_special_tokens=False)
 
@@ -182,7 +177,6 @@ def custom_batch_encoding_Meta_Mistral(
     tokenizer: AutoTokenizer,
     user_messages: List[str],
     thinking_message: str = "",
-    user_suffix: str = "",
     assistant_prefill: str = "",
     force_thought_skip: bool = False,
     template: str = "chat",
@@ -199,9 +193,6 @@ def custom_batch_encoding_Meta_Mistral(
 
     token_ids = []
     for user_message in user_messages:
-        if user_suffix != "":
-            user_message += " " + user_suffix
-
         system_message = ""
         assistant_message = ""
         if assistant_prefill != "":
@@ -233,7 +224,6 @@ def custom_batch_encoding_Gemma3(
     tokenizer: AutoTokenizer,
     user_messages: List[str],
     thinking_message: str = "",
-    user_suffix: str = "",
     assistant_prefill: str = "",
     force_thought_skip: bool = False,
     template: str = "chat",
@@ -250,9 +240,6 @@ def custom_batch_encoding_Gemma3(
 
     token_ids = []
     for user_message in user_messages:
-        if user_suffix != "":
-            user_message += " " + user_suffix
-
         system_message = ""
         assistant_message = ""
         if assistant_prefill != "":
@@ -314,7 +301,6 @@ def custom_batch_encoding(
     tokenizer: AutoTokenizer,
     user_messages: List[str],
     thinking_message: str = "",
-    user_suffix: str = "",
     assistant_prefill: str = "",
     force_thought_skip: bool = False,
     template: str = "chat",
@@ -329,7 +315,6 @@ def custom_batch_encoding(
                 tokenizer=tokenizer,
                 user_message=user_message,
                 thinking_message=thinking_message,
-                user_suffix=user_suffix,
                 assistant_prefill=assistant_prefill,
                 force_thought_skip=force_thought_skip,
                 template=template,
@@ -341,7 +326,6 @@ def custom_batch_encoding(
             tokenizer=tokenizer,
             user_messages=user_messages,
             thinking_message=thinking_message,
-            user_suffix=user_suffix,
             assistant_prefill=assistant_prefill,
             force_thought_skip=force_thought_skip,
             template=template,
@@ -351,7 +335,6 @@ def custom_batch_encoding(
             tokenizer=tokenizer,
             user_messages=user_messages,
             thinking_message=thinking_message,
-            user_suffix=user_suffix,
             assistant_prefill=assistant_prefill,
             force_thought_skip=force_thought_skip,
             template=template,

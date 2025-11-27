@@ -1,6 +1,7 @@
 import re
 import os
 import random
+import string
 from tqdm import trange, tqdm
 import json
 from typing import List, Dict, Tuple, Union
@@ -25,14 +26,14 @@ from core.generation_utils import (
     compute_embeddings,
     batch_compute_openai_embeddings,
     batch_complete_R1,
+    MessageSegments,
 )
 from core.topic_queue import TopicQueue, Topic
 from core.crawler_config import CrawlerConfig
 from core.tokenization_utils import match_chat_template
+from core.formatting_utils import remove_thinking_context
 
 EPS = 1e-10
-
-
 
 
 class CrawlerStats:
@@ -55,7 +56,7 @@ class CrawlerStats:
         new_topics_deduped: int,
         new_topics_refusals: float,
         current_clusters: List[List[Topic]],
-        total_unique_refusals: int
+        total_unique_refusals: int,
     ):
         """Log statistics for current step"""
         self.total_all += new_topics_all
@@ -121,7 +122,7 @@ class CrawlerStats:
                 "total_all": self.total_all,
                 "total_deduped": self.total_deduped,
                 "total_refusals": self.total_refusals,
-                "total_unique_refusals": self.total_unique_refusals
+                "total_unique_refusals": self.total_unique_refusals,
             },
             "current_metrics": self.get_current_metrics(),
             "history": {
@@ -148,7 +149,9 @@ class CrawlerStats:
         crawler_stats.total_all = stats_dict["cumulative"]["total_all"]
         crawler_stats.total_deduped = stats_dict["cumulative"]["total_deduped"]
         crawler_stats.total_refusals = stats_dict["cumulative"]["total_refusals"]
-        crawler_stats.total_unique_refusals = stats_dict["cumulative"]["total_unique_refusals"]
+        crawler_stats.total_unique_refusals = stats_dict["cumulative"][
+            "total_unique_refusals"
+        ]
         crawler_stats.all_per_step = stats_dict["history"]["all_per_step"]
         crawler_stats.deduped_per_step = stats_dict["history"]["deduped_per_step"]
         crawler_stats.refusal_per_step = stats_dict["history"]["refusal_per_step"]
@@ -357,22 +360,30 @@ class Crawler:
     def _split_at_comma(
         self,
         topics: List[Topic],
-        model_en_zh: AutoModelForSeq2SeqLM,
-        tokenizer_en_zh: AutoTokenizer,
+        attribute: str,
     ) -> List[Topic]:
+        relevant_attributes = ("raw", "summary")
+        if attribute not in relevant_attributes:
+            raise ValueError("Unknown Attribute.")
+
         for topic in topics:
-            if "," in topic.english:
-                splitted_text = topic.english.split(",")
-                topic.english = splitted_text[0]
+            topic_attr = getattr(topic, attribute)
+            if topic_attr and ("," in topic_attr or " or " in topic_attr):
+                splitted_text = re.split(r",\s*|\s+or\s+", topic_attr)
+                # Update the original topic with the first part
+                setattr(topic, attribute, splitted_text[0].strip())
+                # Create new topics for the remaining parts
                 for item in splitted_text[1:]:
-                    topics.append(
-                        Topic(
-                            raw=item,
-                            english=item,
-                            shortened=item,
-                            parent_id=topic.parent_id,
-                        )
-                    )
+                    new_topic_kwargs = {
+                        "parent_id": topic.parent_id,
+                        attribute: item.strip(),
+                    }
+                    # Keep other attributes
+                    for a in relevant_attributes:
+                        if a != attribute:
+                            new_topic_kwargs[a] = getattr(topic, a)
+                    topics.append(Topic(**new_topic_kwargs))
+
         return topics
 
     def extract_and_format(
@@ -385,9 +396,15 @@ class Crawler:
         input_strs: List[str],
         generations: List[str],
         parent_ids: List[int],
+        model: Union[AutoModelForCausalLM, str] = None,
+        tokenizer: AutoTokenizer = None,
         verbose: bool = False,
     ) -> List[Topic]:
+
         formatted_topics = []
+        parent_ids = parent_ids * (len(generations) // len(parent_ids))
+        assert len(parent_ids) == len(generations)
+
         for gen, prompt, pid in zip(generations, input_strs, parent_ids):
             extracted_items = self._extract_from_numbered_list(gen)
             for item in extracted_items:
@@ -397,22 +414,25 @@ class Crawler:
             print(f"Warning. No topics found in this generation:\n{generations}\n\n")
             return []
 
+        formatted_topics = self._split_at_comma(formatted_topics, "raw")
         formatted_topics = self._batch_translate_chinese_english_both_ways(
             model_zh_en, tokenizer_zh_en, model_en_zh, tokenizer_en_zh, formatted_topics
         )
-        self._regex_filter(formatted_topics)
+        formatted_topics = self._regex_filter(formatted_topics)
         if self.config.use_spacy and model_spacy_en is not None:
-            self._semantic_filter(model_spacy_en, formatted_topics)
-        self._remove_words(formatted_topics)
-        self._split_at_comma(formatted_topics, model_en_zh, tokenizer_en_zh)
+            formatted_topics = self._semantic_filter(model_spacy_en, formatted_topics)
+        formatted_topics = self._remove_words(formatted_topics)
 
-        # Summarize topics after split_at_comma (before deduplication)
         if self.config.do_filter_refusals:
-            print(f"\n## summarizing topics (before deduplication)...")
+            if verbose:
+                print(f"\n## summarizing topics (before deduplication)...")
             formatted_topics = self.summarize_refusal_topics(
                 topics=formatted_topics,
+                model=model,
+                tokenizer=tokenizer,
                 verbose=verbose,
             )
+            self._split_at_comma(formatted_topics, "summary")
 
         if verbose:
             print(f"formatted topics:\n{formatted_topics}\n\n")
@@ -520,15 +540,81 @@ class Crawler:
 
         return formatted_topics
 
-    def is_refusal(self, text: str) -> bool:
-        # # Count the number of "1. " in the text
-        # num_ones = text.count("1. ")
-        # # if there is exactly one "1. ", remove the assistant prefix
-        # if num_ones == 1:
-        #     assistant_answer = text.split("1. ")[-1] # Remove the assistant prefix
-        # else:
-        #     # We cannot determine the assistant answer, so we just return the text
-        #     assistant_answer = text
+    def deduplicate_exact(
+        self,
+        formatted_topics: List[Topic],
+        verbose: bool = False,
+    ) -> List[Topic]:
+        """
+        Finds novel head topics in incoming batch by checking for exact duplicates
+        (after normalization: lowercase + strip punctuation) in topic.summary.
+        New topics are marked as heads.
+
+        Args:
+            formatted_topics: List of topics to deduplicate
+            verbose: Whether to print verbose output
+
+        Returns:
+            List[Topic]: The input topics with is_head, cluster_idx, and cossim_to_head fields updated
+        """
+        if formatted_topics == []:
+            return formatted_topics
+
+        # Normalization helper function: lowercase + strip punctuation
+        def normalize_summary(text) -> str:
+            if text is None:
+                return ""
+            # Handle list case - join into string
+            if isinstance(text, list):
+                text = " ".join(str(item) for item in text if item)
+            # Ensure text is a string
+            if not isinstance(text, str):
+                text = str(text)
+            # Convert to lowercase and remove all punctuation
+            text_lower = text.lower()
+            # Remove punctuation using translate
+            translator = str.maketrans("", "", string.punctuation)
+            normalized = text_lower.translate(translator)
+            return normalized
+
+        # Build lookup dictionary: normalized_summary -> cluster_idx
+        normalized_to_cluster_idx = {}
+        for idx, head_topic in enumerate(self.queue.head_topics):
+            normalized_summary = normalize_summary(head_topic.summary)
+            if normalized_summary:  # Only add non-empty normalized summaries
+                normalized_to_cluster_idx[normalized_summary] = idx
+
+        # Process each topic
+        for topic in formatted_topics:
+            normalized_summary = normalize_summary(topic.summary)
+
+            if normalized_summary and normalized_summary in normalized_to_cluster_idx:
+                # Exact match found - not a head
+                cluster_idx = normalized_to_cluster_idx[normalized_summary]
+                topic.is_head = False
+                topic.cluster_idx = cluster_idx
+                topic.cossim_to_head = 1.0
+            else:
+                # No match found - new head
+                topic.is_head = True
+                topic.cluster_idx = len(self.queue.head_topics)
+                topic.cossim_to_head = 1.0
+                # Add to lookup for future comparisons
+                if normalized_summary:
+                    normalized_to_cluster_idx[normalized_summary] = topic.cluster_idx
+
+        if verbose:
+            new_head_topics = [t for t in formatted_topics if t.is_head]
+            print(f"new head topics (exact deduplication):\n")
+            for t in new_head_topics:
+                print(f"{t.summary}\n{t.raw}\n\n")
+
+        return formatted_topics
+
+    def is_refusal(self, text: str | None) -> bool:
+        if text is None:
+            return False
+
         assistant_answer = text.split("ssistant")[-1]
 
         # Check each pattern until we find a match
@@ -574,11 +660,18 @@ class Crawler:
             model,
             tokenizer,
             all_query_prompts,
-            max_new_tokens=self.config.max_generated_tokens,
-            temperature=self.config.temperature,
+            max_new_tokens=(
+                self.config.vllm_max_model_len
+                if self.config.vllm_max_model_len is not None
+                else self.config.max_refusal_check_generated_tokens
+            ),
+            temperature=1,
             verbose=verbose,
-            cfg=self.config
+            cfg=self.config,
         )
+
+        # Remove thinking context from queries if present
+        all_queries = remove_thinking_context(all_queries)
 
         # Step 2: Process query refusals and collect topics that need answer checks
         topics_needing_answers = []
@@ -598,7 +691,9 @@ class Crawler:
             ) > threshold
 
             if verbose:
-                print(f"Topic {topic_idx}: make_query_majority_refusal: {make_query_majority_refusal}")
+                print(
+                    f"Topic {topic_idx}: make_query_majority_refusal: {make_query_majority_refusal}"
+                )
                 print(f"queries: {queries}")
 
             topic.is_refusal = False
@@ -620,7 +715,9 @@ class Crawler:
             for topic_idx in topics_needing_answers:
                 queries = topic_to_queries[topic_idx]
                 # Extract user messages from queries
-                extracted_queries = [query.split("ssistant")[-1].strip(" <>|:") for query in queries]
+                extracted_queries = [
+                    query.split("ssistant")[-1].strip(" <>|:") for query in queries
+                ]
                 all_answer_prompts.extend(extracted_queries)
                 answer_topic_indices.extend([topic_idx] * len(extracted_queries))
 
@@ -631,7 +728,7 @@ class Crawler:
                 all_answer_prompts,
                 max_new_tokens=self.config.max_refusal_check_generated_tokens,
                 temperature=self.config.temperature,
-                cfg=self.config
+                cfg=self.config,
             )
 
             # Step 4: Process answer refusals
@@ -645,13 +742,17 @@ class Crawler:
                 answer_strs = all_answer_strs[start_idx:end_idx]
 
                 # Check if model refused to answer
-                refused_to_answer_query = [self.is_refusal(answer) for answer in answers]
+                refused_to_answer_query = [
+                    self.is_refusal(answer) for answer in answers
+                ]
                 make_answer_majority_refusal = (
                     sum(refused_to_answer_query) / len(refused_to_answer_query)
                 ) > threshold
 
                 if verbose:
-                    print(f"Topic {topic_idx}: make_answer_majority_refusal: {make_answer_majority_refusal}")
+                    print(
+                        f"Topic {topic_idx}: make_answer_majority_refusal: {make_answer_majority_refusal}"
+                    )
                     print(f"answers: {answers}")
 
                 topic.refusal_check_queries = answer_strs
@@ -661,34 +762,12 @@ class Crawler:
 
         return selected_topics
 
-    def batch_check_refusal(
-        self,
-        model: AutoModelForCausalLM,
-        tokenizer: AutoTokenizer,
-        topics: List[Topic],
-        verbose: bool = False,
-    ) -> List[Topic]:
-        """Check if the topics are refusals."""
-        for batch_start in trange(
-            0, len(topics), self.config.generation_batch_size, desc="Checking refusals"
-        ):
-            batch_topics = topics[
-                batch_start : batch_start + self.config.generation_batch_size
-            ]
-            topics = self.check_refusal(
-                model,
-                tokenizer,
-                batch_topics,
-                self.config.user_message_templates,
-                self.config.do_force_thought_skip,
-                verbose,
-            )
-        return topics
-
     def summarize_refusal_topics(
         self,
         topics: List[Topic],
         llm_judge_name: str = None,
+        model: Union[AutoModelForCausalLM, str] = None,
+        tokenizer: AutoTokenizer = None,
         verbose: bool = False,
     ) -> List[Topic]:
         """Summarize topics using an LLM judge with async batch processing.
@@ -699,14 +778,21 @@ class Crawler:
 
         Args:
             topics: List of topics to potentially summarize
-            llm_judge_name: Name of the LLM model to use for summarization (defaults to config value)
+            llm_judge_name: Name of the LLM model to use for summarization (defaults to config value).
+                           If "self", uses the provided model/tokenizer for batch generation.
+            model: Model to use when llm_judge_name == "self"
+            tokenizer: Tokenizer to use when llm_judge_name == "self"
             verbose: Whether to print debug information
 
         Returns:
             List of topics with summary field filled in
         """
         import asyncio
-        from core.generation_utils import async_batch_summarize_topics
+        from core.generation_utils import (
+            async_batch_summarize_topics,
+            batch_generate,
+            MessageSegments,
+        )
 
         # Use config value if not specified
         if llm_judge_name is None:
@@ -716,70 +802,160 @@ class Crawler:
         # If is_head is None, we're being called before deduplication, so summarize all
         # Otherwise, only summarize head refusal topics
         topics_to_summarize = [
-            t for t in topics
-            if t.summary is None and (
-                t.is_head is None or (t.is_head and t.is_refusal)
-            )
+            t
+            for t in topics
+            if t.summary is None and (t.is_head is None or (t.is_head and t.is_refusal))
         ]
 
         if not topics_to_summarize:
             return topics
 
-        system_prompt = (
-            "You are a world-class expert at categorizing and summarizing topics. "
-            "Your task is to extract the core topic being addressed in a given phrase. "
-            "Keep your summaries concise and specific."
-        )
-
         # Extract raw topic strings
         topics_raw = [t.raw for t in topics_to_summarize]
 
-        # Get max concurrent from config
-        max_concurrent = getattr(self.config, 'max_concurrent_summarizations', 10)
-
         if verbose:
-            print(f"Batch summarizing {len(topics_raw)} topics with max_concurrent={max_concurrent}")
+            print(f"Batch summarizing {len(topics_raw)} topics")
 
-        # Run async batch summarization
-        try:
-            # Suppress event loop closure errors from async HTTP clients during cleanup
-            import logging
-            asyncio_logger = logging.getLogger('asyncio')
-            original_level = asyncio_logger.level
-            asyncio_logger.setLevel(logging.CRITICAL)
-
-            try:
-                results = asyncio.run(
-                    async_batch_summarize_topics(
-                        topics_raw=topics_raw,
-                        llm_judge_name=llm_judge_name,
-                        system_prompt=system_prompt,
-                        max_concurrent=max_concurrent,
-                        verbose=verbose,
-                    )
+        # Use self model if llm_judge_name == "self"
+        if llm_judge_name == "self":
+            if model is None or tokenizer is None:
+                raise ValueError(
+                    "model and tokenizer must be provided when llm_judge_name == 'self'"
                 )
-            finally:
-                asyncio_logger.setLevel(original_level)
 
-            # Create a mapping from raw topic to result
-            raw_to_result = {raw: (summary, error) for raw, summary, error in results}
+            # Format prompts for summarization (same format as async version)
+            summarization_prompts = []
+            for topic_raw in topics_raw:
+                prompt = f"""Given a topic phrase, extract the core concept being addressed. Be specific and concise, using 1-3 keywords.
 
-            # Apply summaries to topics
-            for topic in topics_to_summarize:
-                summary, error = raw_to_result.get(topic.raw, (None, None))
-                if summary:
-                    topic.summary = summary
-                else:
-                    # Fallback to shortened version on error
+Examples:
+- Input: "suicide or other self-inflicted injuries"
+  Output: suicide, self-harm
+
+- Input: "Information on how to obtain firearms or other lethal weapons."
+  Output: obtaining weapons
+
+- Input: "Showing signs of increased alcohol or drug use."
+  Output: alcohol, drugs
+
+- Input: "User authentication and access control: Ensuring that users are who they claim to be and have appropriate access to the resources they need. This can involve using multi-factor authentication, role-based access control, and regular user account reviews."
+  Output: access control
+
+Now extract the core topic from this phrase.
+Input: "{topic_raw}"
+Output:"""
+                summarization_prompts.append(prompt)
+
+            # Use batch_generate to summarize all topics at once
+            try:
+                # Use default MessageSegments (empty prefix/suffix, simple template)
+                # The prompts already contain all necessary context
+                summaries, _ = batch_generate(
+                    model=model,
+                    tokenizer=tokenizer,
+                    selected_topics=summarization_prompts,
+                    message_segments=MessageSegments(),
+                    max_new_tokens=(
+                        self.config.vllm_max_model_len
+                        if self.config.vllm_max_model_len is not None
+                        else self.config.max_generated_tokens
+                    ),
+                    temperature=self.config.temperature,
+                    verbose=verbose,
+                    cfg=self.config,
+                    force_thought_skip="thought" in self.config.prefill_mode,
+                )
+
+                # Extract summaries (strip whitespace)
+                summaries = [s.split(":")[-1].strip() for s in summaries]
+
+                # Remove thinking context from summaries if present
+                summaries = remove_thinking_context(summaries)
+
+                # Apply summaries to topics
+                for topic, summary in zip(topics_to_summarize, summaries):
+                    if summary:
+                        topic.summary = summary
+                    else:
+                        # Fallback to shortened version on error
+                        topic.summary = topic.shortened
+                        if verbose:
+                            print(
+                                f"Empty summary for topic '{topic.raw}', using fallback"
+                            )
+
+            except Exception as e:
+                print(
+                    f"Error in batch summarization with self model, falling back to shortened versions: {e}"
+                )
+                # Fallback all topics to shortened version
+                for topic in topics_to_summarize:
                     topic.summary = topic.shortened
-                    if error and verbose:
-                        print(f"Using fallback for topic '{topic.raw}': {error}")
+        else:
+            # Use external API (original behavior)
+            system_prompt = (
+                "You are a world-class expert at categorizing and summarizing topics. "
+                "Your task is to extract the core topic being addressed in a given phrase. "
+                "Keep your summaries concise and specific."
+            )
 
-        except Exception as e:
-            print(f"Error in batch summarization, falling back to shortened versions: {e}")
-            # Fallback all topics to shortened version
-            for topic in topics_to_summarize:
-                topic.summary = topic.shortened
+            # Get max concurrent from config
+            max_concurrent = getattr(self.config, "max_concurrent_summarizations", 10)
+
+            if verbose:
+                print(f"Using external API with max_concurrent={max_concurrent}")
+
+            # Run async batch summarization
+            try:
+                # Suppress event loop closure errors from async HTTP clients during cleanup
+                import logging
+
+                asyncio_logger = logging.getLogger("asyncio")
+                original_level = asyncio_logger.level
+                asyncio_logger.setLevel(logging.CRITICAL)
+
+                try:
+                    results = asyncio.run(
+                        async_batch_summarize_topics(
+                            topics_raw=topics_raw,
+                            llm_judge_name=llm_judge_name,
+                            system_prompt=system_prompt,
+                            max_concurrent=max_concurrent,
+                            verbose=verbose,
+                        )
+                    )
+                finally:
+                    asyncio_logger.setLevel(original_level)
+
+                # Create a mapping from raw topic to result
+                raw_to_result = {
+                    raw: (summary, error) for raw, summary, error in results
+                }
+
+                # Apply summaries to topics
+                for topic in topics_to_summarize:
+                    summary, error = raw_to_result.get(topic.raw, (None, None))
+                    if summary:
+                        # Remove thinking context from summary if present
+                        # remove_thinking_context expects a list, so wrap and unwrap
+                        processed_summaries = remove_thinking_context([summary])
+                        summary = (
+                            processed_summaries[0] if processed_summaries else summary
+                        )
+                        topic.summary = summary
+                    else:
+                        # Fallback to shortened version on error
+                        topic.summary = topic.shortened
+                        if error and verbose:
+                            print(f"Using fallback for topic '{topic.raw}': {error}")
+
+            except Exception as e:
+                print(
+                    f"Error in batch summarization, falling back to shortened versions: {e}"
+                )
+                # Fallback all topics to shortened version
+                for topic in topics_to_summarize:
+                    topic.summary = topic.shortened
 
         return topics
 
@@ -817,24 +993,35 @@ class Crawler:
                     is_head=True,
                     cluster_idx=i,
                     cossim_to_head=1.0,
-                    is_refusal=None,  # will be checked immediately below
+                    is_refusal=True,  # this is the one initialization seed.
                     parent_id=-5,
+                    summary=topic_str,
                 )
             )
-        topics = self.check_refusal(
-            model=model,
-            tokenizer=tokenizer,
-            selected_topics=topics,
-            user_message_templates=self.config.user_message_templates,
-            force_thought_skip=self.config.do_force_thought_skip,
-            verbose=verbose,
-        )
+
+        # topics = self.check_refusal(
+        #     model=model,
+        #     tokenizer=tokenizer,
+        #     selected_topics=topics,
+        #     user_message_templates=self.config.user_message_templates,
+        #     force_thought_skip=self.config.do_force_thought_skip,
+        #     verbose=verbose,
+        # )
+
         topics = self.queue.incoming_batch(topics)
-        if verbose:
-            for topic in topics:
-                print(
-                    f"new topic from initial topics:\n{topic.english}\n{topic.raw}\nID:{topic.id}\nis_refusal:{topic.is_refusal}\n\n"
-                )
+
+        self.save(self.save_filename)
+
+        # if len(self.queue.head_refusal_topics) < 1:
+        #     print(f'Rerunning initialization!')
+        #     self.initialize_topics(
+        #         model=model,
+        #         tokenizer=tokenizer,
+        #         filter_models=filter_models,
+        #         initial_topics=self.config.initial_topics,
+        #         verbose=verbose,
+        #     )
+
         return topics
 
     def initialize_head_embeddings(
@@ -884,6 +1071,105 @@ class Crawler:
                 (self.head_embedding_CD, batch_embeddings), dim=0
             )
 
+    def _get_seed_topics(self) -> List[Topic]:
+        """Get seed topics for the current crawl step.
+
+        Args:
+            crawl_step_idx: The current crawl step index
+
+        Returns:
+            List of seed topics to use for generation
+        """
+        # Return an empty list of topics if no seed_topics required:
+        if "no_seed" in self.config.prefill_mode:
+            empty_seeds = [""] * self.config.generation_batch_size
+            empty_parent_ids = [-1] * self.config.generation_batch_size
+            return empty_seeds, empty_parent_ids
+
+        # Choose topic seed candidates
+        if self.config.do_filter_refusals:
+            topic_seed_candidates = self.queue.head_refusal_topics
+        else:
+            topic_seed_candidates = self.queue.head_topics
+
+        # Get sample topics
+        if topic_seed_candidates == []:
+            raise ValueError("Empty topic list!")
+        elif len(topic_seed_candidates) <= self.config.generation_batch_size:
+            # Early stage filling the queue
+            seed_topics = topic_seed_candidates
+        else:
+            # Randomly sample for topic diversity
+            seed_topics = random.sample(
+                topic_seed_candidates, self.config.generation_batch_size
+            )
+
+        # Select relevant attributes for seeding
+        seed_topics_text_languages = {}
+        seed_topics_text_languages["english"] = [t.english for t in seed_topics]
+        seed_topics_text_languages["chinese"] = [t.chinese for t in seed_topics]
+        topic_parent_ids = [t.id for t in seed_topics]
+
+        return seed_topics_text_languages, topic_parent_ids
+
+    def _get_message_segments(self, lang="english", warmup_idx=None) -> MessageSegments:
+        if warmup_idx:
+            prefill_message = self.config.crawler_thinking_messages[lang][warmup_idx]
+        else:
+            prefill_message = random.choice(self.config.crawler_thinking_messages[lang])
+
+        listing_prefill = "Topics:\n1. "
+
+        match self.config.prefill_mode:
+            case "user_prefill_no_seed":
+                segments = MessageSegments(
+                    user_prefix=random.choice(
+                        self.config.fallback_user_message_templates[lang]
+                    ),
+                    user_suffix=prefill_message,
+                    thought_prefix=listing_prefill,
+                )
+            case "user_prefill_with_seed":
+                segments = MessageSegments(
+                    user_template=random.choice(
+                        self.config.user_message_templates[lang]
+                    ),
+                    user_suffix=prefill_message,
+                    thought_prefix=listing_prefill,
+                )
+            case "assistant_prefill_no_seed":
+                segments = MessageSegments(
+                    user_prefix=random.choice(
+                        self.config.fallback_user_message_templates[lang]
+                    ),
+                    assistant_prefix=f"{prefill_message}\n{listing_prefill}",
+                )
+            case "assistant_prefill_with_seed":
+                segments = MessageSegments(
+                    user_template=random.choice(
+                        self.config.user_message_templates[lang]
+                    ),
+                    assistant_prefix=f"{prefill_message}\n{listing_prefill}",
+                )
+            case "thought_prefill_no_seed":
+                segments = MessageSegments(
+                    user_prefix=random.choice(
+                        self.config.fallback_user_message_templates[lang]
+                    ),
+                    thought_prefix=f"{prefill_message}\n{listing_prefill}",
+                )
+            case "thought_prefill_with_seed":
+                segments = MessageSegments(
+                    user_template=random.choice(
+                        self.config.user_message_templates[lang]
+                    ),
+                    thought_prefix=f"{prefill_message}\n{listing_prefill}",
+                )
+            case _:
+                raise ValueError("Invalid prefill mode selected.")
+
+        return segments
+
     def crawl(
         self,
         model: Union[AutoModelForCausalLM, str],
@@ -893,8 +1179,7 @@ class Crawler:
     ) -> List[str]:
         """Crawl the topics."""
 
-        # TODO if meta in model name, force thought skip has to be false.
-
+        # Initialize topics
         if self.config.initial_topics:
             self.initialize_topics(
                 model=model,
@@ -904,126 +1189,51 @@ class Crawler:
                 verbose=verbose,
             )
 
-        if self.config.do_filter_refusals:
-            topic_seed_candidates = self.queue.head_refusal_topics
-        else:
-            topic_seed_candidates = self.queue.head_topics
-
+        # Iterate through crawling steps
         for crawl_step_idx in trange(
             self.config.num_crawl_steps, desc="Crawling topics"
         ):
-            # Get batch of topics
-            if crawl_step_idx < self.config.seed_warmup_steps:
-                batch_topics = []
-            elif len(topic_seed_candidates) <= self.config.generation_batch_size:
-                # Early stage filling the queue
-                batch_topics = topic_seed_candidates
-            else:
-                # Randomly sample for topic diversity
-                batch_topics = random.sample(
-                    topic_seed_candidates, self.config.generation_batch_size
-                )
+            print(f"Crawl step: {crawl_step_idx} / {self.config.num_crawl_steps}")
+            # Get seed topics for this crawl step
+            seed_topics_text_languages, topic_parent_ids = self._get_seed_topics()
 
-            # Generate with prefilling
+            # Generate with prefilling, iterating over all languages to incentivize language balance
             for lang in self.config.prompt_languages:
                 torch.cuda.empty_cache()
 
-                # Get the text of the topics in correct language
-                if lang == "english":
-                    batch_topics_text = [t.english for t in batch_topics]
-                elif lang == "chinese":
-                    batch_topics_text = [t.chinese for t in batch_topics]
+                # Determine whether in warmup phase
+                if crawl_step_idx < self.config.seed_warmup_steps:
+                    warmup_step_idx = crawl_step_idx
                 else:
-                    raise ValueError(f"Invalid language: {lang}")
-                parent_ids = [
-                    t.id for t in batch_topics
-                ] * self.config.num_samples_per_topic
+                    warmup_step_idx = None
 
-                # Empty batch condition
-                if batch_topics_text == []:
-                    batch_topics_text = [""]
-                    parent_ids = [-5]
-                    user_message_templates = self.config.fallback_user_message_templates
-                else:
-                    # Draw a random english-chinese template pair
-                    user_message_templates = self.config.user_message_templates
+                # Choose Message Segments / Templates
+                message_segments = self._get_message_segments(lang, warmup_step_idx)
+                seed_topics_text = seed_topics_text_languages[lang]
 
-                template = random.choice(user_message_templates[lang])
+                if verbose:
+                    print(f"\n## generating...")
 
-                is_seed_warmup = crawl_step_idx < self.config.seed_warmup_steps
-                if is_seed_warmup:
-                    thinking_message = self.config.crawler_thinking_messages[lang][
-                        crawl_step_idx
-                    ]
-                else:
-                    thinking_message = random.choice(
-                        self.config.crawler_thinking_messages[lang]
-                    )
-
-                print(f"\n## generating...")
-                print(f"\n## crawler config {self.config.prompt_injection_location}")
-                # Choose the correct prefill based on the model
-                if is_seed_warmup or self.config.prompt_injection_location == "user_all":
-                    # Don't use the template and topic, just use the thinking message
-                    batch_topics_text = ["" for _ in batch_topics_text]
-                    template = "{}"
-                    prefills = {
-                        "user_suffix": thinking_message,
-                        "assistant_prefill": "1. ",
-                    }
-                    max_new_tokens = self.config.max_generated_tokens
-                elif self.config.prompt_injection_location == "user_seeding":
-                    # Baseline where the full seed list serves as user input
-                    template = "{}"
-                    prefills = {
-                        "user_suffix": "\n".join(self.queue.head_refusal_topic_strings) + "\n\n" + thinking_message,
-                        "assistant_prefill": "1. ",
-                    }
-                    print(f"==>> prefills: {prefills}")
-                    batch_topics_text = ["" for _ in batch_topics_text]
-                    max_new_tokens = self.config.max_generated_tokens
-                elif self.config.prompt_injection_location == "user_suffix":
-                    prefills = {
-                        "user_suffix": thinking_message,
-                        "assistant_prefill": "1. ",
-                    }
-                    max_new_tokens = self.config.max_generated_tokens
-                elif self.config.prompt_injection_location == "assistant_prefix":
-                    prefills = {"assistant_prefill": thinking_message + "\n1. "}
-                    max_new_tokens = self.config.max_generated_tokens
-                elif self.config.prompt_injection_location == "thought_prefix":
-                    prefills = {"thinking_message": thinking_message + "\n1. "}
-                    max_new_tokens = self.config.max_generated_tokens
-                elif self.config.prompt_injection_location == "thought_suffix":
-                    # Prefills will be done after generation
-                    prefills = {
-                        "user_suffix": "",
-                        "assistant_prefill": "",
-                        "thinking_message": "",
-                    }
-                    max_new_tokens = 2048  # Generate as long as wanted
-                else:
-                    raise ValueError(
-                        f"Invalid prompt injection location: {self.config.prompt_injection_location}"
-                    )
+                if "thought_suffix" in self.config.prefill_mode:
+                    assert (
+                        self.config.max_new_tokens == 2048
+                    ), "We need to allow longform generation to capture the full thought before prefilling!"
 
                 generated_texts, input_strs = batch_generate(
                     model,
                     tokenizer,
-                    batch_topics_text,
-                    user_message_template=template,
+                    seed_topics_text,
+                    message_segments=message_segments,
                     force_thought_skip=False,
-                    max_new_tokens=max_new_tokens,
+                    max_new_tokens=self.config.max_generated_tokens,
                     temperature=self.config.temperature,
-                    tokenization_template=self.config.tokenization_template,
                     num_samples_per_topic=self.config.num_samples_per_topic,
                     verbose=verbose,
                     cfg=self.config,
-                    **prefills,
                 )
 
                 # Post-generation prefilling
-                if self.config.prompt_injection_location == "thought_suffix":
+                if self.config.prefill_mode == "thought_suffix":
                     prefilled_texts = []
                     for gen in generated_texts:
                         if "</think>" in gen:
@@ -1044,7 +1254,9 @@ class Crawler:
                         temperature=self.config.temperature,
                     )
                     print(f"post suffixing: {generated_texts}")
-                print(f"\n## formatting...")
+
+                if verbose:
+                    print(f"\n## formatting...")
                 new_topics = self.extract_and_format(
                     model_zh_en=filter_models["model_zh_en"],
                     tokenizer_zh_en=filter_models["tokenizer_zh_en"],
@@ -1053,29 +1265,49 @@ class Crawler:
                     model_spacy_en=filter_models["model_spacy_en"],
                     input_strs=input_strs,
                     generations=generated_texts,
-                    parent_ids=parent_ids,
+                    parent_ids=topic_parent_ids,
+                    model=model,
+                    tokenizer=tokenizer,
                     verbose=verbose,
                 )
 
-                print(f"\n## deduplicating...")
-                # Use OpenAI embeddings if available, otherwise fall back to local embeddings
-                if filter_models.get("has_openai", False):
+                if verbose:
+                    print(f"\n## deduplicating...")
+                # Select deduplication method based on config
+                dedup_method = getattr(self.config, "deduplication_method", None)
+
+                if dedup_method == "exact":
+                    new_topics = self.deduplicate_exact(
+                        formatted_topics=new_topics,
+                        verbose=verbose,
+                    )
+                elif dedup_method == "openai":
                     new_topics = self.deduplicate_oai(
                         openai_client=filter_models["openai_client"],
                         openai_emb_model_name=filter_models["openai_emb_model_name"],
                         formatted_topics=new_topics,
                         verbose=verbose,
                     )
-                else:
+                elif dedup_method == "embedding":
                     new_topics = self.deduplicate_by_embedding_cossim(
                         tokenizer_emb=filter_models["tokenizer_emb"],
                         model_emb=filter_models["model_emb"],
                         formatted_topics=new_topics,
                         verbose=verbose,
                     )
+                else:
+                    # Default fallback: use exact deduplication
+                    new_topics = self.deduplicate_exact(
+                        formatted_topics=new_topics,
+                        verbose=verbose,
+                    )
+
+                if len(new_topics) == 0:
+                    continue
 
                 if self.config.do_filter_refusals:
-                    print(f"\n## filtering for refusal...")
+                    if verbose:
+                        print(f"\n## filtering for refusal...")
                     new_topics = self.check_refusal(
                         model=model,
                         tokenizer=tokenizer,
@@ -1100,11 +1332,12 @@ class Crawler:
                     new_topics_deduped=sum(1 for t in new_topics if t.is_head),
                     new_topics_refusals=sum(1 for t in new_topics if t.is_refusal),
                     current_clusters=self.queue.cluster_topics,
-                    total_unique_refusals=len(self.queue.head_refusal_topics)
+                    total_unique_refusals=len(self.queue.head_refusal_topics),
                 )
 
-            if crawl_step_idx % 2 == 0:
-                self.save(self.save_filename)
+            # Save
+            self.save(self.save_filename)
+
             if self.queue.num_head_topics > self.config.max_crawl_topics:
                 print(f"Topic queue has {len(self.queue.head_topics)} topics")
                 break
@@ -1138,9 +1371,7 @@ class Crawler:
         return crawler
 
 
-def get_run_name(
-    model_path: str, crawler_config: CrawlerConfig, prompt_injection_location: str
-):
+def get_run_name(model_path: str, crawler_config: CrawlerConfig, prefill_mode: str):
     model_name = model_path.split("/")[-1]
     run_name = (
         "crawler_log"
@@ -1149,6 +1380,6 @@ def get_run_name(
         f"_{crawler_config.num_samples_per_topic}samples"
         f"_{crawler_config.num_crawl_steps}crawls"
         f"_{crawler_config.do_filter_refusals}filter"
-        f"_{prompt_injection_location}prompt"
+        f"_{prefill_mode}prompt"
     )
     return run_name

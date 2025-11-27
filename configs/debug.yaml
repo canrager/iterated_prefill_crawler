@@ -13,5 +13,5 @@ prompt_languages:
 
 verbose: true
 
-prompt_injection_location: user_seeding # options
+prefill_mode: user_prefill_with_seed # options
 

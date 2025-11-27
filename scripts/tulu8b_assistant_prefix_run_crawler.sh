@@ -28,7 +28,7 @@ tmux new-session -d -s "$SESSION_NAME" \
     --cache_dir '/home/can/models/' \
     --model_path 'allenai/Llama-3.1-Tulu-3-8B-SFT' \
     --quantization_bits 'none' \
-    --prompt_injection_location 'assistant_prefix' \
+    --prefill_mode 'assistant_prefix' \
     2>&1 | tee '$LOG_FILE'"
     # --debug \
     # --not_use_openai_embeddings \

@@ -4,7 +4,7 @@ import json
 import pandas as pd
 import argparse
 
-from core.project_config import INPUT_DIR, INTERIM_DIR, RESULT_DIR
+from core.project_config import INPUT_DIR, INTERIM_DIR, RESULT_DIR, resolve_cache_dir
 from core.crawler import CrawlerStats
 from core.analysis_utils import (
     load_crawl, 
@@ -425,7 +425,9 @@ if __name__ == "__main__":
     check_unique_acronyms(selected_crawl_names)
 
     # Update variables from args
-    CACHE_DIR = args.cache_dir
+    # Resolve cache_dir relative to ROOT_DIR.parent and create if needed
+    cache_dir_path = resolve_cache_dir(args.cache_dir)
+    CACHE_DIR = str(cache_dir_path)
     debug = args.debug
     force_recompute = args.force_recompute
     DEVICE = args.device

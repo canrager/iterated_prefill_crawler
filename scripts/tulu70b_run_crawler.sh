@@ -25,7 +25,7 @@ nohup python exp/run_crawler.py \
     --cache_dir "/disk/u/models/" \
     --model_path "allenai/Llama-3.1-Tulu-3-70B-SFT" \
     --quantization_bits "none" \
-    --prompt_injection_location "assistant_prefix" \
+    --prefill_mode "assistant_prefix" \
     "$@" \
     > "$LOG_FILE" 2>&1 &
 

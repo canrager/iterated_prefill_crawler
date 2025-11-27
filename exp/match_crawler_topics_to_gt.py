@@ -15,8 +15,8 @@ from core.project_config import INTERIM_DIR
 
 def main():
     # Configuration
-    run_title = "tulu-3-1120-example"
-    crawler_log_filename = "crawler_log_20251120_112924_Llama-3.1-Tulu-3-8B-SFT_1samples_1000crawls_Truefilter_user_seedingprompt_vllm.json"
+    run_title = "tulu-3-1126-user_seeding"
+    crawler_log_filename = "crawler_log_20251126_142426_Llama-3.1-Tulu-3-8B-SFT_1samples_100crawls_Truefilter_assistant_prefill_with_seedprompt_vllm.json"
     crawler_log_path = os.path.join(INTERIM_DIR, crawler_log_filename)
 
     # Ground truth files to match against
@@ -26,7 +26,7 @@ def main():
     }
 
     # LLM judge to use for semantic matching
-    llm_judge_name = "gpt-4o"
+    llm_judge_name = "gpt-5-nano"
 
     # Run matching
     print(f"Matching crawler log: {crawler_log_filename}")

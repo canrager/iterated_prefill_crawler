@@ -184,6 +184,7 @@ def run_parallel_ranking_experiment(
     num_comparisons: int,
     batch_size: int = 32,
     use_balanced_pairs: bool = True,
+    model_name: str = None,
 ) -> Tuple[Dict[str, List[Tuple[str, float]]], Dict[str, Dict]]:
     """
     Run ranking experiment for multiple ranking systems in parallel.
@@ -235,6 +236,13 @@ def run_parallel_ranking_experiment(
     else:
         all_pairs = [random.sample(topics, 2) for _ in range(num_comparisons)]
 
+    # Create a minimal config object for batch_generate
+    @dataclass
+    class MinimalConfig:
+        model_path: str
+
+    cfg = MinimalConfig(model_path=model_name) if model_name else None
+
     progress_bar = tqdm(total=num_comparisons, desc="Running comparisons")
     for i in range(0, num_comparisons, batch_size):
         batch_pairs = all_pairs[i : i + batch_size]
@@ -253,6 +261,7 @@ def run_parallel_ranking_experiment(
             temperature=None,  # Greedy decoding
             skip_special_tokens=True,
             verbose=False,
+            cfg=cfg,
         )
 
         for (t1, t2), response in zip(batch_pairs, responses):
@@ -352,6 +361,7 @@ def setup_ranking_experiment(
         num_comparisons=ranking_config["num_comparisons"],
         batch_size=ranking_config["batch_size"],
         use_balanced_pairs=ranking_config["use_balanced_pairs"],
+        model_name=model_name,
     )
 
     # Format results

@@ -25,7 +25,7 @@ nohup python exp/run_crawler.py \
     --cache_dir "/disk/u/models/" \
     --model_path "meta-llama/Llama-3.3-70B-Instruct" \
     --quantization_bits 8 \
-    --prompt_injection_location "assistant_prefix" \
+    --prefill_mode "assistant_prefix" \
     "$@" \
     > "$LOG_FILE" 2>&1 &
 

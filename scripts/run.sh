@@ -2,7 +2,7 @@
 
 # Unified script to run crawler with Hydra configs in tmux
 # Usage: ./scripts/run.sh [--no-tmux] [hydra_args]
-# Example: ./scripts/run.sh model_path="allenai/Llama-3.1-Tulu-3-8B-SFT" prompt_injection_location=assistant_prefix
+# Example: ./scripts/run.sh model_path="allenai/Llama-3.1-Tulu-3-8B-SFT" prefill_mode=assistant_prefix
 # Example: ./scripts/run.sh --config-name=debug
 # Example: ./scripts/run.sh --no-tmux --config-name=debug  # Run directly in terminal without logging
 

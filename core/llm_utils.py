@@ -18,7 +18,7 @@ from transformers import (
     AutoModel,
 )
 from openai import OpenAI
-from core.project_config import INPUT_DIR, MODELS_DIR
+from core.project_config import INPUT_DIR, MODELS_DIR, resolve_cache_dir
 import spacy
 from vllm import LLM
 
@@ -226,14 +226,16 @@ def load_embedding_model(cache_dir: str, device: str):
 def load_filter_models(
     cache_dir: Optional[str] = None, device: str = "auto", load_openai: bool = True, load_spacy: bool = False
 ):
-    if cache_dir is None:
-        cache_dir = MODELS_DIR
+    # Resolve cache_dir relative to ROOT_DIR.parent and create if needed
+    cache_dir_path = resolve_cache_dir(cache_dir)
+    cache_dir_str = str(cache_dir_path)
+    
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    model_zh_en, tokenizer_zh_en = load_zh_en_translation_model(cache_dir, device)
-    model_en_zh, tokenizer_en_zh = load_en_zh_translation_model(cache_dir, device)
-    model_emb, tokenizer_emb = load_embedding_model(cache_dir, device)
+    model_zh_en, tokenizer_zh_en = load_zh_en_translation_model(cache_dir_str, device)
+    model_en_zh, tokenizer_en_zh = load_en_zh_translation_model(cache_dir_str, device)
+    model_emb, tokenizer_emb = load_embedding_model(cache_dir_str, device)
 
     # Load OpenAI client for embeddings
     has_openai = False

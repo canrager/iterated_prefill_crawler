@@ -26,7 +26,7 @@ nohup python exp/run_crawler.py \
     --cache_dir "/home/can/models/" \
     --model_path "mistralai/Mistral-Small-24B-Instruct-2501" \
     --quantization_bits "8" \
-    --prompt_injection_location "thought_prefix" \
+    --prefill_mode "thought_prefix" \
     "$@" \
     > "$LOG_FILE" 2>&1 &
 

@@ -23,7 +23,7 @@ echo "Log Dir: $LOG_FILE"
 nohup python exp/run_crawler.py \
     --model_path "grok-3" \
     --cache_dir "/Users/canrager/Desktop" \
-    --prompt_injection_location "thought_prefix" \
+    --prefill_mode "thought_prefix" \
     --device "cpu" \
     > "$LOG_FILE" 2>&1 &
 

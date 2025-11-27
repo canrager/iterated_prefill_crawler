@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 from tqdm import trange
 import time
 import asyncio
@@ -12,9 +12,21 @@ import anthropic
 import os
 from vllm import LLM, SamplingParams
 from vllm.inputs.data import TokensPrompt
+from dataclasses import dataclass
 
 from core.tokenization_utils import custom_decoding, custom_batch_encoding
 from core.project_config import INPUT_DIR
+
+
+@dataclass
+class MessageSegments:
+    user_prefix: str = ""
+    user_template: str = "{}"  # formatable!
+    user_suffix: str = ""
+
+    assistant_prefix: str = ""
+    thought_prefix: str = ""
+    thought_suffix: str = ""
 
 
 def single_generate_from_tokens(
@@ -93,7 +105,7 @@ def batch_complete_R1(
     texts: List[str],
     max_new_tokens: int = 150,
     temperature: float = 0.6,
-    cfg = None
+    cfg=None,
 ):
     """
     Complete the generated text using the R1 model.
@@ -209,7 +221,9 @@ def batch_generate_from_tokens_vllm(
     # Set up sampling parameters
     sampling_params = SamplingParams(
         temperature=temperature,
-        max_tokens=max_new_tokens if max_new_tokens is not None else max_generation_length,
+        max_tokens=(
+            max_new_tokens if max_new_tokens is not None else max_generation_length
+        ),
         skip_special_tokens=skip_special_tokens,
     )
 
@@ -280,10 +294,7 @@ def batch_generate(
     model,
     tokenizer,
     selected_topics: List[str],
-    user_message_template: str = "{}",
-    user_suffix: str = "",
-    assistant_prefill: str = "",
-    thinking_message: str = "",
+    message_segments: MessageSegments = MessageSegments(),
     force_thought_skip: bool = False,
     tokenization_template: str = "chat",
     num_samples_per_topic: int = 1,
@@ -292,47 +303,64 @@ def batch_generate(
     verbose: bool = False,
     skip_special_tokens: bool = False,
     remote: bool = False,
-    cfg = None
+    cfg=None,
 ) -> List[str]:
     """Given a list of seed topics, return a list of raw model generations,
     self.config.num_samples_per_topic determines number of generations for identical input topics.
     """
 
-    if verbose:
-        print(f" selected_topics: {selected_topics}")
-    generated_texts = []
+    # Populate templates topic
+    filled_user_prompts = [
+        " ".join(
+            filter(
+                None,
+                [
+                    message_segments.user_prefix,
+                    message_segments.user_template.format(t),
+                    message_segments.user_suffix,
+                ],
+            )
+        )
+        for t in selected_topics
+    ]
 
+    # Repeat for multiple generations per topic
+    filled_user_prompts *= num_samples_per_topic
+
+    # Run generation
+
+    # Handle external APIs
     if isinstance(model, str):
         assert any(
             keyword in model for keyword in ["claude", "grok"]
         ), f"Model {model} must be either a loaded hf model or 'claude' or 'grok'"
-        prompts = [user_message_template.format(topic) for topic in selected_topics]
-        if thinking_message != "":
-            system_prompt = "Organize your thoughts within XML tags using <think> </think> before responding."
-            assistant_prefill = f"{assistant_prefill}<think> {thinking_message}"
-        else:
-            system_prompt = ""
-        for prompt in prompts:
-            generation = query_llm_api(
-                model_name=model,
-                prompt=prompt,
-                assistant_prefill=assistant_prefill,
-                system_prompt=system_prompt,
-                verbose=True,
-                max_tokens=max_new_tokens,
-            )
-            generated_texts.append(generation)
+
+        system_prompt = ""
+        assistant_prefill = message_segments.assistant_prefix
+
+        if message_segments.thought_prefix != "":
+            system_prompt += "Organize your thoughts within XML tags using <think> </think> before responding."
+            assistant_prefill += f"\n<think> {message_segments.thought_prefix}"
+
+        # Use batched processing for all prompts at once
+        generated_texts = query_llm_api(
+            model_name=model,
+            prompt=filled_user_prompts,
+            assistant_prefill=assistant_prefill,
+            system_prompt=system_prompt,
+            verbose=True,
+            max_tokens=max_new_tokens,
+        )
         return generated_texts
 
     model_name = cfg.model_path
-    user_messages = [user_message_template.format(topic) for topic in selected_topics]
+
     input_ids, input_strs = custom_batch_encoding(
         model_name=model_name,
         tokenizer=tokenizer,
-        user_messages=user_messages,
-        user_suffix=user_suffix,
-        assistant_prefill=assistant_prefill,
-        thinking_message=thinking_message,
+        user_messages=filled_user_prompts,
+        assistant_prefill=message_segments.assistant_prefix,
+        thinking_message=message_segments.thought_prefix,
         force_thought_skip=force_thought_skip,
         template=tokenization_template,
     )
@@ -354,7 +382,7 @@ def batch_generate(
         if isinstance(model, LLM):
             # vLLM backend
             for _ in range(num_samples_per_topic):
-                batch_generations = batch_generate_from_tokens_vllm(
+                generated_texts = batch_generate_from_tokens_vllm(
                     model=model,
                     tokenizer=tokenizer,
                     input_ids_BL=input_ids,
@@ -363,11 +391,11 @@ def batch_generate(
                     temperature=temperature,
                     skip_special_tokens=skip_special_tokens,
                     verbose=False,
-                    cfg=cfg
+                    cfg=cfg,
                 )
-                generated_texts.extend(batch_generations)
         else:
             # Transformers backend
+            generated_texts = []
             for _ in range(num_samples_per_topic):
                 batch_generations = batch_generate_from_tokens(
                     model=model,
@@ -378,7 +406,7 @@ def batch_generate(
                     temperature=temperature,
                     skip_special_tokens=skip_special_tokens,
                     verbose=False,
-                    cfg=cfg
+                    cfg=cfg,
                 )
                 generated_texts.extend(batch_generations)
 
@@ -527,55 +555,69 @@ if __name__ == "__main__":
 
 def query_llm_api(
     model_name: str,
-    prompt: str,
+    prompt: Union[str, List[str]],
     assistant_prefill: str = "",
     system_prompt: str = "",
     verbose: bool = False,
     max_tokens: int = 10000,
-) -> str:
-    """Query LLM API with prompt caching enabled and retry logic"""
-    if "claude" in model_name:
-        temperature = 1
-        with open(os.path.join(INPUT_DIR, "ant.txt"), "r") as f:
-            api_key = f.read()
-        return query_anthropic(
-            prompt,
-            api_key,
-            model_name,
-            system_prompt,
-            assistant_prefill,
-            verbose,
-            max_tokens,
-            temperature,
+) -> Union[str, List[str]]:
+    """Query LLM API with prompt caching enabled and retry logic.
+
+    Args:
+        model_name: Name of the model to query
+        prompt: Single prompt string or list of prompts for batched processing
+        assistant_prefill: Assistant prefill text
+        system_prompt: System prompt text
+        verbose: Whether to print verbose output
+        max_tokens: Maximum number of tokens to generate
+
+    Returns:
+        Single response string if prompt is a string, list of responses if prompt is a list
+    """
+    # Handle single prompt - convert to list for uniform processing
+    is_single_prompt = isinstance(prompt, str)
+    prompts = [prompt] if is_single_prompt else prompt
+
+    # Run async batch processing
+    responses = asyncio.run(
+        _batch_query_llm_api(
+            model_name=model_name,
+            prompts=prompts,
+            assistant_prefill=assistant_prefill,
+            system_prompt=system_prompt,
+            verbose=verbose,
+            max_tokens=max_tokens,
         )
-    elif "gpt" in model_name:
-        assert assistant_prefill == "", (
-            "Assistant prefill is not supported for GPT. Argument assistant_prefill is: "
-            + assistant_prefill
+    )
+
+    # Return single response if single prompt was provided
+    return responses[0] if is_single_prompt else responses
+
+
+async def _batch_query_llm_api(
+    model_name: str,
+    prompts: List[str],
+    assistant_prefill: str = "",
+    system_prompt: str = "",
+    verbose: bool = False,
+    max_tokens: int = 10000,
+) -> List[str]:
+    """Internal async function to process batch of prompts concurrently"""
+    tasks = []
+    for prompt in prompts:
+        task = async_query_llm_api(
+            model_name=model_name,
+            prompt=prompt,
+            assistant_prefill=assistant_prefill,
+            system_prompt=system_prompt,
+            verbose=verbose,
+            max_tokens=max_tokens,
         )
-        temperature = 1
-        api_key = os.environ.get("OPENAI_API_KEY")
-        return query_openai(
-            prompt, api_key, model_name, system_prompt, verbose, max_tokens, temperature
-        )
-    elif "grok" in model_name:
-        temperature = 1
-        with open(os.path.join(INPUT_DIR, "grok.txt"), "r") as f:
-            api_key = f.read()
-        return query_grok(
-            prompt,
-            api_key,
-            model_name,
-            system_prompt,
-            assistant_prefill,  # Pass it along, query_grok will ignore if not supported
-            verbose,
-            max_tokens,
-            temperature,
-        )
-    else:
-        raise ValueError(
-            f"Model {model_name} not supported, must contain 'claude' or 'gpt'"
-        )
+        tasks.append(task)
+
+    # Execute all queries concurrently
+    responses = await asyncio.gather(*tasks)
+    return responses
 
 
 def query_anthropic(

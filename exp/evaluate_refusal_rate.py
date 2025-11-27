@@ -31,7 +31,7 @@ from core.crawler import Crawler
 from core.crawler_config import CrawlerConfig
 from core.generation_utils import batch_generate
 from core.llm_utils import load_model_and_tokenizer
-from core.project_config import MODELS_DIR
+from core.project_config import MODELS_DIR, resolve_cache_dir
 
 
 @dataclass
@@ -46,7 +46,7 @@ class BenchmarkEvalConfig:
     device: str = "cuda"
     max_new_tokens: int = 512
     verbose: bool = False
-    cache_dir: str = str(MODELS_DIR)
+    cache_dir: str = None  # Will be resolved to ROOT_DIR.parent / "models" if None
 
     # vLLM settings (vLLM handles batching internally)
     tensor_parallel_size: int = 1
@@ -97,11 +97,15 @@ class BenchmarkEvaluator:
         """Load model and tokenizer"""
         print(f"Loading model: {self.config.model_path}")
         print(f"Backend: {self.config.backend}")
-        print(f"Cache directory: {self.config.cache_dir}")
+        
+        # Resolve cache_dir relative to ROOT_DIR.parent and create if needed
+        cache_dir_path = resolve_cache_dir(self.config.cache_dir)
+        cache_dir_str = str(cache_dir_path)
+        print(f"Cache directory: {cache_dir_str}")
 
         self.model, self.tokenizer = load_model_and_tokenizer(
             model_name=self.config.model_path,
-            cache_dir=self.config.cache_dir,
+            cache_dir=cache_dir_str,
             device=self.config.device,
             backend=self.config.backend,
             vllm_tensor_parallel_size=self.config.tensor_parallel_size,
