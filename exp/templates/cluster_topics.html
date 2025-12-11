@@ -1,0 +1,1736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Topic Clustering - Drag & Drop</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .header-info {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .file-input-section {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .file-input-group {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .file-input-group input {
+            flex: 1;
+            padding: 0.75rem;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+
+        .file-input-group button {
+            padding: 0.75rem 1.5rem;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .file-input-group button:hover {
+            background: #2980b9;
+        }
+
+        .stats {
+            display: flex;
+            gap: 2rem;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .stat-value {
+            font-weight: bold;
+            color: #3498db;
+        }
+
+        .undo-button {
+            padding: 0.75rem 1.5rem;
+            background: #95a5a6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: background 0.2s;
+            margin-left: auto;
+        }
+
+        .undo-button:hover:not(:disabled) {
+            background: #7f8c8d;
+        }
+
+        .undo-button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .topics-section {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .clusters-section {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .section-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #eee;
+        }
+
+        .topics-grid {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .topic-navigation {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            margin-bottom: 1rem;
+        }
+
+        .topic-nav-button {
+            padding: 0.75rem 1.5rem;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .topic-nav-button:hover:not(:disabled) {
+            background: #2980b9;
+        }
+
+        .topic-nav-button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+
+        .topic-counter {
+            font-size: 1rem;
+            color: #7f8c8d;
+            font-weight: 500;
+        }
+
+        .suggestion-button {
+            padding: 0.75rem 1.5rem;
+            background: #9b59b6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .suggestion-button:hover:not(:disabled) {
+            background: #8e44ad;
+        }
+
+        .suggestion-button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .suggestion-loading {
+            display: inline-block;
+            margin-left: 0.5rem;
+        }
+
+        .suggestion-display {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .suggestion-display.show {
+            display: block;
+        }
+
+        .suggestion-text {
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #856404;
+        }
+
+        .suggestion-cluster-name {
+            font-weight: 600;
+            color: #9b59b6;
+        }
+
+        .assign-suggestion-button {
+            padding: 0.5rem 1rem;
+            background: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .assign-suggestion-button:hover {
+            background: #229954;
+        }
+
+        .topic-card {
+            background: #fff;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 1.5rem;
+            cursor: grab;
+            transition: all 0.2s;
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+        }
+
+        .topic-card:hover {
+            border-color: #3498db;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+
+        .topic-card.dragging {
+            opacity: 0.5;
+            cursor: grabbing;
+        }
+
+        .topic-card.assigned {
+            border-color: #27ae60;
+            background: #f8fff9;
+        }
+
+        .topic-id {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background: #ecf0f1;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .topic-card.assigned .topic-id {
+            background: #27ae60;
+            color: white;
+        }
+
+        .topic-english {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+        }
+
+        .topic-raw {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+            margin-bottom: 0.5rem;
+        }
+
+        .topic-section {
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid #eee;
+        }
+
+        .topic-section-header {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #7f8c8d;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: color 0.2s;
+        }
+
+        .topic-section-header:hover {
+            color: #3498db;
+        }
+
+        .topic-section-expand-icon {
+            font-size: 0.75rem;
+            transition: transform 0.2s;
+            display: inline-block;
+        }
+
+        .topic-section.expanded .topic-section-expand-icon {
+            transform: rotate(90deg);
+        }
+
+        .topic-section-content {
+            display: none;
+            margin-top: 0.5rem;
+        }
+
+        .topic-section.expanded .topic-section-content {
+            display: block;
+        }
+
+        .topic-response,
+        .topic-query {
+            font-size: 0.8rem;
+            color: #555;
+            padding: 0.75rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .topic-response-number,
+        .topic-query-number {
+            font-weight: 600;
+            color: #3498db;
+            margin-right: 0.5rem;
+        }
+
+        .cluster {
+            margin-bottom: 1rem;
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 1rem;
+            transition: all 0.2s;
+        }
+
+        .cluster.drag-over {
+            border-color: #3498db;
+            background: #ebf5fb;
+        }
+
+        .cluster.suggested {
+            border-color: #ffc107;
+            border-width: 3px;
+            background: #fff3cd;
+            box-shadow: 0 0 10px rgba(255, 193, 7, 0.5);
+            animation: pulse-suggestion 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-suggestion {
+            0%, 100% {
+                box-shadow: 0 0 10px rgba(255, 193, 7, 0.5);
+            }
+            50% {
+                box-shadow: 0 0 20px rgba(255, 193, 7, 0.8);
+            }
+        }
+
+        .cluster-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .cluster-header:hover {
+            background: #f8f9fa;
+            margin: -1rem;
+            padding: 1rem;
+            border-radius: 8px;
+        }
+
+        .cluster-expand-icon {
+            margin-right: 0.5rem;
+            font-size: 0.9rem;
+            transition: transform 0.2s;
+            display: inline-block;
+        }
+
+        .cluster.expanded .cluster-expand-icon {
+            transform: rotate(90deg);
+        }
+
+        .cluster-name {
+            font-weight: 600;
+            font-size: 1.4rem;
+            color: #2c3e50;
+            flex: 1;
+            margin-right: 0.5rem;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .cluster-header .cluster-name {
+            cursor: pointer;
+        }
+
+        .cluster-name:hover:not(.editing) {
+            color: #3498db;
+            text-decoration: underline;
+        }
+
+        .cluster-name.editing {
+            cursor: text;
+        }
+
+        .cluster-name.editing {
+            border: 2px solid #3498db;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            background: white;
+        }
+
+        .cluster-name input {
+            width: 100%;
+            border: none;
+            font-size: 1.1rem;
+            font-weight: 600;
+            outline: none;
+        }
+
+        .cluster-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn-icon {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.25rem;
+            color: #7f8c8d;
+            font-size: 1rem;
+            transition: color 0.2s;
+        }
+
+        .btn-icon:hover {
+            color: #e74c3c;
+        }
+
+        .btn-icon.edit:hover {
+            color: #3498db;
+        }
+
+        .cluster-count {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+            margin-left: 1.5rem;
+        }
+
+        .cluster-topics {
+            display: none;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid #eee;
+        }
+
+        .cluster.expanded .cluster-topics {
+            display: flex;
+        }
+
+        .cluster-topic {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 0.75rem;
+            font-size: 0.9rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .cluster-topic-text {
+            flex: 1;
+        }
+
+        .cluster-topic-remove {
+            background: none;
+            border: none;
+            color: #e74c3c;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .cluster-topic-remove:hover {
+            background: #fee;
+        }
+
+        .new-cluster {
+            border: 2px dashed #95a5a6;
+            background: #f8f9fa;
+            text-align: center;
+            padding: 2rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-radius: 8px;
+        }
+
+        .new-cluster:hover {
+            border-color: #3498db;
+            background: #ebf5fb;
+        }
+
+        .new-cluster-input {
+            display: none;
+        }
+
+        .new-cluster-input.active {
+            display: block;
+        }
+
+        .new-cluster-input input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #3498db;
+            border-radius: 4px;
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .new-cluster-input button {
+            padding: 0.5rem 1rem;
+            background: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 0.5rem;
+        }
+
+        .new-cluster-input button.cancel {
+            background: #95a5a6;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #7f8c8d;
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #7f8c8d;
+        }
+
+        .error {
+            background: #fee;
+            border: 2px solid #e74c3c;
+            color: #c0392b;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        .success-message {
+            background: #d4edda;
+            border: 2px solid #27ae60;
+            color: #155724;
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        .clusters-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Topic Clustering - Drag & Drop Interface</h1>
+        <div class="header-info">Manually cluster head refusal topics by dragging them into clusters</div>
+    </div>
+
+    <div class="container">
+        <div class="file-input-section">
+            <div class="file-input-group">
+                <input type="text" id="filePath" placeholder="Path to crawler log file (e.g., artifacts/baseline_eval/crawler_log_*.json)">
+                <button onclick="loadFile()">Load File</button>
+            </div>
+            <div id="stats" class="stats" style="display: none;">
+                <div class="stat">
+                    <span>Total Topics:</span>
+                    <span class="stat-value" id="totalTopics">0</span>
+                </div>
+                <div class="stat">
+                    <span>Unlabeled:</span>
+                    <span class="stat-value" id="unlabeledCount">0</span>
+                </div>
+                <div class="stat">
+                    <span>Labeled:</span>
+                    <span class="stat-value" id="labeledCount">0</span>
+                </div>
+                <div class="stat">
+                    <span>Clusters:</span>
+                    <span class="stat-value" id="clusterCount">0</span>
+                </div>
+                <button class="undo-button" id="undoButton" onclick="undoLastAction()" disabled>↶ Undo</button>
+            </div>
+        </div>
+
+        <div id="successMessage" class="success-message"></div>
+        <div id="errorMessage" class="error" style="display: none;"></div>
+
+        <div id="mainContent" class="main-content" style="display: none;">
+            <div class="topics-section">
+                <h2 class="section-title">Current Topic</h2>
+                <div id="topicsGrid" class="topics-grid">
+                    <div class="topic-navigation">
+                        <button class="topic-nav-button" id="prevTopic" onclick="navigateTopic(-1)">← Previous</button>
+                        <div class="topic-counter" id="topicCounter">Topic 1 of 0</div>
+                        <button class="topic-nav-button" id="nextTopic" onclick="navigateTopic(1)">Next →</button>
+                        <button class="suggestion-button" id="suggestionButton" onclick="getSuggestion()">🤖 Get Suggestion</button>
+                    </div>
+                    <div id="currentTopicCard"></div>
+                    <div id="suggestionDisplay" class="suggestion-display">
+                        <div class="suggestion-text">
+                            Suggested cluster: <span class="suggestion-cluster-name" id="suggestedClusterName"></span>
+                        </div>
+                        <button class="assign-suggestion-button" id="assignSuggestionButton" onclick="assignSuggestedCluster()">Assign to Suggested Cluster</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="clusters-section">
+                <h2 class="section-title">Clusters</h2>
+                <div id="clustersContainer" class="clusters-grid"></div>
+                <div class="new-cluster" onclick="showNewClusterInput()">
+                    <div id="newClusterPlaceholder">+ Create New Cluster</div>
+                    <div id="newClusterInput" class="new-cluster-input">
+                        <input type="text" id="newClusterName" placeholder="Cluster name" onkeypress="if(event.key==='Enter') createCluster()">
+                        <button onclick="createCluster()">Create</button>
+                        <button class="cancel" onclick="hideNewClusterInput()">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="loadingMessage" class="loading" style="display: none;">
+            Loading...
+        </div>
+    </div>
+
+    <script>
+        let topics = [];
+        let clusters = {};
+        let labeledTopicIds = new Set();
+        let draggedTopic = null;
+        let editingClusterName = null;
+        let currentTopicIndex = 0;
+        let actionHistory = []; // Stack of actions for undo
+        let suggestedClusterName = null; // Currently suggested cluster
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        function showSuccess(message) {
+            const successDiv = document.getElementById('successMessage');
+            successDiv.textContent = message;
+            successDiv.classList.add('show');
+            setTimeout(() => {
+                successDiv.classList.remove('show');
+            }, 3000);
+        }
+
+        async function loadFile() {
+            const filePath = document.getElementById('filePath').value.trim();
+            if (!filePath) {
+                showError('Please enter a file path');
+                return;
+            }
+
+            document.getElementById('loadingMessage').style.display = 'block';
+            document.getElementById('mainContent').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/init', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ file_path: filePath }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to load file');
+                }
+
+                topics = data.topics;
+                clusters = data.clusters || {};
+                labeledTopicIds = new Set();
+                currentTopicIndex = 0; // Reset to first unlabeled topic
+                actionHistory = []; // Reset history when loading new file
+                updateUndoButton();
+
+                // Build labeled topic IDs set
+                for (const clusterTopics of Object.values(clusters)) {
+                    for (const topic of clusterTopics) {
+                        if (topic.id !== undefined && topic.id !== null) {
+                            labeledTopicIds.add(topic.id);
+                        }
+                    }
+                }
+
+                updateStats(data);
+                renderTopics();
+                renderClusters();
+                document.getElementById('mainContent').style.display = 'flex';
+                showSuccess(`Loaded ${data.total_topics} topics`);
+
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                document.getElementById('loadingMessage').style.display = 'none';
+            }
+        }
+
+        function updateStats(data) {
+            document.getElementById('totalTopics').textContent = data.total_topics || topics.length;
+            document.getElementById('unlabeledCount').textContent = data.unlabeled_count || 0;
+            document.getElementById('labeledCount').textContent = data.labeled_count || 0;
+            document.getElementById('clusterCount').textContent = Object.keys(clusters).length;
+            document.getElementById('stats').style.display = 'flex';
+        }
+
+        function updateUndoButton() {
+            const undoBtn = document.getElementById('undoButton');
+            if (undoBtn) {
+                undoBtn.disabled = actionHistory.length === 0;
+            }
+        }
+
+        function pushToHistory(action) {
+            actionHistory.push(action);
+            updateUndoButton();
+        }
+
+        function getUnlabeledTopics() {
+            return topics.filter(topic => !labeledTopicIds.has(topic.id));
+        }
+
+        function renderTopics() {
+            const unlabeledTopics = getUnlabeledTopics();
+            const cardContainer = document.getElementById('currentTopicCard');
+            const navContainer = document.querySelector('.topic-navigation');
+            const prevBtn = document.getElementById('prevTopic');
+            const nextBtn = document.getElementById('nextTopic');
+            const counter = document.getElementById('topicCounter');
+
+            if (unlabeledTopics.length === 0) {
+                cardContainer.innerHTML = '<div class="empty-state">All topics have been labeled!</div>';
+                if (navContainer) navContainer.style.display = 'none';
+                return;
+            }
+
+            // Ensure currentTopicIndex is within bounds
+            if (currentTopicIndex >= unlabeledTopics.length) {
+                currentTopicIndex = unlabeledTopics.length - 1;
+            }
+            if (currentTopicIndex < 0) {
+                currentTopicIndex = 0;
+            }
+
+            const topic = unlabeledTopics[currentTopicIndex];
+            if (!topic) {
+                cardContainer.innerHTML = '<div class="empty-state">No topic available</div>';
+                return;
+            }
+
+            // Update navigation buttons
+            if (prevBtn) prevBtn.disabled = currentTopicIndex === 0;
+            if (nextBtn) nextBtn.disabled = currentTopicIndex === unlabeledTopics.length - 1;
+
+            // Update counter
+            if (counter) {
+                counter.textContent = `Topic ${currentTopicIndex + 1} of ${unlabeledTopics.length}`;
+            }
+
+            // Update suggestion button state
+            const suggestionBtn = document.getElementById('suggestionButton');
+            if (suggestionBtn) {
+                suggestionBtn.disabled = Object.keys(clusters).length === 0;
+            }
+
+            // Create and display the current topic card
+            const card = document.createElement('div');
+            card.className = 'topic-card';
+            card.draggable = true;
+            card.dataset.topicId = topic.id;
+
+            const english = topic.english || topic.raw || topic.summary || 'N/A';
+            const raw = topic.raw && topic.raw !== english ? topic.raw : '';
+            const queries = topic.refusal_check_queries || [];
+            const responses = topic.refusal_check_responses || [];
+
+            let queriesHtml = '';
+            if (queries.length > 0) {
+                queriesHtml = `
+                    <div class="topic-section">
+                        <div class="topic-section-header" onclick="toggleSection(this)">
+                            <span class="topic-section-expand-icon">▶</span>
+                            <span>Refusal Queries (${queries.length})</span>
+                        </div>
+                        <div class="topic-section-content">
+                            ${queries.map((q, idx) => `
+                                <div class="topic-query">
+                                    <span class="topic-query-number">${idx + 1}.</span>
+                                    ${escapeHtml(String(q))}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            let responsesHtml = '';
+            if (responses.length > 0) {
+                responsesHtml = `
+                    <div class="topic-section">
+                        <div class="topic-section-header" onclick="toggleSection(this)">
+                            <span class="topic-section-expand-icon">▶</span>
+                            <span>Refusal Responses (${responses.length})</span>
+                        </div>
+                        <div class="topic-section-content">
+                            ${responses.map((r, idx) => `
+                                <div class="topic-response">
+                                    <span class="topic-response-number">${idx + 1}.</span>
+                                    ${escapeHtml(String(r))}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            card.innerHTML = `
+                <div class="topic-id">ID: ${topic.id !== undefined ? topic.id : 'N/A'}</div>
+                <div class="topic-english">${escapeHtml(english)}</div>
+                ${raw ? `<div class="topic-raw">${escapeHtml(raw)}</div>` : ''}
+                ${queriesHtml}
+                ${responsesHtml}
+            `;
+
+            card.addEventListener('dragstart', (e) => {
+                draggedTopic = topic;
+                card.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+            });
+
+            card.addEventListener('dragend', () => {
+                card.classList.remove('dragging');
+                draggedTopic = null;
+            });
+
+            cardContainer.innerHTML = '';
+            cardContainer.appendChild(card);
+        }
+
+        function navigateTopic(direction) {
+            const unlabeledTopics = getUnlabeledTopics();
+            if (unlabeledTopics.length === 0) return;
+
+            currentTopicIndex += direction;
+            
+            // Clamp to valid range
+            if (currentTopicIndex < 0) {
+                currentTopicIndex = 0;
+            } else if (currentTopicIndex >= unlabeledTopics.length) {
+                currentTopicIndex = unlabeledTopics.length - 1;
+            }
+
+            renderTopics();
+        }
+
+        function renderClusters() {
+            const container = document.getElementById('clustersContainer');
+            container.innerHTML = '';
+
+            Object.entries(clusters).forEach(([clusterName, clusterTopics]) => {
+                const clusterDiv = createClusterElement(clusterName, clusterTopics);
+                // Add suggested class if this is the suggested cluster
+                if (suggestedClusterName === clusterName) {
+                    clusterDiv.classList.add('suggested');
+                }
+                container.appendChild(clusterDiv);
+            });
+
+            // Update suggestion button state
+            const suggestionBtn = document.getElementById('suggestionButton');
+            if (suggestionBtn) {
+                suggestionBtn.disabled = Object.keys(clusters).length === 0;
+            }
+        }
+
+        function createClusterElement(clusterName, clusterTopics) {
+            const clusterDiv = document.createElement('div');
+            clusterDiv.className = 'cluster';
+            clusterDiv.dataset.clusterName = clusterName;
+
+            const expandIcon = document.createElement('span');
+            expandIcon.className = 'cluster-expand-icon';
+            expandIcon.textContent = '▶';
+
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'cluster-name';
+            nameDiv.textContent = clusterName;
+            nameDiv.dataset.clusterName = clusterName;
+
+            // Single click: assign current topic to cluster
+            nameDiv.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Only assign if not editing
+                if (!nameDiv.classList.contains('editing')) {
+                    const unlabeledTopics = getUnlabeledTopics();
+                    if (unlabeledTopics.length > 0 && currentTopicIndex < unlabeledTopics.length) {
+                        const currentTopic = unlabeledTopics[currentTopicIndex];
+                        if (currentTopic) {
+                            assignToCluster(currentTopic.id, clusterName);
+                        }
+                    }
+                }
+            });
+
+            // Double click: rename cluster
+            nameDiv.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                startEditingClusterName(clusterName, nameDiv);
+            });
+
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'cluster-actions';
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'btn-icon edit';
+            editBtn.innerHTML = '✏️';
+            editBtn.title = 'Rename cluster';
+            editBtn.onclick = (e) => {
+                e.stopPropagation();
+                startEditingClusterName(clusterName, nameDiv);
+            };
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'btn-icon';
+            deleteBtn.innerHTML = '🗑️';
+            deleteBtn.title = 'Delete cluster';
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (confirm(`Delete cluster "${clusterName}"?`)) {
+                    deleteCluster(clusterName);
+                }
+            };
+
+            actionsDiv.appendChild(editBtn);
+            actionsDiv.appendChild(deleteBtn);
+
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'cluster-header';
+            headerDiv.appendChild(expandIcon);
+            headerDiv.appendChild(nameDiv);
+            headerDiv.appendChild(actionsDiv);
+
+            // Toggle expand/collapse on header click (but not on cluster name click)
+            headerDiv.addEventListener('click', (e) => {
+                // Don't toggle if clicking on action buttons, cluster name, or editing name
+                if (e.target === deleteBtn || e.target === editBtn || e.target === nameDiv || e.target.closest('.cluster-name') || e.target.closest('.cluster-name.editing') || e.target.closest('.btn-icon')) {
+                    return;
+                }
+                clusterDiv.classList.toggle('expanded');
+            });
+
+            const countDiv = document.createElement('div');
+            countDiv.className = 'cluster-count';
+            countDiv.textContent = `${clusterTopics.length} topic${clusterTopics.length !== 1 ? 's' : ''}`;
+
+            const topicsDiv = document.createElement('div');
+            topicsDiv.className = 'cluster-topics';
+
+            clusterTopics.forEach(topic => {
+                const topicDiv = document.createElement('div');
+                topicDiv.className = 'cluster-topic';
+                const english = topic.english || topic.raw || topic.summary || 'N/A';
+                topicDiv.innerHTML = `
+                    <div class="cluster-topic-text">${escapeHtml(english.substring(0, 60))}${english.length > 60 ? '...' : ''}</div>
+                    <button class="cluster-topic-remove">×</button>
+                `;
+                const removeBtn = topicDiv.querySelector('.cluster-topic-remove');
+                removeBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    removeFromCluster(topic.id, clusterName);
+                };
+                topicsDiv.appendChild(topicDiv);
+            });
+
+            clusterDiv.appendChild(headerDiv);
+            clusterDiv.appendChild(countDiv);
+            clusterDiv.appendChild(topicsDiv);
+
+            // Drag and drop handlers
+            clusterDiv.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                clusterDiv.classList.add('drag-over');
+            });
+
+            clusterDiv.addEventListener('dragleave', () => {
+                clusterDiv.classList.remove('drag-over');
+            });
+
+            clusterDiv.addEventListener('drop', (e) => {
+                e.preventDefault();
+                clusterDiv.classList.remove('drag-over');
+                if (draggedTopic) {
+                    assignToCluster(draggedTopic.id, clusterName);
+                }
+            });
+
+            return clusterDiv;
+        }
+
+        function startEditingClusterName(oldName, nameDiv) {
+            if (editingClusterName) return;
+
+            editingClusterName = oldName;
+            
+            // Find the cluster div and expand it if collapsed
+            const clusterDiv = nameDiv.closest('.cluster');
+            if (clusterDiv && !clusterDiv.classList.contains('expanded')) {
+                clusterDiv.classList.add('expanded');
+            }
+            
+            nameDiv.classList.add('editing');
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = oldName;
+            nameDiv.innerHTML = '';
+            nameDiv.appendChild(input);
+            input.focus();
+            input.select();
+
+            const finishEditing = async () => {
+                const newName = input.value.trim();
+                if (newName && newName !== oldName) {
+                    await renameCluster(oldName, newName);
+                } else {
+                    nameDiv.textContent = oldName;
+                    nameDiv.classList.remove('editing');
+                }
+                editingClusterName = null;
+            };
+
+            const cancelEditing = () => {
+                nameDiv.textContent = oldName;
+                nameDiv.classList.remove('editing');
+                editingClusterName = null;
+            };
+
+            input.addEventListener('blur', finishEditing);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    finishEditing();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelEditing();
+                }
+            });
+        }
+
+        async function assignToCluster(topicId, clusterName) {
+            try {
+                // Find previous cluster if any
+                let previousCluster = null;
+                for (const [name, topics] of Object.entries(clusters)) {
+                    if (topics.some(t => get_topic_id(t) === topicId)) {
+                        previousCluster = name;
+                        break;
+                    }
+                }
+
+                const response = await fetch('/api/clusters', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        action: 'assign',
+                        topic_id: topicId,
+                        cluster_name: clusterName,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to assign topic');
+                }
+
+                clusters = data.clusters;
+                labeledTopicIds.add(topicId);
+                
+                // Clear suggestion if topic was assigned
+                if (suggestedClusterName) {
+                    suggestedClusterName = null;
+                    document.getElementById('suggestionDisplay').classList.remove('show');
+                }
+                
+                // Save to history
+                pushToHistory({
+                    type: 'assign',
+                    topicId: topicId,
+                    clusterName: clusterName,
+                    previousCluster: previousCluster
+                });
+                
+                // Auto-advance to next topic if available
+                const unlabeledBefore = getUnlabeledTopics().length;
+                const unlabeledAfter = topics.filter(t => !labeledTopicIds.has(t.id)).length;
+                
+                // If we're at the end and there are more topics, stay at current index (which will be adjusted)
+                // Otherwise, if we removed the current topic, we might need to adjust index
+                const unlabeledTopics = getUnlabeledTopics();
+                if (currentTopicIndex >= unlabeledTopics.length && unlabeledTopics.length > 0) {
+                    currentTopicIndex = unlabeledTopics.length - 1;
+                }
+                
+                renderTopics();
+                renderClusters();
+                updateStats({
+                    total_topics: topics.length,
+                    unlabeled_count: topics.length - labeledTopicIds.size,
+                    labeled_count: labeledTopicIds.size,
+                });
+                showSuccess(`Assigned topic to "${clusterName}"`);
+
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        async function removeFromCluster(topicId, clusterName) {
+            try {
+                const response = await fetch('/api/clusters', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        action: 'remove',
+                        topic_id: topicId,
+                        cluster_name: clusterName,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to remove topic');
+                }
+
+                clusters = data.clusters;
+                labeledTopicIds.delete(topicId);
+                
+                // Save to history
+                pushToHistory({
+                    type: 'remove',
+                    topicId: topicId,
+                    clusterName: clusterName
+                });
+                
+                // Adjust index if needed - if we unlabeled a topic, it might be before current index
+                const unlabeledTopics = getUnlabeledTopics();
+                if (currentTopicIndex >= unlabeledTopics.length && unlabeledTopics.length > 0) {
+                    currentTopicIndex = unlabeledTopics.length - 1;
+                }
+                
+                renderTopics();
+                renderClusters();
+                updateStats({
+                    total_topics: topics.length,
+                    unlabeled_count: topics.length - labeledTopicIds.size,
+                    labeled_count: labeledTopicIds.size,
+                });
+                showSuccess(`Removed topic from "${clusterName}"`);
+
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        function showNewClusterInput() {
+            document.getElementById('newClusterPlaceholder').style.display = 'none';
+            document.getElementById('newClusterInput').classList.add('active');
+            document.getElementById('newClusterName').focus();
+        }
+
+        function hideNewClusterInput() {
+            document.getElementById('newClusterPlaceholder').style.display = 'block';
+            document.getElementById('newClusterInput').classList.remove('active');
+            document.getElementById('newClusterName').value = '';
+        }
+
+        async function createCluster() {
+            const clusterName = document.getElementById('newClusterName').value.trim();
+            if (!clusterName) {
+                showError('Please enter a cluster name');
+                return;
+            }
+
+            if (clusters[clusterName]) {
+                showError('Cluster name already exists');
+                return;
+            }
+
+            // If there's a dragged topic, assign it to the new cluster
+            if (draggedTopic) {
+                await assignToCluster(draggedTopic.id, clusterName);
+            } else {
+                // Create empty cluster
+                clusters[clusterName] = [];
+                
+                // Save to history
+                pushToHistory({
+                    type: 'create',
+                    clusterName: clusterName
+                });
+                
+                renderClusters();
+                updateStats({
+                    total_topics: topics.length,
+                    unlabeled_count: topics.length - labeledTopicIds.size,
+                    labeled_count: labeledTopicIds.size,
+                });
+            }
+
+            hideNewClusterInput();
+            showSuccess(`Created cluster "${clusterName}"`);
+        }
+
+        async function renameCluster(oldName, newName) {
+            try {
+                const response = await fetch('/api/clusters', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        action: 'rename',
+                        old_name: oldName,
+                        new_name: newName,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to rename cluster');
+                }
+
+                clusters = data.clusters;
+                
+                // Save to history
+                pushToHistory({
+                    type: 'rename',
+                    oldName: oldName,
+                    newName: newName
+                });
+                
+                renderClusters();
+                showSuccess(`Renamed cluster to "${newName}"`);
+
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        async function deleteCluster(clusterName) {
+            try {
+                // Save topics before deletion for undo
+                const removedTopics = [...(clusters[clusterName] || [])];
+                
+                const response = await fetch('/api/clusters', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        action: 'delete',
+                        cluster_name: clusterName,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to delete cluster');
+                }
+
+                // Remove topic IDs from labeledTopicIds before deleting cluster
+                removedTopics.forEach(topic => {
+                    if (topic.id !== undefined && topic.id !== null) {
+                        labeledTopicIds.delete(topic.id);
+                    }
+                });
+
+                clusters = data.clusters;
+                
+                // Save to history
+                pushToHistory({
+                    type: 'delete',
+                    clusterName: clusterName,
+                    topics: removedTopics
+                });
+
+                renderTopics();
+                renderClusters();
+                updateStats({
+                    total_topics: topics.length,
+                    unlabeled_count: topics.length - labeledTopicIds.size,
+                    labeled_count: labeledTopicIds.size,
+                });
+                showSuccess(`Deleted cluster "${clusterName}"`);
+
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function toggleSection(header) {
+            const section = header.closest('.topic-section');
+            if (section) {
+                section.classList.toggle('expanded');
+            }
+        }
+
+        function get_topic_id(topic) {
+            return topic.id;
+        }
+
+        async function undoLastAction() {
+            if (actionHistory.length === 0) {
+                return;
+            }
+
+            const lastAction = actionHistory.pop();
+            updateUndoButton();
+
+            try {
+                switch (lastAction.type) {
+                    case 'assign':
+                        // Undo: remove from cluster (or move back to previous cluster)
+                        if (lastAction.previousCluster) {
+                            // Move back to previous cluster
+                            await assignToClusterWithoutHistory(lastAction.topicId, lastAction.previousCluster);
+                        } else {
+                            // Remove from cluster
+                            await removeFromClusterWithoutHistory(lastAction.topicId, lastAction.clusterName);
+                        }
+                        showSuccess('Undone: Assignment reversed');
+                        break;
+
+                    case 'remove':
+                        // Undo: add back to cluster
+                        await assignToClusterWithoutHistory(lastAction.topicId, lastAction.clusterName);
+                        showSuccess('Undone: Removal reversed');
+                        break;
+
+                    case 'create':
+                        // Undo: delete cluster
+                        await deleteClusterWithoutHistory(lastAction.clusterName);
+                        showSuccess('Undone: Cluster creation reversed');
+                        break;
+
+                    case 'delete':
+                        // Undo: recreate cluster with its topics
+                        const topicsToRestore = lastAction.topics || [];
+                        
+                        // Re-add topic IDs to labeledTopicIds
+                        topicsToRestore.forEach(topic => {
+                            if (topic.id !== undefined && topic.id !== null) {
+                                labeledTopicIds.add(topic.id);
+                            }
+                        });
+                        
+                        // Recreate cluster by assigning topics back
+                        // If cluster has topics, assign them to recreate it
+                        if (topicsToRestore.length > 0) {
+                            // Assign first topic to recreate cluster
+                            await assignToClusterWithoutHistory(topicsToRestore[0].id, lastAction.clusterName);
+                            // Then assign remaining topics
+                            for (let i = 1; i < topicsToRestore.length; i++) {
+                                await assignToClusterWithoutHistory(topicsToRestore[i].id, lastAction.clusterName);
+                            }
+                        } else {
+                            // Empty cluster - just recreate locally
+                            clusters[lastAction.clusterName] = [];
+                            renderClusters();
+                        }
+                        
+                        renderTopics();
+                        updateStats({
+                            total_topics: topics.length,
+                            unlabeled_count: topics.length - labeledTopicIds.size,
+                            labeled_count: labeledTopicIds.size,
+                        });
+                        showSuccess('Undone: Cluster deletion reversed');
+                        break;
+
+                    case 'rename':
+                        // Undo: rename back
+                        await renameClusterWithoutHistory(lastAction.newName, lastAction.oldName);
+                        showSuccess('Undone: Rename reversed');
+                        break;
+                }
+            } catch (error) {
+                showError(`Failed to undo: ${error.message}`);
+                // Re-add action to history if undo failed
+                actionHistory.push(lastAction);
+                updateUndoButton();
+            }
+        }
+
+        async function assignToClusterWithoutHistory(topicId, clusterName) {
+            const response = await fetch('/api/clusters', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: 'assign',
+                    topic_id: topicId,
+                    cluster_name: clusterName,
+                }),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to assign topic');
+            }
+
+            clusters = data.clusters;
+            labeledTopicIds.add(topicId);
+            
+            const unlabeledTopics = getUnlabeledTopics();
+            if (currentTopicIndex >= unlabeledTopics.length && unlabeledTopics.length > 0) {
+                currentTopicIndex = unlabeledTopics.length - 1;
+            }
+            
+            renderTopics();
+            renderClusters();
+            updateStats({
+                total_topics: topics.length,
+                unlabeled_count: topics.length - labeledTopicIds.size,
+                labeled_count: labeledTopicIds.size,
+            });
+        }
+
+        async function removeFromClusterWithoutHistory(topicId, clusterName) {
+            const response = await fetch('/api/clusters', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: 'remove',
+                    topic_id: topicId,
+                    cluster_name: clusterName,
+                }),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to remove topic');
+            }
+
+            clusters = data.clusters;
+            labeledTopicIds.delete(topicId);
+            
+            const unlabeledTopics = getUnlabeledTopics();
+            if (currentTopicIndex >= unlabeledTopics.length && unlabeledTopics.length > 0) {
+                currentTopicIndex = unlabeledTopics.length - 1;
+            }
+            
+            renderTopics();
+            renderClusters();
+            updateStats({
+                total_topics: topics.length,
+                unlabeled_count: topics.length - labeledTopicIds.size,
+                labeled_count: labeledTopicIds.size,
+            });
+        }
+
+        async function deleteClusterWithoutHistory(clusterName) {
+            const response = await fetch('/api/clusters', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: 'delete',
+                    cluster_name: clusterName,
+                }),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to delete cluster');
+            }
+
+            const removedTopics = clusters[clusterName] || [];
+            removedTopics.forEach(topic => {
+                if (topic.id !== undefined && topic.id !== null) {
+                    labeledTopicIds.delete(topic.id);
+                }
+            });
+
+            clusters = data.clusters;
+            renderTopics();
+            renderClusters();
+            updateStats({
+                total_topics: topics.length,
+                unlabeled_count: topics.length - labeledTopicIds.size,
+                labeled_count: labeledTopicIds.size,
+            });
+        }
+
+        async function renameClusterWithoutHistory(oldName, newName) {
+            const response = await fetch('/api/clusters', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: 'rename',
+                    old_name: oldName,
+                    new_name: newName,
+                }),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to rename cluster');
+            }
+
+            clusters = data.clusters;
+            renderClusters();
+        }
+
+
+        // Allow Enter key to load file
+        document.getElementById('filePath').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                loadFile();
+            }
+        });
+
+        // Keyboard shortcut for undo (Ctrl+Z or Cmd+Z)
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey && !e.altKey) {
+                e.preventDefault();
+                const undoBtn = document.getElementById('undoButton');
+                if (undoBtn && !undoBtn.disabled) {
+                    undoLastAction();
+                }
+            }
+        });
+
+        async function getSuggestion() {
+            const unlabeledTopics = getUnlabeledTopics();
+            if (unlabeledTopics.length === 0 || currentTopicIndex >= unlabeledTopics.length) {
+                showError('No topic available for suggestion');
+                return;
+            }
+
+            const currentTopic = unlabeledTopics[currentTopicIndex];
+            if (!currentTopic || currentTopic.id === undefined) {
+                showError('Current topic has no ID');
+                return;
+            }
+
+            const suggestionBtn = document.getElementById('suggestionButton');
+            const suggestionDisplay = document.getElementById('suggestionDisplay');
+            
+            // Clear previous suggestion
+            suggestedClusterName = null;
+            suggestionDisplay.classList.remove('show');
+            renderClusters();
+
+            // Show loading state
+            suggestionBtn.disabled = true;
+            const originalText = suggestionBtn.textContent;
+            suggestionBtn.textContent = '🤖 Getting suggestion...';
+
+            try {
+                const response = await fetch('/api/suggest', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        topic_id: currentTopic.id,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to get suggestion');
+                }
+
+                suggestedClusterName = data.suggested_cluster;
+                
+                // Show suggestion display
+                document.getElementById('suggestedClusterName').textContent = suggestedClusterName;
+                suggestionDisplay.classList.add('show');
+
+                // Highlight suggested cluster
+                renderClusters();
+
+                showSuccess(`LLM suggests: "${suggestedClusterName}"`);
+
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                suggestionBtn.disabled = false;
+                suggestionBtn.textContent = originalText;
+            }
+        }
+
+        async function assignSuggestedCluster() {
+            if (!suggestedClusterName) {
+                showError('No suggestion available');
+                return;
+            }
+
+            const unlabeledTopics = getUnlabeledTopics();
+            if (unlabeledTopics.length === 0 || currentTopicIndex >= unlabeledTopics.length) {
+                showError('No topic available');
+                return;
+            }
+
+            const currentTopic = unlabeledTopics[currentTopicIndex];
+            if (!currentTopic) {
+                showError('Current topic not found');
+                return;
+            }
+
+            await assignToCluster(currentTopic.id, suggestedClusterName);
+            
+            // Clear suggestion
+            suggestedClusterName = null;
+            document.getElementById('suggestionDisplay').classList.remove('show');
+            renderClusters();
+        }
+
+    </script>
+</body>
+</html>

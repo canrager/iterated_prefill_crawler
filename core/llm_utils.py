@@ -60,6 +60,7 @@ def load_model_and_tokenizer(
             gpu_memory_utilization=vllm_gpu_memory_utilization,
             max_model_len=vllm_max_model_len,
             dtype="bfloat16",
+            quantization_bits=quantization_bits,
         )
 
     # Transformers backend (default)
@@ -140,6 +141,7 @@ def load_vllm_model(
     gpu_memory_utilization: float = 0.9,
     max_model_len: Optional[int] = None,
     dtype: str = "bfloat16",
+    quantization_bits: Optional[int] = None,
 ):
     """
     Load a model using vLLM for efficient inference.
@@ -151,6 +153,7 @@ def load_vllm_model(
         gpu_memory_utilization: Fraction of GPU memory to use (0.0-1.0)
         max_model_len: Maximum sequence length (None = use model default)
         dtype: Data type for model weights (default: "bfloat16")
+        quantization_bits: Quantization bits (4, 8, or None). When 4 or 8, uses bitsandbytes quantization.
 
     Returns:
         LLM: vLLM model instance
@@ -159,16 +162,32 @@ def load_vllm_model(
     # Load tokenizer separately (vLLM also loads it internally but we need it for preprocessing)
     tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
 
+    # Determine quantization parameter for vLLM
+    # vLLM supports bitsandbytes quantization via quantization="bitsandbytes"
+    # Note: vLLM defaults to 4-bit quantization when using bitsandbytes
+    quantization = None
+    if quantization_bits in [4, 8]:
+        quantization = "bitsandbytes"
+        print(f"Using bitsandbytes quantization (vLLM defaults to 4-bit) for {quantization_bits}-bit request")
+    else:
+        print("Using no quantization with vLLM")
+
     # Initialize vLLM model
-    llm = LLM(
-        model=model_name,
-        download_dir=cache_dir,
-        tensor_parallel_size=tensor_parallel_size,
-        gpu_memory_utilization=gpu_memory_utilization,
-        dtype=dtype,
-        max_model_len=max_model_len,
-        trust_remote_code=True,  # Some models need this
-    )
+    llm_kwargs = {
+        "model": model_name,
+        "download_dir": cache_dir,
+        "tensor_parallel_size": tensor_parallel_size,
+        "gpu_memory_utilization": gpu_memory_utilization,
+        "dtype": dtype,
+        "max_model_len": max_model_len,
+        "trust_remote_code": True,  # Some models need this
+    }
+    
+    # Add quantization parameter if specified
+    if quantization is not None:
+        llm_kwargs["quantization"] = quantization
+    
+    llm = LLM(**llm_kwargs)
 
     return llm, tokenizer
 

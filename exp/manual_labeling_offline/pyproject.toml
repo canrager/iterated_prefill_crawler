@@ -1,0 +1,18 @@
+[project]
+name = "manual-labeling-offline"
+version = "0.1.0"
+description = "Offline manual labeling tool for clustering head refusal topics"
+authors = [
+    {name = "Manual Labeling Tool"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "flask>=3.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false

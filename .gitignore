@@ -9,6 +9,11 @@ artifacts/result
 artifacts/log
 artifacts/interim
 artifacts/old
+artifacts/latest
+artifacts/baseline_eval
+artifacts/threshold_ablation
+artifacts/pbr
+
 exp/prototypes
 outputs
 docs

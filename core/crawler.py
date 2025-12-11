@@ -30,7 +30,6 @@ from core.generation_utils import (
 )
 from core.topic_queue import TopicQueue, Topic
 from core.crawler_config import CrawlerConfig
-from core.tokenization_utils import match_chat_template
 from core.formatting_utils import remove_thinking_context
 
 EPS = 1e-10
@@ -1083,6 +1082,9 @@ Output:"""
         # Return an empty list of topics if no seed_topics required:
         if "no_seed" in self.config.prefill_mode:
             empty_seeds = [""] * self.config.generation_batch_size
+            seed_topics_text_languages = {}
+            seed_topics_text_languages["english"] = empty_seeds
+            seed_topics_text_languages["chinese"] = empty_seeds
             empty_parent_ids = [-1] * self.config.generation_batch_size
             return empty_seeds, empty_parent_ids
 
@@ -1127,7 +1129,7 @@ Output:"""
                         self.config.fallback_user_message_templates[lang]
                     ),
                     user_suffix=prefill_message,
-                    thought_prefix=listing_prefill,
+                    assistant_prefix=listing_prefill,
                 )
             case "user_prefill_with_seed":
                 segments = MessageSegments(
@@ -1135,7 +1137,7 @@ Output:"""
                         self.config.user_message_templates[lang]
                     ),
                     user_suffix=prefill_message,
-                    thought_prefix=listing_prefill,
+                    assistant_prefix=listing_prefill,
                 )
             case "assistant_prefill_no_seed":
                 segments = MessageSegments(
