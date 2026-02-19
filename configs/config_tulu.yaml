@@ -9,12 +9,8 @@ cache_dir: "models"  # Relative to project root parent, will be created if non-e
 
 # Model and runtime settings
 prefill_mode: "assistant_prefill_with_seed" # user_seeding # options
-use_openai_embeddings: true
-use_spacy: false  # Enable spacy semantic filtering
-cossim_thresh: 0.91
 load_fname: null
 backend: vllm  # "transformers" or "vllm"
-deduplication_method: "exact"  # "embedding", "openai", or "exact" (default)
 
 # vLLM-specific settings (only used when backend: vllm)
 vllm_tensor_parallel_size: 1
