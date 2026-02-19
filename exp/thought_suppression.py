@@ -101,7 +101,7 @@ questions = [
 
 batch_size = 5
 
-from core.llm_utils import load_model_and_tokenizer
+from src.llm_utils import load_model_and_tokenizer
 
 
 model_name = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
@@ -131,7 +131,7 @@ for i in range(len(encoded_chat)):
     print(tokenizer.decode(generation_BL[0]))
 
 import json
-from core.project_config import INTERIM_DIR
+from configs.directory_config import INTERIM_DIR
 
 with open(INTERIM_DIR / "full_rollouts.json", "w") as f:
     json.dump(full_rollouts, f)

@@ -6,14 +6,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from dataclasses import dataclass
-from core.llm_utils import load_model_and_tokenizer
-from core.ranking import WinCountRanking, EloRanking, TrueSkillRanking
-from core.ranking_eval import RankingTracker
+from src.llm_utils import load_model_and_tokenizer
+from src.evaluation.ranking import WinCountRanking, EloRanking, TrueSkillRanking
+from src.evaluation.ranking_eval import RankingTracker
 import random
 import torch
-from core.generation_utils import query_llm_api
+from src.generation_utils import query_llm_api
 
-from core.project_config import INPUT_DIR, INTERIM_DIR, RESULT_DIR
+from configs.directory_config import INPUT_DIR, INTERIM_DIR, RESULT_DIR
 
 
 @dataclass

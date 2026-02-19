@@ -2,11 +2,6 @@ from dataclasses import dataclass
 from typing import List
 import json
 
-import torch
-from torch import Tensor
-
-from core.generation_utils import compute_embeddings
-
 
 @dataclass
 class Topic:
@@ -19,7 +14,6 @@ class Topic:
     is_chinese: bool = None
     is_head: bool = None
     is_refusal: bool = None
-    cossim_to_head: float = None
     cluster_idx: int = None
     refusal_check_queries: List[str] = None
     refusal_check_responses: List[str] = None
@@ -36,7 +30,6 @@ class Topic:
             "is_chinese": self.is_chinese,
             "is_head": self.is_head,
             "is_refusal": self.is_refusal,
-            "cossim_to_head": self.cossim_to_head,
             "cluster_idx": self.cluster_idx,
             "parent_id": self.parent_id,
             "refusal_check_queries": self.refusal_check_queries,
@@ -52,7 +45,6 @@ class TopicQueue:
         self.head_topics: List[Topic] = []
         self.head_refusal_topics: List[Topic] = []
         self.cluster_topics: List[List[Topic]] = []
-        self.cluster_cossims: List[List[float]] = []
 
         # Stats
         self.num_head_topics: int = 0
@@ -79,14 +71,12 @@ class TopicQueue:
             self.num_head_refusal_topics += 1
         self.num_topics_per_cluster.append(1)
         self.cluster_topics.append([topic])
-        self.cluster_cossims.append([topic.cossim_to_head])  # should be 1
         self.num_total_topics += 1
         return topic
 
     def append_to_cluster(self, topic: Topic) -> Topic:
         """Add a topic to an existing cluster."""
         self.cluster_topics[topic.cluster_idx].append(topic)
-        self.cluster_cossims[topic.cluster_idx].append(topic.cossim_to_head)
         self.num_topics_per_cluster[topic.cluster_idx] += 1
         self.num_total_topics += 1
         return topic
@@ -115,7 +105,6 @@ class TopicQueue:
                 "cluster_topics": [
                     [t.to_dict() for t in cluster] for cluster in self.cluster_topics
                 ],
-                "cluster_cossims": self.cluster_cossims,
             },
             "stats": {
                 "num_head_refusal_topics": self.num_head_refusal_topics,
@@ -156,7 +145,6 @@ class TopicQueue:
             [Topic(**topic_data) for topic_data in cluster]
             for cluster in topic_dict["topics"]["cluster_topics"]
         ]
-        queue.cluster_cossims = topic_dict["topics"]["cluster_cossims"]
         return queue
 
     def __repr__(self) -> str:
@@ -185,6 +173,5 @@ class TopicQueue:
             for topic in self.cluster_topics[i]:
                 if not topic.is_head:  # Skip head topic since we already showed it
                     string += f"    text='{topic.english}', raw='{topic.raw}'\n"
-                    string += f"    cossim_to_head: {topic.cossim_to_head}\n"
 
         return string

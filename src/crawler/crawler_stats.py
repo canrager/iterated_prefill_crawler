@@ -4,7 +4,7 @@ from typing import List
 import matplotlib.pyplot as plt
 import torch
 
-from core.topic_queue import Topic
+from src.crawler.topic_queue import Topic
 
 EPS = 1e-10
 
@@ -61,9 +61,7 @@ class CrawlerStats:
 
         fig, ax = plt.subplots(figsize=(10, 5))
         plt.grid(zorder=-1)
-        ax.scatter(
-            cumulative_generations, cumulative_topics, label="Unique topics", zorder=10
-        )
+        ax.scatter(cumulative_generations, cumulative_topics, label="Unique topics", zorder=10)
         ax.scatter(
             cumulative_generations,
             cumulative_refusals,
@@ -111,9 +109,7 @@ class CrawlerStats:
         crawler_stats.total_all = stats_dict["cumulative"]["total_all"]
         crawler_stats.total_deduped = stats_dict["cumulative"]["total_deduped"]
         crawler_stats.total_refusals = stats_dict["cumulative"]["total_refusals"]
-        crawler_stats.total_unique_refusals = stats_dict["cumulative"][
-            "total_unique_refusals"
-        ]
+        crawler_stats.total_unique_refusals = stats_dict["cumulative"]["total_unique_refusals"]
         crawler_stats.all_per_step = stats_dict["history"]["all_per_step"]
         crawler_stats.deduped_per_step = stats_dict["history"]["deduped_per_step"]
         crawler_stats.refusal_per_step = stats_dict["history"]["refusal_per_step"]

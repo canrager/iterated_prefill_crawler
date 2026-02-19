@@ -32,5 +32,14 @@ Results are saved in `/artifacts/pbr/`:
 git clone https://github.com/canrager/iterated_prefill_crawler.git
 cd thought_crawl
 pip install -e .
-python -m spacy download en_core_web_sm
 ```
+
+## Changes:
+- remove deduplication
+- make templatization easy
+- declutter
+- which models do we need during the crawl
+    - target
+    - translation
+    - summarization
+    - refusal_check

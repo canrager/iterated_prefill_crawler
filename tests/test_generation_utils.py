@@ -1,6 +1,6 @@
 import pytest
-from core.generation_utils import batch_generate
-from core.llm_utils import load_model_and_tokenizer
+from src.generation_utils import batch_generate
+from src.llm_utils import load_model_and_tokenizer
 from nnsight import LanguageModel
 
 TOPICS = ["capital of France", "main city of Germany", "most populous city in Italy"]

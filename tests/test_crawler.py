@@ -3,12 +3,12 @@ import torch
 from unittest.mock import patch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, AutoModelForCausalLM
 
-from core.crawler import Crawler
-from core.crawler_config import CrawlerConfig
-from core.topic_queue import Topic
-from core.llm_utils import load_zh_en_translation_model, load_model_and_tokenizer
-from core.project_config import MODELS_DIR, DEVICE, resolve_cache_dir
-from core.tokenization_utils import custom_batch_encoding
+from src.crawler.crawler import Crawler
+from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.topic_queue import Topic
+from src.llm_utils import load_zh_en_translation_model, load_model_and_tokenizer
+from configs.directory_config import MODELS_DIR, DEVICE, resolve_cache_dir
+from src.tokenization_utils import custom_batch_encoding
 
 
 @pytest.fixture
@@ -51,9 +51,7 @@ def test_translate_chinese_english(crawler):
 
     # Check Chinese topics are translated
     assert translated_topics[1].is_chinese
-    assert (
-        translated_topics[1].translation is not None
-    )  # Changed since we're using real model
+    assert translated_topics[1].translation is not None  # Changed since we're using real model
     assert translated_topics[3].is_chinese
     assert translated_topics[3].translation is not None
 
@@ -281,9 +279,7 @@ def test_summarize_refusal_topics():
     print("=" * 80)
     print(f"Using model: {model_path}")
     print(f"Cache directory: {cache_dir_str}")
-    print(
-        f"vllm_max_model_len (max_new_tokens for summarization): {config.vllm_max_model_len}"
-    )
+    print(f"vllm_max_model_len (max_new_tokens for summarization): {config.vllm_max_model_len}")
     print(f"\nInput topics ({len(test_topics)} topics):")
     for i, topic in enumerate(test_topics, 1):
         print(f"\n  Topic {i}:")
@@ -327,14 +323,10 @@ def test_summarize_refusal_topics():
         # Verify summaries were generated
         summaries_generated = sum(1 for t in summarized_topics if t.summary is not None)
         print(f"\n{'='*80}")
-        print(
-            f"Summary: {summaries_generated}/{len(summarized_topics)} topics got summaries"
-        )
+        print(f"Summary: {summaries_generated}/{len(summarized_topics)} topics got summaries")
         print(f"{'='*80}\n")
 
-        assert (
-            summaries_generated > 0
-        ), "At least one summary should have been generated"
+        assert summaries_generated > 0, "At least one summary should have been generated"
 
     except Exception as e:
         print(f"\nError loading model or running summarization: {e}")

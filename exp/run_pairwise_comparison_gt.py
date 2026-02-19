@@ -30,8 +30,8 @@ from typing import Dict, List, Tuple
 from datetime import datetime
 from scipy.stats import spearmanr, kendalltau
 
-from core.ranking import DEFAULT_RANKING_CONFIG, setup_ranking_experiment
-from core.project_config import MODELS_DIR, RESULT_DIR, resolve_cache_dir
+from src.evaluation.ranking import DEFAULT_RANKING_CONFIG, setup_ranking_experiment
+from configs.directory_config import MODELS_DIR, RESULT_DIR, resolve_cache_dir
 
 
 @dataclass

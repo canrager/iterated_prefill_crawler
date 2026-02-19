@@ -6,16 +6,15 @@ import nnsight
 from nnsight import LanguageModel
 import torch
 from torch import Tensor
-from torch.nn import functional as F
-from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import anthropic
 import os
 from vllm import LLM, SamplingParams
 from vllm.inputs.data import TokensPrompt
 from dataclasses import dataclass
 
-from core.tokenization_utils import custom_decoding, custom_batch_encoding
-from core.project_config import INPUT_DIR
+from src.tokenization_utils import custom_decoding, custom_batch_encoding
+from configs.directory_config import INPUT_DIR
 
 
 @dataclass
@@ -421,106 +420,9 @@ def batch_generate(
     return generated_texts, input_strs
 
 
-# Embedding related functions
-def average_pool(last_hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
-    """Average-pool the last hidden states of the model."""
-    last_hidden = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)
-    return last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
-
-
-def final_token_hidden_state(
-    last_hidden_states: Tensor, attention_mask: Tensor
-) -> Tensor:
-    """Get the hidden state of the final token."""
-    return last_hidden_states[
-        torch.arange(last_hidden_states.size(0)), attention_mask.sum(dim=1) - 1, :
-    ]
-
-
-def compute_embeddings(
-    tokenizer_emb: AutoTokenizer,
-    model_emb: AutoModel,
-    words: List[str],
-    prefix: str = "query: ",
-) -> Tensor:
-    """Embed a batch of words."""
-    batch_formatted = [f"{prefix}{word.lower()}" for word in words]
-    batch_dict = tokenizer_emb(
-        batch_formatted, padding=True, truncation=False, return_tensors="pt"
-    )
-    batch_dict = batch_dict.to(model_emb.device)
-
-    # outputs.last_hidden_state.shape (batch_size, sequence_length, hidden_size) hidden activations of the last layer
-    outputs = model_emb(**batch_dict)
-    batch_embeddings_BD = final_token_hidden_state(
-        outputs.last_hidden_state, batch_dict["attention_mask"]
-    )
-    batch_embeddings_BD = F.normalize(batch_embeddings_BD, p=2, dim=1)
-
-    return batch_embeddings_BD
-
-
-def batch_compute_embeddings(
-    tokenizer_emb: AutoTokenizer,
-    model_emb: AutoModel,
-    words: List[str],
-    batch_size: int = 100,
-    prefix: str = "query: ",
-) -> Tensor:
-    """Embed a batch of words."""
-    batch_embeddings_BD = []
-    for i in trange(0, len(words), batch_size):
-        batch_words = words[i : i + batch_size]
-        batch_embeddings_BD.append(
-            compute_embeddings(tokenizer_emb, model_emb, batch_words, prefix=prefix)
-        )
-    batch_embeddings_BD = torch.cat(batch_embeddings_BD, dim=0)
-    return batch_embeddings_BD
-
-
-def compute_openai_embeddings(
-    openai_client, model_name: str, words: List[str], prefix: str = "query: "
-) -> Tensor:
-    """Embed a batch of words using OpenAI API."""
-    batch_formatted = [f"{prefix}{word.lower()}" for word in words]
-
-    response = openai_client.embeddings.create(input=batch_formatted, model=model_name)
-
-    # Extract embeddings from response
-    embeddings = [data.embedding for data in response.data]
-
-    # Convert to tensor
-    batch_embeddings_BD = torch.tensor(embeddings, dtype=torch.float)
-
-    # OpenAI embeddings are already normalized, but normalize again just to be sure
-    batch_embeddings_BD = F.normalize(batch_embeddings_BD, p=2, dim=1)
-
-    return batch_embeddings_BD
-
-
-def batch_compute_openai_embeddings(
-    openai_client,
-    openai_emb_model_name: str,
-    words: List[str],
-    batch_size: int = 100,
-    prefix: str = "query: ",
-) -> Tensor:
-    """Embed a batch of words using OpenAI API."""
-    batch_embeddings_BD = []
-    for i in trange(0, len(words), batch_size):
-        batch_words = words[i : i + batch_size]
-        batch_embeddings_BD.append(
-            compute_openai_embeddings(
-                openai_client, openai_emb_model_name, batch_words, prefix=prefix
-            )
-        )
-    batch_embeddings_BD = torch.cat(batch_embeddings_BD, dim=0)
-    return batch_embeddings_BD
-
-
 if __name__ == "__main__":
     from nnsight import CONFIG
-    from core.project_config import INPUT_DIR
+    from configs.directory_config import INPUT_DIR
 
     model_name = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
     model_name = "meta-llama/Meta-Llama-3.1-8B"

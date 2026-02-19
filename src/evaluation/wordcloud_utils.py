@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
-from core.project_config import RESULT_DIR
+from configs.directory_config import RESULT_DIR
 
 def create_oval_mask(width: int, height: int) -> np.ndarray:
     """

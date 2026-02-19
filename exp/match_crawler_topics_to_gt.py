@@ -12,7 +12,7 @@ Usage:
 import os
 import glob
 from pathlib import Path
-from core.safety_topic_ranker_matcher import match_crawler_log_with_gt
+from src.evaluation.safety_topic_ranker_matcher import match_crawler_log_with_gt
 
 
 def main():

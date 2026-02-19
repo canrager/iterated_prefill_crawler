@@ -24,7 +24,7 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-from core.project_config import INTERIM_DIR
+from configs.directory_config import INTERIM_DIR
 
 
 def parse_crawler_log_filename(filename: str) -> Optional[Dict[str, str]]:

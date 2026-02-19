@@ -34,9 +34,9 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-from core.crawler_config import REFUSAL_PROVOCATION_GENERATION_PROMPTS
-from core.llm_utils import load_vllm_model
-from core.project_config import resolve_cache_dir
+from src.crawler.crawler_config import REFUSAL_PROVOCATION_GENERATION_PROMPTS
+from src.llm_utils import load_vllm_model
+from configs.directory_config import resolve_cache_dir
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 

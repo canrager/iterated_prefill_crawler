@@ -1,4 +1,16 @@
-from src import init_vllm # VLLM setup needs to run first
+import os
+
+# Set environment variable to force spawn method before any imports
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+
+import multiprocessing
+
+# Set multiprocessing start method to 'spawn' for CUDA compatibility
+# MUST be set before importing torch or any CUDA libraries
+try:
+    multiprocessing.set_start_method("spawn", force=True)
+except RuntimeError:
+    pass  # Already set
 
 import os
 import torch
@@ -8,7 +20,7 @@ from omegaconf import DictConfig, OmegaConf
 from src.crawler.crawler import Crawler, get_run_name
 from src.crawler.crawler_config import CrawlerConfig
 from src.llm_utils import load_model_and_tokenizer, load_filter_models, load_from_path
-from src.project_config import INTERIM_DIR, RESULT_DIR, CONFIG_DIR, resolve_cache_dir
+from configs.directory_config import INTERIM_DIR, RESULT_DIR, CONFIG_DIR, resolve_cache_dir
 
 
 @hydra.main(version_base=None, config_path=str(CONFIG_DIR), config_name="config")

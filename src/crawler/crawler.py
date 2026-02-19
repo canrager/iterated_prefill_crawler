@@ -18,7 +18,7 @@ from src.generation_utils import (
     batch_complete_R1,
     MessageSegments,
 )
-from src.topic_queue import TopicQueue, Topic
+from src.crawler.topic_queue import TopicQueue, Topic
 from src.crawler.crawler_config import CrawlerConfig
 from src.crawler.crawler_stats import CrawlerStats
 from src.response_formatting_utils import remove_thinking_context, TopicFormatter
@@ -36,9 +36,7 @@ class Crawler:
         self.formatter = TopicFormatter(crawler_config)
 
         self.save_filename = save_filename
-        self.save(
-            save_filename
-        )  # Already testing at initialization whether saving works
+        self.save(save_filename)  # Already testing at initialization whether saving works
 
     def deduplicate_exact(
         self,
@@ -240,9 +238,7 @@ class Crawler:
                 answer_strs = all_answer_strs[start_idx:end_idx]
 
                 # Check if model refused to answer
-                refused_to_answer_query = [
-                    self.is_refusal(answer) for answer in answers
-                ]
+                refused_to_answer_query = [self.is_refusal(answer) for answer in answers]
                 make_answer_majority_refusal = (
                     sum(refused_to_answer_query) / len(refused_to_answer_query)
                 ) > threshold
@@ -337,9 +333,7 @@ class Crawler:
             seed_topics = topic_seed_candidates
         else:
             # Randomly sample for topic diversity
-            seed_topics = random.sample(
-                topic_seed_candidates, self.config.generation_batch_size
-            )
+            seed_topics = random.sample(topic_seed_candidates, self.config.generation_batch_size)
 
         # Select relevant attributes for seeding
         seed_topics_text_languages = {}
@@ -360,46 +354,34 @@ class Crawler:
         match self.config.prefill_mode:
             case "user_prefill_no_seed":
                 segments = MessageSegments(
-                    user_prefix=random.choice(
-                        self.config.fallback_user_message_templates[lang]
-                    ),
+                    user_prefix=random.choice(self.config.fallback_user_message_templates[lang]),
                     user_suffix=prefill_message,
                     assistant_prefix=listing_prefill,
                 )
             case "user_prefill_with_seed":
                 segments = MessageSegments(
-                    user_template=random.choice(
-                        self.config.user_message_templates[lang]
-                    ),
+                    user_template=random.choice(self.config.user_message_templates[lang]),
                     user_suffix=prefill_message,
                     assistant_prefix=listing_prefill,
                 )
             case "assistant_prefill_no_seed":
                 segments = MessageSegments(
-                    user_prefix=random.choice(
-                        self.config.fallback_user_message_templates[lang]
-                    ),
+                    user_prefix=random.choice(self.config.fallback_user_message_templates[lang]),
                     assistant_prefix=f"{prefill_message}\n{listing_prefill}",
                 )
             case "assistant_prefill_with_seed":
                 segments = MessageSegments(
-                    user_template=random.choice(
-                        self.config.user_message_templates[lang]
-                    ),
+                    user_template=random.choice(self.config.user_message_templates[lang]),
                     assistant_prefix=f"{prefill_message}\n{listing_prefill}",
                 )
             case "thought_prefill_no_seed":
                 segments = MessageSegments(
-                    user_prefix=random.choice(
-                        self.config.fallback_user_message_templates[lang]
-                    ),
+                    user_prefix=random.choice(self.config.fallback_user_message_templates[lang]),
                     thought_prefix=f"{prefill_message}\n{listing_prefill}",
                 )
             case "thought_prefill_with_seed":
                 segments = MessageSegments(
-                    user_template=random.choice(
-                        self.config.user_message_templates[lang]
-                    ),
+                    user_template=random.choice(self.config.user_message_templates[lang]),
                     thought_prefix=f"{prefill_message}\n{listing_prefill}",
                 )
             case _:
@@ -427,9 +409,7 @@ class Crawler:
             )
 
         # Iterate through crawling steps
-        for crawl_step_idx in trange(
-            self.config.num_crawl_steps, desc="Crawling topics"
-        ):
+        for crawl_step_idx in trange(self.config.num_crawl_steps, desc="Crawling topics"):
             print(f"Crawl step: {crawl_step_idx} / {self.config.num_crawl_steps}")
             # Get seed topics for this crawl step
             seed_topics_text_languages, topic_parent_ids = self._get_seed_topics()
@@ -474,9 +454,7 @@ class Crawler:
                     prefilled_texts = []
                     for gen in generated_texts:
                         if "</think>" in gen:
-                            gen = gen.split("</think>")[
-                                0
-                            ]  # Only keep the text until </think>
+                            gen = gen.split("</think>")[0]  # Only keep the text until </think>
                             gen = (
                                 gen + "</think>\n\n" + thinking_message + "\n1. "
                             )  # Prefill the generated text

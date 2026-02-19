@@ -38,11 +38,11 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-from core.generation_utils import batch_generate, MessageSegments
-from core.crawler_config import CrawlerConfig
-from core.topic_queue import Topic
-from core.llm_utils import load_model_and_tokenizer
-from core.project_config import resolve_cache_dir
+from src.generation_utils import batch_generate, MessageSegments
+from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.topic_queue import Topic
+from src.llm_utils import load_model_and_tokenizer
+from configs.directory_config import resolve_cache_dir
 
 
 @dataclass
@@ -58,7 +58,9 @@ class ModelInfo:
 def parse_crawler_log_filename(filename: str) -> Optional[Dict[str, str]]:
     """Parse crawler log filename to extract model info."""
     basename = filename.replace(".json", "")
-    pattern = r"crawler_log_(\d{8})_(\d{6})_(.+?)_(\d+)samples_(\d+)crawls_(.+?)filter_(.+?)prompt_(.+)"
+    pattern = (
+        r"crawler_log_(\d{8})_(\d{6})_(.+?)_(\d+)samples_(\d+)crawls_(.+?)filter_(.+?)prompt_(.+)"
+    )
 
     match = re.match(pattern, basename)
     if not match:
@@ -214,9 +216,7 @@ def get_full_model_name(model_name: str) -> str:
 
 def load_model_for_testing(model_info: ModelInfo, config: CrawlerConfig):
     """Load model and tokenizer for testing."""
-    print(
-        f"  Loading model: {model_info.model_name} (backend: {model_info.backend})..."
-    )
+    print(f"  Loading model: {model_info.model_name} (backend: {model_info.backend})...")
 
     cache_dir_path = resolve_cache_dir(config.cache_dir)
     cache_dir_str = str(cache_dir_path)
@@ -447,8 +447,7 @@ def main():
 
     if not benchmark_file.exists():
         raise FileNotFoundError(
-            f"Benchmark not found at {benchmark_file}. "
-            "Please run create_pbr_benchmark.py first."
+            f"Benchmark not found at {benchmark_file}. " "Please run create_pbr_benchmark.py first."
         )
 
     print("=" * 80)
@@ -478,9 +477,7 @@ def main():
     print(f"Pooled reference set size: {results['pooled_reference_set_size']}")
     print(f"Models evaluated: {len(results['models'])}")
     print(f"\nPBR Scores:")
-    for model_result in sorted(
-        results["models"], key=lambda x: x["pbr_score"], reverse=True
-    ):
+    for model_result in sorted(results["models"], key=lambda x: x["pbr_score"], reverse=True):
         print(
             f"  {model_result['model_name']:50s} PBR: {model_result['pbr_score']:.4f} "
             f"({model_result['breakdown']['total_refused']}/{model_result['breakdown']['pooled_reference_set_size']})"

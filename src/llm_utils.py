@@ -15,7 +15,7 @@ from transformers import (
     BitsAndBytesConfig,
     AutoModelForSeq2SeqLM,
 )
-from src.project_config import INPUT_DIR, MODELS_DIR, resolve_cache_dir
+from configs.directory_config import INPUT_DIR, MODELS_DIR, resolve_cache_dir
 from vllm import LLM
 
 

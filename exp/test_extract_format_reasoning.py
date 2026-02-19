@@ -20,9 +20,9 @@ script_dir = Path(__file__).parent
 project_root = script_dir
 sys.path.insert(0, str(project_root))
 
-from core.crawler import Crawler
-from core.crawler_config import CrawlerConfig
-from core.topic_queue import Topic
+from src.crawler.crawler import Crawler
+from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.topic_queue import Topic
 
 
 def create_test_generation() -> str:
@@ -113,9 +113,7 @@ def test_extraction_only(crawler: Crawler, generation: str):
 
     # Count numbered items in different sections
     think_section = generation.split("</think>")[0] if "</think>" in generation else ""
-    main_section = (
-        generation.split("</think>")[1] if "</think>" in generation else generation
-    )
+    main_section = generation.split("</think>")[1] if "</think>" in generation else generation
 
     import re
 
@@ -135,9 +133,7 @@ def test_extraction_only(crawler: Crawler, generation: str):
 
     if len(extracted) > len(main_items):
         print("\n⚠️  PROBLEM DETECTED:")
-        print(
-            "   The extraction is picking up numbered items from the <think> reasoning section!"
-        )
+        print("   The extraction is picking up numbered items from the <think> reasoning section!")
         print("   This means reasoning text is being treated as topics.")
     else:
         print("\n✓ Extraction appears correct (only main section items)")
@@ -197,9 +193,7 @@ def test_full_extract_and_format(crawler: Crawler, generation: str):
 
         if problematic_topics:
             print(f"\n⚠️  PROBLEM DETECTED:")
-            print(
-                f"   Found {len(problematic_topics)} topics that may contain reasoning text:"
-            )
+            print(f"   Found {len(problematic_topics)} topics that may contain reasoning text:")
             for topic in problematic_topics:
                 print(f"   - '{topic.shortened or topic.raw}'")
         else:
@@ -235,9 +229,7 @@ def test_full_extract_and_format(crawler: Crawler, generation: str):
 
         if found_reasoning_topics:
             print(f"\n⚠️  PROBLEM DETECTED:")
-            print(
-                f"   Found {len(found_reasoning_topics)} topics from reasoning section:"
-            )
+            print(f"   Found {len(found_reasoning_topics)} topics from reasoning section:")
             for topic in found_reasoning_topics:
                 print(f"   - '{topic.shortened or topic.raw}'")
 
@@ -261,7 +253,7 @@ def test_split_at_comma(crawler: Crawler, generation: str):
         print(f"{i}. {item}")
 
     # Create topics
-    from core.topic_queue import Topic
+    from src.crawler.topic_queue import Topic
 
     topics = [Topic(raw=item, parent_id=0) for item in extracted]
 
@@ -294,9 +286,7 @@ def main():
     config.do_filter_refusals = False  # Disable refusal filtering for simpler testing
 
     # Create temporary file for crawler save
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False
-    ) as tmp_file:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp_file:
         tmp_filename = tmp_file.name
 
     try:

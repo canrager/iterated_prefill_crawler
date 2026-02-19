@@ -4,9 +4,9 @@ import json
 import pandas as pd
 import argparse
 
-from core.project_config import INPUT_DIR, INTERIM_DIR, RESULT_DIR, resolve_cache_dir
-from core.crawler import CrawlerStats
-from core.analysis_utils import (
+from configs.directory_config import INPUT_DIR, INTERIM_DIR, RESULT_DIR, resolve_cache_dir
+from src.crawler.crawler import CrawlerStats
+from src.evaluation.analysis_utils import (
     load_crawl, 
     get_head_topic_dict, 
     llm_judge_topic_deduplication_batched, 
@@ -16,9 +16,9 @@ from core.analysis_utils import (
     plot_ROC_curve,
     CrawlName
 )
-from core.ranking import rank_topics
-from core.wordcloud_utils import generate_wordcloud_from_ranking
-from core.safety_topic_ranker_matcher import match_crawled_topics_with_gt, match_crawler_log_with_gt
+from src.evaluation.ranking import rank_topics
+from src.evaluation.wordcloud_utils import generate_wordcloud_from_ranking
+from src.evaluation.safety_topic_ranker_matcher import match_crawled_topics_with_gt, match_crawler_log_with_gt
 
 
 

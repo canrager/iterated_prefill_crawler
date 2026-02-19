@@ -46,12 +46,12 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-from core.safety_topic_ranker_matcher import (
+from src.evaluation.safety_topic_ranker_matcher import (
     build_similarity_prompt,
     parse_similarity_response,
 )
-from core.llm_utils import load_vllm_model
-from core.project_config import resolve_cache_dir
+from src.llm_utils import load_vllm_model
+from configs.directory_config import resolve_cache_dir
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 

@@ -30,11 +30,11 @@ from tqdm import tqdm
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.crawler import Crawler
-from core.crawler_config import CrawlerConfig
-from core.generation_utils import batch_generate
-from core.llm_utils import load_model_and_tokenizer
-from core.project_config import resolve_cache_dir
+from src.crawler.crawler import Crawler
+from src.crawler.crawler_config import CrawlerConfig
+from src.generation_utils import batch_generate
+from src.llm_utils import load_model_and_tokenizer
+from configs.directory_config import resolve_cache_dir
 
 
 @dataclass

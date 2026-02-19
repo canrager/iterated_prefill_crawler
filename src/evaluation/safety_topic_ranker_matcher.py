@@ -7,8 +7,8 @@ import time
 import re
 from collections import defaultdict
 
-from core.generation_utils import query_llm_api
-from core.project_config import RESULT_DIR, INPUT_DIR
+from src.generation_utils import query_llm_api
+from configs.directory_config import RESULT_DIR, INPUT_DIR
 
 
 def get_semantic_equivalence_examples():

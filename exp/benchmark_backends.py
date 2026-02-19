@@ -6,9 +6,9 @@ Usage: python scripts/benchmark_backends.py
 
 import time
 import torch
-from core.llm_utils import load_model_and_tokenizer
-from core.generation_utils import batch_generate
-from core.project_config import INPUT_DIR
+from src.llm_utils import load_model_and_tokenizer
+from src.generation_utils import batch_generate
+from configs.directory_config import INPUT_DIR
 
 # Small model for quick testing
 MODEL_NAME = "allenai/Llama-3.1-Tulu-3-8B-SFT"

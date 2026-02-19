@@ -24,7 +24,7 @@ if [ "$1" = "--tmux" ]; then
 fi
 
 # Build the full python command with all arguments
-PYTHON_CMD="python exp/run_crawler.py $@"
+PYTHON_CMD="python src/crawler/run_crawler.py $@"
 
 if [ "$NO_TMUX" = true ]; then
     # Run directly in terminal without logging

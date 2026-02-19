@@ -47,4 +47,4 @@ build-backend = "hatchling.build"
 package = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["exp", "core"]
+packages = ["exp", "src"]

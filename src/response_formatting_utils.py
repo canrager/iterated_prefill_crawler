@@ -7,7 +7,7 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForCausalLM,
 )
-from src.topic_queue import Topic
+from src.crawler.topic_queue import Topic
 
 
 def remove_thinking_context(queries: List[str]) -> List[str]:
@@ -55,9 +55,7 @@ class TopicFormatter:
         """Extract topics from a text that contains a numbered list."""
         extracted_list = self.numbered_list_pattern.findall(text)
         extracted_list = list(dict.fromkeys(extracted_list))  # Remove exact duplicates
-        extracted_list = extracted_list[
-            : self.config.max_extracted_topics_per_generation
-        ]
+        extracted_list = extracted_list[: self.config.max_extracted_topics_per_generation]
         extracted_list = [item for item in extracted_list if item is not None]
         return extracted_list
 
@@ -76,9 +74,7 @@ class TopicFormatter:
         ).to(model_zh_en.device)
         with torch.inference_mode():
             translated_ids_B = model_zh_en.generate(**zh_en_ids_B, max_new_tokens=30)
-        translated_str_B = tokenizer_zh_en.batch_decode(
-            translated_ids_B, skip_special_tokens=True
-        )
+        translated_str_B = tokenizer_zh_en.batch_decode(translated_ids_B, skip_special_tokens=True)
         return translated_str_B
 
     def _translate_en_to_zn(
@@ -92,9 +88,7 @@ class TopicFormatter:
         ).to(model_en_zh.device)
         with torch.inference_mode():
             translated_ids_B = model_en_zh.generate(**en_zh_ids_B, max_new_tokens=30)
-        translated_str_B = tokenizer_en_zh.batch_decode(
-            translated_ids_B, skip_special_tokens=True
-        )
+        translated_str_B = tokenizer_en_zh.batch_decode(translated_ids_B, skip_special_tokens=True)
         return translated_str_B
 
     def _batch_translate_chinese_english_both_ways(
@@ -120,16 +114,12 @@ class TopicFormatter:
                 english_indices.append(i)
 
         # translate the subset with chinese characters in a single batch
-        for batch_start in range(
-            0, len(chinese_topics), self.config.generation_batch_size
-        ):
+        for batch_start in range(0, len(chinese_topics), self.config.generation_batch_size):
             batch_end = batch_start + self.config.generation_batch_size
             chinese_topic_B = chinese_topics[batch_start:batch_end]
             chinese_indices_B = chinese_indices[batch_start:batch_end]
             chinese_raw_B = [t.raw for t in chinese_topic_B]
-            translated_str_B = self._translate_zn_to_en(
-                model_zh_en, tokenizer_zh_en, chinese_raw_B
-            )
+            translated_str_B = self._translate_zn_to_en(model_zh_en, tokenizer_zh_en, chinese_raw_B)
             for original, translation, idx in zip(
                 chinese_raw_B, translated_str_B, chinese_indices_B
             ):
@@ -137,16 +127,12 @@ class TopicFormatter:
                 topics[idx].shortened = translation  # copy of english
                 topics[idx].chinese = original
 
-        for batch_start in range(
-            0, len(english_topics), self.config.generation_batch_size
-        ):
+        for batch_start in range(0, len(english_topics), self.config.generation_batch_size):
             batch_end = batch_start + self.config.generation_batch_size
             english_topic_B = english_topics[batch_start:batch_end]
             english_indices_B = english_indices[batch_start:batch_end]
             english_raw_B = [t.raw for t in english_topic_B]
-            translated_str_B = self._translate_en_to_zn(
-                model_en_zh, tokenizer_en_zh, english_raw_B
-            )
+            translated_str_B = self._translate_en_to_zn(model_en_zh, tokenizer_en_zh, english_raw_B)
             for original, translation, idx in zip(
                 english_raw_B, translated_str_B, english_indices_B
             ):
@@ -398,9 +384,7 @@ Output:"""
                         # Fallback to shortened version on error
                         topic.summary = topic.shortened
                         if verbose:
-                            print(
-                                f"Empty summary for topic '{topic.raw}', using fallback"
-                            )
+                            print(f"Empty summary for topic '{topic.raw}', using fallback")
 
             except Exception as e:
                 print(
@@ -446,9 +430,7 @@ Output:"""
                     asyncio_logger.setLevel(original_level)
 
                 # Create a mapping from raw topic to result
-                raw_to_result = {
-                    raw: (summary, error) for raw, summary, error in results
-                }
+                raw_to_result = {raw: (summary, error) for raw, summary, error in results}
 
                 # Apply summaries to topics
                 for topic in topics_to_summarize:
@@ -457,9 +439,7 @@ Output:"""
                         # Remove thinking context from summary if present
                         # remove_thinking_context expects a list, so wrap and unwrap
                         processed_summaries = remove_thinking_context([summary])
-                        summary = (
-                            processed_summaries[0] if processed_summaries else summary
-                        )
+                        summary = processed_summaries[0] if processed_summaries else summary
                         topic.summary = summary
                     else:
                         # Fallback to shortened version on error
@@ -468,9 +448,7 @@ Output:"""
                             print(f"Using fallback for topic '{topic.raw}': {error}")
 
             except Exception as e:
-                print(
-                    f"Error in batch summarization, falling back to shortened versions: {e}"
-                )
+                print(f"Error in batch summarization, falling back to shortened versions: {e}")
                 # Fallback all topics to shortened version
                 for topic in topics_to_summarize:
                     topic.summary = topic.shortened

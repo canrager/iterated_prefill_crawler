@@ -7,10 +7,10 @@ from tqdm import tqdm
 import json
 import os
 import torch
-from core.generation_utils import batch_generate
-from core.llm_utils import load_model_and_tokenizer
-from core.project_config import RESULT_DIR
-from core.ranking_eval import RankingTracker
+from src.generation_utils import batch_generate
+from src.llm_utils import load_model_and_tokenizer
+from configs.directory_config import RESULT_DIR
+from src.evaluation.ranking_eval import RankingTracker
 
 # Default ranking configuration
 DEFAULT_RANKING_CONFIG = {
