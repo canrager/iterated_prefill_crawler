@@ -19,7 +19,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from src.crawler.crawler import Crawler, get_run_name
 from src.crawler.config import CrawlerConfig
-from src.llm_utils import load_model_and_tokenizer, load_filter_models, load_from_path
+from src.llm_utils import load_model_and_tokenizer, load_from_path
 from src.directory_config import INTERIM_DIR, RESULT_DIR, CONFIG_DIR, resolve_cache_dir
 
 
@@ -33,45 +33,34 @@ def main(cfg: DictConfig) -> None:
     crawler_config = CrawlerConfig(**OmegaConf.to_container(cfg, resolve=True))
 
     # Resolve cache_dir relative to ROOT_DIR.parent and create if needed
-    cache_dir_path = resolve_cache_dir(cfg.cache_dir)
+    cache_dir_path = resolve_cache_dir(cfg.model.cache_dir)
     cache_dir_str = str(cache_dir_path)
 
-    # Initialize models
-    if not any(keyword in cfg.model_path for keyword in ["claude", "grok"]):
-        model_crawl, tokenizer_crawl = load_model_and_tokenizer(
-            cfg.model_path,
-            device=cfg.device,
+    # Load local model if specified
+    if cfg.model.local_model is not None:
+        local_model, local_tokenizer = load_model_and_tokenizer(
+            cfg.model.local_model,
+            device=cfg.model.device,
             cache_dir=cache_dir_str,
-            quantization_bits=cfg.quantization_bits,
-            backend=cfg.backend,
-            vllm_tensor_parallel_size=cfg.vllm_tensor_parallel_size if cfg.backend == "vllm" else 1,
-            vllm_gpu_memory_utilization=(
-                cfg.vllm_gpu_memory_utilization if cfg.backend == "vllm" else 0.9
-            ),
-            vllm_max_model_len=crawler_config.max_context_tokens if cfg.backend == "vllm" else None,
+            quantization_bits=cfg.model.quantization_bits,
+            vllm_tensor_parallel_size=cfg.model.vllm_tensor_parallel_size,
+            vllm_gpu_memory_utilization=cfg.model.vllm_gpu_memory_utilization,
+            vllm_max_model_len=crawler_config.model.vllm_max_model_len,
         )
     else:
-        model_crawl = cfg.model_path
-        tokenizer_crawl = None
-
-    filter_models = load_filter_models(cache_dir_str, cfg.device)
+        local_model, local_tokenizer = None, None
 
     # Get crawler name
-    run_name = get_run_name(cfg.model_path, crawler_config, cfg.prefill_mode)
-    # Add backend and quantization info to run name
-    if cfg.backend == "vllm":
-        run_name = f"{run_name}_vllm"
-    else:
-        run_name = f"{run_name}_hf_q{cfg.quantization_bits}"
+    run_name = get_run_name(crawler_config)
     crawler_log_filename = os.path.join(INTERIM_DIR, f"{run_name}.json")
     print(f"Run name: {run_name}")
     print(f"Saving to: {crawler_log_filename}\n\n")
 
     # Create Crawler or load from checkpoint
-    if cfg.load_fname is None:
+    if cfg.crawler.load_fname is None:
         crawler = Crawler(crawler_config=crawler_config, save_filename=crawler_log_filename)
     else:
-        load_dir = os.path.join(INTERIM_DIR, cfg.load_fname)
+        load_dir = os.path.join(INTERIM_DIR, cfg.crawler.load_fname)
         crawler = Crawler.load(
             load_from_filename=load_dir,
             save_to_filename=crawler_log_filename,
@@ -83,10 +72,9 @@ def main(cfg: DictConfig) -> None:
 
     # Go crawling!
     crawler.crawl(
-        model=model_crawl,
-        tokenizer=tokenizer_crawl,
-        filter_models=filter_models,
-        verbose=cfg.verbose,
+        local_model=local_model,
+        local_tokenizer=local_tokenizer,
+        verbose=cfg.crawler.verbose,
     )
 
     plot_filename = os.path.join(RESULT_DIR, f"{run_name}.png")

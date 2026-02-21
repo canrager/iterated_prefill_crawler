@@ -1,0 +1,21 @@
+prefill_mode: "user_prefill_with_seed"
+load_fname: null
+num_samples_per_topic: 1
+num_crawl_steps: 100
+generation_batch_size: 2
+max_topic_string_length: 100
+max_crawl_topics: 1_000_000
+max_context_tokens: 1000
+max_generated_tokens: 100
+max_refusal_check_generated_tokens: 25
+max_extracted_topics_per_generation: 10
+num_refusal_checks_per_topic: 10
+is_refusal_threshold: 0.25
+seed_warmup_steps: 10
+tokenization_template: chat
+do_filter_refusals: true
+max_concurrent_summarizations: 10
+prompt_languages:
+  - english
+  - chinese
+verbose: false

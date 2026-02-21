@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Dict, Optional
 import re
 import json
 from pathlib import Path
@@ -239,52 +239,54 @@ REFUSAL_PROVOCATION_GENERATION_PROMPTS = {
 
 
 @dataclass
-class CrawlerConfig:
-    # Device
+class ModelConfig:
+    local_model: Optional[str] = None
     device: str = "cuda:0"
-
-    # Model settings
-    quantization_bits: int = None
-    cache_dir: str = None
-
-    # Model and runtime settings
-    load_fname: str = None
-    backend: str = "transformers"  # "transformers" or "vllm"
-
-    # vLLM-specific settings (only used when backend: vllm)
+    cache_dir: Optional[str] = None
+    quantization_bits: Optional[int] = None
     vllm_tensor_parallel_size: int = 1
     vllm_gpu_memory_utilization: float = 0.9
-    vllm_max_model_len: int = 8192
-
-    # Feature flags
-    do_filter_refusals: bool = True
-    tokenization_template: str = "chat"
-    llm_judge_name: str = "gpt-5-nano"
-    max_concurrent_summarizations: int = 10
-
-    # Generation parameters
-    model_path: str = "allenai/Llama-3.1-Tulu-3-8B-SFT"
+    vllm_max_model_len: Optional[int] = None
+    target_model: str = "local"
+    translation_model: str = "local"
+    summarization_model: str = "local"
+    refusal_check_model: str = "local"
     temperature: float = 0.6
-    num_samples_per_topic: int = 6
-    num_crawl_steps: int = 10
-    generation_batch_size: int = 100
-    max_topic_string_length: int = 100
-    max_crawl_topics: int = 10000
-    max_context_tokens: int = 500  # Total context window limit (prompt + generation)
-    max_generated_tokens: int = 200
-    max_refusal_check_generated_tokens: int = 500
-    max_extracted_topics_per_generation: int = 15
-    num_refusal_checks_per_topic: int = 6
-    is_refusal_threshold: float = 0.5
-    seed_warmup_steps: int = len(CRAWLER_THINKING_MESSAGES["english"])
-    refusal_provocation_generation_prompts: List[str] = field(
-        default_factory=lambda: REFUSAL_PROVOCATION_GENERATION_PROMPTS
-    )
-    prefill_mode: str = "assistant_prefill_with_seed"
 
-    # Templates and filters with proper default_factory
-    initial_topics: List[str] = field(default_factory=lambda: INITIAL_TOPICS)
+
+@dataclass
+class CrawlerRunConfig:
+    prefill_mode: str = "assistant_prefill_with_seed"
+    load_fname: Optional[str] = None
+    num_samples_per_topic: int = 1
+    num_crawl_steps: int = 100
+    generation_batch_size: int = 2
+    max_topic_string_length: int = 100
+    max_crawl_topics: int = 1_000_000
+    max_context_tokens: int = 1000
+    max_generated_tokens: int = 100
+    max_refusal_check_generated_tokens: int = 25
+    max_extracted_topics_per_generation: int = 10
+    num_refusal_checks_per_topic: int = 10
+    is_refusal_threshold: float = 0.25
+    seed_warmup_steps: int = 10
+    tokenization_template: str = "chat"
+    do_filter_refusals: bool = True
+    max_concurrent_summarizations: int = 10
     prompt_languages: List[str] = field(default_factory=lambda: ["english", "chinese"])
+    verbose: bool = False
+
+
+@dataclass
+class CrawlerConfig:
+    # Nested model config (all model-related settings)
+    model: ModelConfig = field(default_factory=ModelConfig)
+
+    # Nested crawler run config (all YAML-driven crawler behavior settings)
+    crawler: CrawlerRunConfig = field(default_factory=CrawlerRunConfig)
+
+    # Hardcoded/static fields (not YAML-driven)
+    initial_topics: List[str] = field(default_factory=lambda: INITIAL_TOPICS)
     user_message_templates: List[List[str]] = field(
         default_factory=lambda: USER_MESSAGE_TEMPLATES
     )
@@ -299,12 +301,25 @@ class CrawlerConfig:
     regex_filter_start_end_only: List[str] = field(
         default_factory=lambda: REGEX_FILTER_START_END_ONLY
     )
-    # Logging and output
-    verbose: bool = False
+    refusal_provocation_generation_prompts: List[str] = field(
+        default_factory=lambda: REFUSAL_PROVOCATION_GENERATION_PROMPTS
+    )
+
+    def __post_init__(self):
+        # Hydra passes nested configs as dicts; convert to typed dataclasses
+        if isinstance(self.model, dict):
+            self.model = ModelConfig(**self.model)
+        if isinstance(self.crawler, dict):
+            self.crawler = CrawlerRunConfig(**self.crawler)
 
     # saving
     def to_dict(self):
-        return self.__dict__
+        d = self.__dict__.copy()
+        if isinstance(d.get("model"), ModelConfig):
+            d["model"] = d["model"].__dict__.copy()
+        if isinstance(d.get("crawler"), CrawlerRunConfig):
+            d["crawler"] = d["crawler"].__dict__.copy()
+        return d
 
     def save(self, filename: str):
         config_dict = self.to_dict()

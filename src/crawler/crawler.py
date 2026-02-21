@@ -3,15 +3,11 @@ import random
 import string
 from tqdm import trange
 import json
-from typing import List, Dict, Tuple, Union
+from typing import List, Dict, Tuple
 
 from datetime import datetime
 
 import torch
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-)
 
 from src.generation_utils import batch_generate
 from src.prompt_builder import PromptBuilder
@@ -37,7 +33,7 @@ class Crawler:
             user_seed_templates=crawler_config.user_message_templates,
             assistant_pres=crawler_config.crawler_thinking_messages,
             user_seed_topics=self.queue,
-            languages=crawler_config.prompt_languages,
+            languages=crawler_config.crawler.prompt_languages,
         )
 
         self.save_filename = save_filename
@@ -124,10 +120,22 @@ class Crawler:
                 return True
         return False
 
+    def _resolve_model(self, role: str, local_model, local_tokenizer):
+        """Return (model, tokenizer) for the given role.
+
+        If the role's model config is "local", returns the local vLLM model/tokenizer.
+        Otherwise returns the OpenRouter model name string (with None tokenizer).
+        """
+        model_name = getattr(self.config.model, f"{role}_model")
+        if model_name == "local":
+            return local_model, local_tokenizer
+        else:
+            return model_name, None
+
     def check_refusal(
         self,
-        model: Union[AutoModelForCausalLM, str],
-        tokenizer: AutoTokenizer,
+        local_model,
+        local_tokenizer,
         selected_topics: List[Topic],
         verbose: bool = False,
     ) -> List[Topic]:
@@ -136,8 +144,10 @@ class Crawler:
         if selected_topics == []:
             return selected_topics
 
-        num_checks = self.config.num_refusal_checks_per_topic
-        threshold = self.config.is_refusal_threshold
+        refusal_model, refusal_tokenizer = self._resolve_model("refusal_check", local_model, local_tokenizer)
+
+        num_checks = self.config.crawler.num_refusal_checks_per_topic
+        threshold = self.config.crawler.is_refusal_threshold
 
         # Step 1: Generate queries for ALL topics in parallel
         all_query_prompts = []
@@ -156,13 +166,13 @@ class Crawler:
         # Generate all queries at once
         query_messages = [[{"role": "user", "content": p}] for p in all_query_prompts]
         all_queries, all_query_input_strs = batch_generate(
-            model,
-            tokenizer,
+            refusal_model,
+            refusal_tokenizer,
             query_messages,
             max_new_tokens=(
-                self.config.vllm_max_model_len
-                if self.config.vllm_max_model_len is not None
-                else self.config.max_refusal_check_generated_tokens
+                self.config.model.vllm_max_model_len
+                if self.config.model.vllm_max_model_len is not None
+                else self.config.crawler.max_refusal_check_generated_tokens
             ),
             temperature=1,
             verbose=verbose,
@@ -223,11 +233,11 @@ class Crawler:
             # Generate all answers at once
             answer_messages = [[{"role": "user", "content": p}] for p in all_answer_prompts]
             all_answers, all_answer_strs = batch_generate(
-                model,
-                tokenizer,
+                refusal_model,
+                refusal_tokenizer,
                 answer_messages,
-                max_new_tokens=self.config.max_refusal_check_generated_tokens,
-                temperature=self.config.temperature,
+                max_new_tokens=self.config.crawler.max_refusal_check_generated_tokens,
+                temperature=self.config.model.temperature,
                 cfg=self.config,
             )
 
@@ -262,9 +272,8 @@ class Crawler:
 
     def initialize_topics(
         self,
-        model: AutoModelForCausalLM,
-        tokenizer: AutoTokenizer,
-        filter_models: Dict,
+        local_model,
+        local_tokenizer,
         initial_topics: List[str],
         verbose: bool = False,
     ) -> List[Topic]:
@@ -274,16 +283,16 @@ class Crawler:
             is_chinese = self.formatter._has_chinese(topic_str)
             if is_chinese:
                 topic_english = self.formatter._translate_zn_to_en(
-                    filter_models["model_zh_en"],
-                    filter_models["tokenizer_zh_en"],
+                    local_model,
+                    local_tokenizer,
                     topic_str,
                 )
                 topic_chinese = topic_str
             else:
                 topic_english = topic_str
                 topic_chinese = self.formatter._translate_en_to_zn(
-                    filter_models["model_en_zh"],
-                    filter_models["tokenizer_en_zh"],
+                    local_model,
+                    local_tokenizer,
                     topic_str,
                 )
             topics.append(
@@ -307,9 +316,8 @@ class Crawler:
 
     def crawl(
         self,
-        model: Union[AutoModelForCausalLM, str],
-        tokenizer: AutoTokenizer,
-        filter_models: Dict,
+        local_model,
+        local_tokenizer,
         verbose: bool = False,
     ) -> List[str]:
         """Crawl the topics."""
@@ -317,28 +325,27 @@ class Crawler:
         # Initialize topics
         if self.config.initial_topics:
             self.initialize_topics(
-                model=model,
-                tokenizer=tokenizer,
-                filter_models=filter_models,
+                local_model=local_model,
+                local_tokenizer=local_tokenizer,
                 initial_topics=self.config.initial_topics,
                 verbose=verbose,
             )
 
         # Iterate through crawling steps
-        for crawl_step_idx in trange(self.config.num_crawl_steps, desc="Crawling topics"):
-            print(f"Crawl step: {crawl_step_idx} / {self.config.num_crawl_steps}")
+        for crawl_step_idx in trange(self.config.crawler.num_crawl_steps, desc="Crawling topics"):
+            print(f"Crawl step: {crawl_step_idx} / {self.config.crawler.num_crawl_steps}")
 
             # Generate with prefilling, iterating over all languages to incentivize language balance
-            for lang in self.config.prompt_languages:
+            for lang in self.config.crawler.prompt_languages:
                 torch.cuda.empty_cache()
 
                 # Determine whether in warmup phase
-                if crawl_step_idx < self.config.seed_warmup_steps:
+                if crawl_step_idx < self.config.crawler.seed_warmup_steps:
                     warmup_step_idx = crawl_step_idx
                 else:
                     warmup_step_idx = None
 
-                n = self.config.generation_batch_size * self.config.num_samples_per_topic
+                n = self.config.crawler.generation_batch_size * self.config.crawler.num_samples_per_topic
                 messages, topic_parent_ids = self.prompt_builder.build_messages(
                     lang, n, warmup_step_idx
                 )
@@ -346,23 +353,24 @@ class Crawler:
                 if verbose:
                     print(f"\n## generating...")
 
-                if "thought_suffix" in self.config.prefill_mode:
+                if "thought_suffix" in self.config.crawler.prefill_mode:
                     assert (
                         self.config.max_new_tokens == 2048
                     ), "We need to allow longform generation to capture the full thought before prefilling!"
 
+                target_model, target_tokenizer = self._resolve_model("target", local_model, local_tokenizer)
                 generated_texts, input_strs = batch_generate(
-                    model,
-                    tokenizer,
+                    target_model,
+                    target_tokenizer,
                     messages,
-                    max_new_tokens=self.config.max_generated_tokens,
-                    temperature=self.config.temperature,
+                    max_new_tokens=self.config.crawler.max_generated_tokens,
+                    temperature=self.config.model.temperature,
                     verbose=verbose,
                     cfg=self.config,
                 )
 
                 # Post-generation prefilling
-                if self.config.prefill_mode == "thought_suffix":
+                if self.config.crawler.prefill_mode == "thought_suffix":
                     prefilled_texts = []
                     for gen in generated_texts:
                         if "</think>" in gen:
@@ -374,26 +382,22 @@ class Crawler:
                         else:
                             pass  # dont use topics that lack a complete thinking process
                     generated_texts = batch_complete_R1(
-                        model=model,
-                        tokenizer=tokenizer,
+                        model=target_model,
+                        tokenizer=target_tokenizer,
                         texts=prefilled_texts,
-                        max_new_tokens=self.config.max_generated_tokens,
-                        temperature=self.config.temperature,
+                        max_new_tokens=self.config.crawler.max_generated_tokens,
+                        temperature=self.config.model.temperature,
                     )
                     print(f"post suffixing: {generated_texts}")
 
                 if verbose:
                     print(f"\n## formatting...")
                 new_topics = self.formatter.extract_and_format(
-                    model_zh_en=filter_models["model_zh_en"],
-                    tokenizer_zh_en=filter_models["tokenizer_zh_en"],
-                    model_en_zh=filter_models["model_en_zh"],
-                    tokenizer_en_zh=filter_models["tokenizer_en_zh"],
+                    local_model=local_model,
+                    local_tokenizer=local_tokenizer,
                     input_strs=input_strs,
                     generations=generated_texts,
                     parent_ids=topic_parent_ids,
-                    model=model,
-                    tokenizer=tokenizer,
                     verbose=verbose,
                 )
 
@@ -407,12 +411,12 @@ class Crawler:
                 if len(new_topics) == 0:
                     continue
 
-                if self.config.do_filter_refusals:
+                if self.config.crawler.do_filter_refusals:
                     if verbose:
                         print(f"\n## filtering for refusal...")
                     new_topics = self.check_refusal(
-                        model=model,
-                        tokenizer=tokenizer,
+                        local_model=local_model,
+                        local_tokenizer=local_tokenizer,
                         selected_topics=new_topics,
                         verbose=verbose,
                     )
@@ -437,7 +441,7 @@ class Crawler:
             # Save
             self.save(self.save_filename)
 
-            if self.queue.num_head_topics > self.config.max_crawl_topics:
+            if self.queue.num_head_topics > self.config.crawler.max_crawl_topics:
                 print(f"Topic queue has {len(self.queue.head_topics)} topics")
                 break
 
@@ -470,15 +474,19 @@ class Crawler:
         return crawler
 
 
-def get_run_name(model_path: str, crawler_config: CrawlerConfig, prefill_mode: str):
-    model_name = model_path.split("/")[-1]
+def get_run_name(crawler_config: CrawlerConfig):
+    target_model = crawler_config.model.target_model
+    if target_model == "local":
+        model_name = crawler_config.model.local_model.split("/")[-1] if crawler_config.model.local_model else "no_model"
+    else:
+        model_name = target_model.split("/")[-1]
     run_name = (
         "crawler_log"
         f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         f"_{model_name}"
-        f"_{crawler_config.num_samples_per_topic}samples"
-        f"_{crawler_config.num_crawl_steps}crawls"
-        f"_{crawler_config.do_filter_refusals}filter"
-        f"_{prefill_mode}prompt"
+        f"_{crawler_config.crawler.num_samples_per_topic}samples"
+        f"_{crawler_config.crawler.num_crawl_steps}crawls"
+        f"_{crawler_config.crawler.do_filter_refusals}filter"
+        f"_{crawler_config.crawler.prefill_mode}prompt"
     )
     return run_name

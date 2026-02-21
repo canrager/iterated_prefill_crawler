@@ -1,12 +1,6 @@
 import re
 from typing import List, Union
 
-import torch
-from transformers import (
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM,
-    AutoModelForCausalLM,
-)
 from src.crawler.topic_queue import Topic
 
 
@@ -55,7 +49,7 @@ class TopicFormatter:
         """Extract topics from a text that contains a numbered list."""
         extracted_list = self.numbered_list_pattern.findall(text)
         extracted_list = list(dict.fromkeys(extracted_list))  # Remove exact duplicates
-        extracted_list = extracted_list[: self.config.max_extracted_topics_per_generation]
+        extracted_list = extracted_list[: self.config.crawler.max_extracted_topics_per_generation]
         extracted_list = [item for item in extracted_list if item is not None]
         return extracted_list
 
@@ -65,38 +59,48 @@ class TopicFormatter:
 
     def _translate_zn_to_en(
         self,
-        model_zh_en: AutoModelForSeq2SeqLM,
-        tokenizer_zh_en: AutoTokenizer,
+        local_model,
+        local_tokenizer,
         inputs: Union[str, List[str]],
     ) -> Union[str, List[str]]:
-        zh_en_ids_B = tokenizer_zh_en(
-            inputs, padding=True, truncation=True, return_tensors="pt"
-        ).to(model_zh_en.device)
-        with torch.inference_mode():
-            translated_ids_B = model_zh_en.generate(**zh_en_ids_B, max_new_tokens=30)
-        translated_str_B = tokenizer_zh_en.batch_decode(translated_ids_B, skip_special_tokens=True)
-        return translated_str_B
+        from src.generation_utils import batch_generate
+        translation_model, translation_tokenizer = self._resolve_model("translation", local_model, local_tokenizer)
+        is_single = isinstance(inputs, str)
+        texts = [inputs] if is_single else inputs
+        messages = [[{"role": "user", "content": f"Translate to English (translation only): {t}"}] for t in texts]
+        translated, _ = batch_generate(translation_model, translation_tokenizer, messages, max_new_tokens=50, temperature=0)
+        return translated[0] if is_single else translated
 
     def _translate_en_to_zn(
         self,
-        model_en_zh: AutoModelForSeq2SeqLM,
-        tokenizer_en_zh: AutoTokenizer,
+        local_model,
+        local_tokenizer,
         inputs: Union[str, List[str]],
     ) -> Union[str, List[str]]:
-        en_zh_ids_B = tokenizer_en_zh(
-            inputs, padding=True, truncation=True, return_tensors="pt"
-        ).to(model_en_zh.device)
-        with torch.inference_mode():
-            translated_ids_B = model_en_zh.generate(**en_zh_ids_B, max_new_tokens=30)
-        translated_str_B = tokenizer_en_zh.batch_decode(translated_ids_B, skip_special_tokens=True)
-        return translated_str_B
+        from src.generation_utils import batch_generate
+        translation_model, translation_tokenizer = self._resolve_model("translation", local_model, local_tokenizer)
+        is_single = isinstance(inputs, str)
+        texts = [inputs] if is_single else inputs
+        messages = [[{"role": "user", "content": f"翻译成中文（只输出翻译）：{t}"}] for t in texts]
+        translated, _ = batch_generate(translation_model, translation_tokenizer, messages, max_new_tokens=50, temperature=0)
+        return translated[0] if is_single else translated
+
+    def _resolve_model(self, role: str, local_model, local_tokenizer):
+        """Return (model, tokenizer) for the given role.
+
+        If the role's model config is "local", returns the local model/tokenizer.
+        Otherwise returns the OpenRouter model name string (with None tokenizer).
+        """
+        model_name = getattr(self.config.model, f"{role}_model")
+        if model_name == "local":
+            return local_model, local_tokenizer
+        else:
+            return model_name, None
 
     def _batch_translate_chinese_english_both_ways(
         self,
-        model_zh_en: AutoModelForSeq2SeqLM,
-        tokenizer_zh_en: AutoTokenizer,
-        model_en_zh: AutoModelForSeq2SeqLM,
-        tokenizer_en_zh: AutoTokenizer,
+        local_model,
+        local_tokenizer,
         topics: List[Topic],
     ) -> List[Topic]:
         """Given a list of texts, translate the texts with chinese characters to english. Do not translate others.
@@ -114,12 +118,12 @@ class TopicFormatter:
                 english_indices.append(i)
 
         # translate the subset with chinese characters in a single batch
-        for batch_start in range(0, len(chinese_topics), self.config.generation_batch_size):
-            batch_end = batch_start + self.config.generation_batch_size
+        for batch_start in range(0, len(chinese_topics), self.config.crawler.generation_batch_size):
+            batch_end = batch_start + self.config.crawler.generation_batch_size
             chinese_topic_B = chinese_topics[batch_start:batch_end]
             chinese_indices_B = chinese_indices[batch_start:batch_end]
             chinese_raw_B = [t.raw for t in chinese_topic_B]
-            translated_str_B = self._translate_zn_to_en(model_zh_en, tokenizer_zh_en, chinese_raw_B)
+            translated_str_B = self._translate_zn_to_en(local_model, local_tokenizer, chinese_raw_B)
             for original, translation, idx in zip(
                 chinese_raw_B, translated_str_B, chinese_indices_B
             ):
@@ -127,12 +131,12 @@ class TopicFormatter:
                 topics[idx].shortened = translation  # copy of english
                 topics[idx].chinese = original
 
-        for batch_start in range(0, len(english_topics), self.config.generation_batch_size):
-            batch_end = batch_start + self.config.generation_batch_size
+        for batch_start in range(0, len(english_topics), self.config.crawler.generation_batch_size):
+            batch_end = batch_start + self.config.crawler.generation_batch_size
             english_topic_B = english_topics[batch_start:batch_end]
             english_indices_B = english_indices[batch_start:batch_end]
             english_raw_B = [t.raw for t in english_topic_B]
-            translated_str_B = self._translate_en_to_zn(model_en_zh, tokenizer_en_zh, english_raw_B)
+            translated_str_B = self._translate_en_to_zn(local_model, local_tokenizer, english_raw_B)
             for original, translation, idx in zip(
                 english_raw_B, translated_str_B, english_indices_B
             ):
@@ -219,15 +223,11 @@ class TopicFormatter:
 
     def extract_and_format(
         self,
-        model_zh_en: AutoModelForSeq2SeqLM,
-        tokenizer_zh_en: AutoTokenizer,
-        model_en_zh: AutoModelForSeq2SeqLM,
-        tokenizer_en_zh: AutoTokenizer,
+        local_model,
+        local_tokenizer,
         input_strs: List[str],
         generations: List[str],
         parent_ids: List[int],
-        model: Union[AutoModelForCausalLM, str] = None,
-        tokenizer: AutoTokenizer = None,
         verbose: bool = False,
     ) -> List[Topic]:
 
@@ -246,18 +246,18 @@ class TopicFormatter:
 
         formatted_topics = self._split_at_comma(formatted_topics, "raw")
         formatted_topics = self._batch_translate_chinese_english_both_ways(
-            model_zh_en, tokenizer_zh_en, model_en_zh, tokenizer_en_zh, formatted_topics
+            local_model, local_tokenizer, formatted_topics
         )
         formatted_topics = self._regex_filter(formatted_topics)
         formatted_topics = self._remove_words(formatted_topics)
 
-        if self.config.do_filter_refusals:
+        if self.config.crawler.do_filter_refusals:
             if verbose:
                 print(f"\n## summarizing topics (before deduplication)...")
             formatted_topics = self.summarize_refusal_topics(
                 topics=formatted_topics,
-                model=model,
-                tokenizer=tokenizer,
+                local_model=local_model,
+                local_tokenizer=local_tokenizer,
                 verbose=verbose,
             )
             self._split_at_comma(formatted_topics, "summary")
@@ -269,23 +269,19 @@ class TopicFormatter:
     def summarize_refusal_topics(
         self,
         topics: List[Topic],
-        llm_judge_name: str = None,
-        model: Union[AutoModelForCausalLM, str] = None,
-        tokenizer: AutoTokenizer = None,
+        local_model=None,
+        local_tokenizer=None,
         verbose: bool = False,
     ) -> List[Topic]:
-        """Summarize topics using an LLM judge with async batch processing.
+        """Summarize topics using the configured summarization_model.
 
-        This function takes topics and summarizes them into concise category labels
-        using concurrent API requests. When called before deduplication, it summarizes
-        all topics. When called after refusal checking, it only summarizes head refusal topics.
+        Routes to vLLM (batch_generate) when summarization_model is "local",
+        or to async OpenRouter API otherwise.
 
         Args:
             topics: List of topics to potentially summarize
-            llm_judge_name: Name of the LLM model to use for summarization (defaults to config value).
-                           If "self", uses the provided model/tokenizer for batch generation.
-            model: Model to use when llm_judge_name == "self"
-            tokenizer: Tokenizer to use when llm_judge_name == "self"
+            local_model: Local vLLM model (used when summarization_model == "local")
+            local_tokenizer: Local tokenizer (used when summarization_model == "local")
             verbose: Whether to print debug information
 
         Returns:
@@ -297,9 +293,7 @@ class TopicFormatter:
             batch_generate,
         )
 
-        # Use config value if not specified
-        if llm_judge_name is None:
-            llm_judge_name = self.config.llm_judge_name
+        summarization_model = self.config.model.summarization_model
 
         # Filter topics that don't already have summaries
         # If is_head is None, we're being called before deduplication, so summarize all
@@ -319,14 +313,10 @@ class TopicFormatter:
         if verbose:
             print(f"Batch summarizing {len(topics_raw)} topics")
 
-        # Use self model if llm_judge_name == "self"
-        if llm_judge_name == "self":
-            if model is None or tokenizer is None:
-                raise ValueError(
-                    "model and tokenizer must be provided when llm_judge_name == 'self'"
-                )
+        if summarization_model == "local":
+            model, tokenizer = local_model, local_tokenizer
 
-            # Format prompts for summarization (same format as async version)
+            # Format prompts for summarization
             summarization_prompts = []
             for topic_raw in topics_raw:
                 prompt = f"""Given a topic phrase, extract the core concept being addressed. Be specific and concise, using 1-3 keywords.
@@ -359,11 +349,11 @@ Output:"""
                     tokenizer=tokenizer,
                     messages=summarization_messages,
                     max_new_tokens=(
-                        self.config.vllm_max_model_len
-                        if self.config.vllm_max_model_len is not None
-                        else self.config.max_generated_tokens
+                        self.config.model.vllm_max_model_len
+                        if self.config.model.vllm_max_model_len is not None
+                        else self.config.crawler.max_generated_tokens
                     ),
-                    temperature=self.config.temperature,
+                    temperature=self.config.model.temperature,
                     verbose=verbose,
                     cfg=self.config,
                 )
@@ -386,26 +376,23 @@ Output:"""
 
             except Exception as e:
                 print(
-                    f"Error in batch summarization with self model, falling back to shortened versions: {e}"
+                    f"Error in batch summarization with local model, falling back to shortened versions: {e}"
                 )
-                # Fallback all topics to shortened version
                 for topic in topics_to_summarize:
                     topic.summary = topic.shortened
         else:
-            # Use external API (original behavior)
+            # Use OpenRouter API
             system_prompt = (
                 "You are a world-class expert at categorizing and summarizing topics. "
                 "Your task is to extract the core topic being addressed in a given phrase. "
                 "Keep your summaries concise and specific."
             )
 
-            # Get max concurrent from config
-            max_concurrent = getattr(self.config, "max_concurrent_summarizations", 10)
+            max_concurrent = self.config.crawler.max_concurrent_summarizations
 
             if verbose:
-                print(f"Using external API with max_concurrent={max_concurrent}")
+                print(f"Using OpenRouter API (model={summarization_model}, max_concurrent={max_concurrent})")
 
-            # Run async batch summarization
             try:
                 # Suppress event loop closure errors from async HTTP clients during cleanup
                 import logging
@@ -418,7 +405,7 @@ Output:"""
                     results = asyncio.run(
                         async_batch_summarize_topics(
                             topics_raw=topics_raw,
-                            llm_judge_name=llm_judge_name,
+                            llm_judge_name=summarization_model,
                             system_prompt=system_prompt,
                             max_concurrent=max_concurrent,
                             verbose=verbose,
@@ -434,20 +421,16 @@ Output:"""
                 for topic in topics_to_summarize:
                     summary, error = raw_to_result.get(topic.raw, (None, None))
                     if summary:
-                        # Remove thinking context from summary if present
-                        # remove_thinking_context expects a list, so wrap and unwrap
                         processed_summaries = remove_thinking_context([summary])
                         summary = processed_summaries[0] if processed_summaries else summary
                         topic.summary = summary
                     else:
-                        # Fallback to shortened version on error
                         topic.summary = topic.shortened
                         if error and verbose:
                             print(f"Using fallback for topic '{topic.raw}': {error}")
 
             except Exception as e:
                 print(f"Error in batch summarization, falling back to shortened versions: {e}")
-                # Fallback all topics to shortened version
                 for topic in topics_to_summarize:
                     topic.summary = topic.shortened
 

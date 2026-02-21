@@ -1,0 +1,4 @@
+target_model: "anthropic/claude-3.5-haiku"
+translation_model: "anthropic/claude-3.5-haiku"
+summarization_model: "anthropic/claude-3.5-haiku"
+refusal_check_model: "anthropic/claude-3.5-haiku"
