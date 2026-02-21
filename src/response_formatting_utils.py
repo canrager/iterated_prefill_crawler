@@ -295,7 +295,6 @@ class TopicFormatter:
         from src.generation_utils import (
             async_batch_summarize_topics,
             batch_generate,
-            MessageSegments,
         )
 
         # Use config value if not specified
@@ -352,13 +351,13 @@ Output:"""
 
             # Use batch_generate to summarize all topics at once
             try:
-                # Use default MessageSegments (empty prefix/suffix, simple template)
-                # The prompts already contain all necessary context
+                summarization_messages = [
+                    [{"role": "user", "content": p}] for p in summarization_prompts
+                ]
                 summaries, _ = batch_generate(
                     model=model,
                     tokenizer=tokenizer,
-                    selected_topics=summarization_prompts,
-                    message_segments=MessageSegments(),
+                    messages=summarization_messages,
                     max_new_tokens=(
                         self.config.vllm_max_model_len
                         if self.config.vllm_max_model_len is not None
@@ -367,7 +366,6 @@ Output:"""
                     temperature=self.config.temperature,
                     verbose=verbose,
                     cfg=self.config,
-                    force_thought_skip="thought" in self.config.prefill_mode,
                 )
 
                 # Extract summaries (strip whitespace)

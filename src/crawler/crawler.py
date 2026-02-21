@@ -13,11 +13,8 @@ from transformers import (
     AutoModelForCausalLM,
 )
 
-from src.generation_utils import (
-    batch_generate,
-    batch_complete_R1,
-    MessageSegments,
-)
+from src.generation_utils import batch_generate
+from src.prompt_builder import PromptBuilder
 from src.crawler.topic_queue import TopicQueue, Topic
 from src.crawler.config import CrawlerConfig
 from src.crawler.crawler_stats import CrawlerStats
@@ -34,6 +31,14 @@ class Crawler:
         self.stats = CrawlerStats()
 
         self.formatter = TopicFormatter(crawler_config)
+
+        self.prompt_builder = PromptBuilder(
+            user_pres=crawler_config.fallback_user_message_templates,
+            user_seed_templates=crawler_config.user_message_templates,
+            assistant_pres=crawler_config.crawler_thinking_messages,
+            user_seed_topics=self.queue,
+            languages=crawler_config.prompt_languages,
+        )
 
         self.save_filename = save_filename
         self.save(save_filename)  # Already testing at initialization whether saving works
@@ -124,8 +129,6 @@ class Crawler:
         model: Union[AutoModelForCausalLM, str],
         tokenizer: AutoTokenizer,
         selected_topics: List[Topic],
-        user_message_templates: List[List[str]],
-        force_thought_skip: bool = False,
         verbose: bool = False,
     ) -> List[Topic]:
         """Filtering incoming head topics for refusals."""
@@ -151,11 +154,11 @@ class Crawler:
             topic_indices.extend([topic_idx] * num_checks)
 
         # Generate all queries at once
-        # Note that batch_generate does enforce internal batching, but vllm might do automatically?
+        query_messages = [[{"role": "user", "content": p}] for p in all_query_prompts]
         all_queries, all_query_input_strs = batch_generate(
             model,
             tokenizer,
-            all_query_prompts,
+            query_messages,
             max_new_tokens=(
                 self.config.vllm_max_model_len
                 if self.config.vllm_max_model_len is not None
@@ -218,10 +221,11 @@ class Crawler:
                 answer_topic_indices.extend([topic_idx] * len(extracted_queries))
 
             # Generate all answers at once
+            answer_messages = [[{"role": "user", "content": p}] for p in all_answer_prompts]
             all_answers, all_answer_strs = batch_generate(
                 model,
                 tokenizer,
-                all_answer_prompts,
+                answer_messages,
                 max_new_tokens=self.config.max_refusal_check_generated_tokens,
                 temperature=self.config.temperature,
                 cfg=self.config,
@@ -301,94 +305,6 @@ class Crawler:
 
         return topics
 
-    def _get_seed_topics(self) -> List[Topic]:
-        """Get seed topics for the current crawl step.
-
-        Args:
-            crawl_step_idx: The current crawl step index
-
-        Returns:
-            List of seed topics to use for generation
-        """
-        # Return an empty list of topics if no seed_topics required:
-        if "no_seed" in self.config.prefill_mode:
-            empty_seeds = [""] * self.config.generation_batch_size
-            seed_topics_text_languages = {}
-            seed_topics_text_languages["english"] = empty_seeds
-            seed_topics_text_languages["chinese"] = empty_seeds
-            empty_parent_ids = [-1] * self.config.generation_batch_size
-            return empty_seeds, empty_parent_ids
-
-        # Choose topic seed candidates
-        if self.config.do_filter_refusals:
-            topic_seed_candidates = self.queue.head_refusal_topics
-        else:
-            topic_seed_candidates = self.queue.head_topics
-
-        # Get sample topics
-        if topic_seed_candidates == []:
-            raise ValueError("Empty topic list!")
-        elif len(topic_seed_candidates) <= self.config.generation_batch_size:
-            # Early stage filling the queue
-            seed_topics = topic_seed_candidates
-        else:
-            # Randomly sample for topic diversity
-            seed_topics = random.sample(topic_seed_candidates, self.config.generation_batch_size)
-
-        # Select relevant attributes for seeding
-        seed_topics_text_languages = {}
-        seed_topics_text_languages["english"] = [t.english for t in seed_topics]
-        seed_topics_text_languages["chinese"] = [t.chinese for t in seed_topics]
-        topic_parent_ids = [t.id for t in seed_topics]
-
-        return seed_topics_text_languages, topic_parent_ids
-
-    def _get_message_segments(self, lang="english", warmup_idx=None) -> MessageSegments:
-        if warmup_idx:
-            prefill_message = self.config.crawler_thinking_messages[lang][warmup_idx]
-        else:
-            prefill_message = random.choice(self.config.crawler_thinking_messages[lang])
-
-        listing_prefill = "Topics:\n1. "
-
-        match self.config.prefill_mode:
-            case "user_prefill_no_seed":
-                segments = MessageSegments(
-                    user_prefix=random.choice(self.config.fallback_user_message_templates[lang]),
-                    user_suffix=prefill_message,
-                    assistant_prefix=listing_prefill,
-                )
-            case "user_prefill_with_seed":
-                segments = MessageSegments(
-                    user_template=random.choice(self.config.user_message_templates[lang]),
-                    user_suffix=prefill_message,
-                    assistant_prefix=listing_prefill,
-                )
-            case "assistant_prefill_no_seed":
-                segments = MessageSegments(
-                    user_prefix=random.choice(self.config.fallback_user_message_templates[lang]),
-                    assistant_prefix=f"{prefill_message}\n{listing_prefill}",
-                )
-            case "assistant_prefill_with_seed":
-                segments = MessageSegments(
-                    user_template=random.choice(self.config.user_message_templates[lang]),
-                    assistant_prefix=f"{prefill_message}\n{listing_prefill}",
-                )
-            case "thought_prefill_no_seed":
-                segments = MessageSegments(
-                    user_prefix=random.choice(self.config.fallback_user_message_templates[lang]),
-                    thought_prefix=f"{prefill_message}\n{listing_prefill}",
-                )
-            case "thought_prefill_with_seed":
-                segments = MessageSegments(
-                    user_template=random.choice(self.config.user_message_templates[lang]),
-                    thought_prefix=f"{prefill_message}\n{listing_prefill}",
-                )
-            case _:
-                raise ValueError("Invalid prefill mode selected.")
-
-        return segments
-
     def crawl(
         self,
         model: Union[AutoModelForCausalLM, str],
@@ -411,8 +327,6 @@ class Crawler:
         # Iterate through crawling steps
         for crawl_step_idx in trange(self.config.num_crawl_steps, desc="Crawling topics"):
             print(f"Crawl step: {crawl_step_idx} / {self.config.num_crawl_steps}")
-            # Get seed topics for this crawl step
-            seed_topics_text_languages, topic_parent_ids = self._get_seed_topics()
 
             # Generate with prefilling, iterating over all languages to incentivize language balance
             for lang in self.config.prompt_languages:
@@ -424,9 +338,10 @@ class Crawler:
                 else:
                     warmup_step_idx = None
 
-                # Choose Message Segments / Templates
-                message_segments = self._get_message_segments(lang, warmup_step_idx)
-                seed_topics_text = seed_topics_text_languages[lang]
+                n = self.config.generation_batch_size * self.config.num_samples_per_topic
+                messages, topic_parent_ids = self.prompt_builder.build_messages(
+                    lang, n, warmup_step_idx
+                )
 
                 if verbose:
                     print(f"\n## generating...")
@@ -439,12 +354,9 @@ class Crawler:
                 generated_texts, input_strs = batch_generate(
                     model,
                     tokenizer,
-                    seed_topics_text,
-                    message_segments=message_segments,
-                    force_thought_skip=False,
+                    messages,
                     max_new_tokens=self.config.max_generated_tokens,
                     temperature=self.config.temperature,
-                    num_samples_per_topic=self.config.num_samples_per_topic,
                     verbose=verbose,
                     cfg=self.config,
                 )
@@ -502,8 +414,6 @@ class Crawler:
                         model=model,
                         tokenizer=tokenizer,
                         selected_topics=new_topics,
-                        user_message_templates=self.config.user_message_templates,
-                        force_thought_skip=self.config.do_force_thought_skip,
                         verbose=verbose,
                     )
 

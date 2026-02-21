@@ -242,15 +242,17 @@ def run_parallel_ranking_experiment(
         batch_pairs = all_pairs[i : i + batch_size]
         batch_prompts = [build_prompt(t1, t2) for t1, t2 in batch_pairs]
 
+        messages = [
+            [
+                {"role": "user", "content": p},
+                {"role": "assistant", "content": r"\boxed{"},
+            ]
+            for p in batch_prompts
+        ]
         responses, input_strs = batch_generate(
             model=model,
             tokenizer=tokenizer,
-            selected_topics=batch_prompts,
-            assistant_prefill=r"\boxed{",
-            thinking_message="",
-            force_thought_skip=False,
-            tokenization_template="chat",
-            num_samples_per_topic=1,
+            messages=messages,
             max_new_tokens=50,
             temperature=None,  # Greedy decoding
             skip_special_tokens=True,

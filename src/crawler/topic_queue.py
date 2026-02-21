@@ -40,10 +40,12 @@ class Topic:
 
 
 class TopicQueue:
-    def __init__(self):
+    def __init__(self,
+                 head_refusal_topics: List[Topic] = []
+                 ):
         # Track clusters
         self.head_topics: List[Topic] = []
-        self.head_refusal_topics: List[Topic] = []
+        self.head_refusal_topics: List[Topic] = head_refusal_topics
         self.cluster_topics: List[List[Topic]] = []
 
         # Stats

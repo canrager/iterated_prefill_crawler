@@ -1,8 +1,8 @@
 # Model settings
 # model_path: "allenai/Llama-3.1-Tulu-3-8B-SFT"
-# model_path: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+model_path: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 # model_path: "perplexity-ai/r1-1776-distill-llama-70b"
-model_path: "meta-llama/Llama-3.1-8B-Instruct"
+# model_path: "meta-llama/Llama-3.1-8B-Instruct"
 quantization_bits: null
 device: "cuda"
 cache_dir: "models"  # Relative to project root parent, will be created if non-existent
@@ -29,7 +29,6 @@ max_extracted_topics_per_generation: 10
 max_crawl_topics: 1_000_000
 tokenization_template: chat
 do_filter_refusals: true
-do_force_thought_skip: false
 # llm_judge_name: "gpt-5-nano"
 llm_judge_name: "self"
 max_concurrent_summarizations: 10

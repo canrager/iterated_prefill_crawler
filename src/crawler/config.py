@@ -258,7 +258,6 @@ class CrawlerConfig:
 
     # Feature flags
     do_filter_refusals: bool = True
-    do_force_thought_skip: bool = True
     tokenization_template: str = "chat"
     llm_judge_name: str = "gpt-5-nano"
     max_concurrent_summarizations: int = 10

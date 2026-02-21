@@ -1,181 +1,15 @@
-from typing import List, Optional, Tuple, Union
-from tqdm import trange
+from typing import Dict, List, Optional, Tuple, Union
 import time
 import asyncio
-import nnsight
-from nnsight import LanguageModel
 import torch
-from torch import Tensor
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import anthropic
 import os
 from vllm import LLM, SamplingParams
 from vllm.inputs.data import TokensPrompt
-from dataclasses import dataclass
 
-from src.tokenization_utils import custom_decoding, custom_batch_encoding
+from src.tokenization_utils_new import encode_for_generation
 from src.directory_config import INPUT_DIR
-
-
-@dataclass
-class MessageSegments:
-    user_prefix: str = ""
-    user_template: str = "{}"  # formatable!
-    user_suffix: str = ""
-
-    assistant_prefix: str = ""
-    thought_prefix: str = ""
-    thought_suffix: str = ""
-
-
-def single_generate_from_tokens(
-    model,
-    tokenizer,
-    input_ids,
-    max_generated_tokens,
-    skip_special_tokens=False,
-    temperature: Optional[float] = None,
-):
-    """
-    Generate text based on the input prompt.
-
-    Args:
-        prompt (str): Input text prompt
-        model: The loaded model
-        tokenizer: The loaded tokenizer
-        max_length (int): Maximum length of generated text
-
-    Returns:
-        str: Generated text
-    """
-
-    # Prepare input ids
-    input_ids = torch.tensor([input_ids], device=model.device)
-    attention_mask = torch.ones_like(input_ids, device=model.device)
-
-    # Set sampling parameters
-    if temperature is not None:
-        do_sample = True
-        top_p = temperature
-    else:
-        do_sample = False
-        top_p = None
-
-    with torch.no_grad():
-        outputs = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            max_length=max_generated_tokens,
-            do_sample=do_sample,
-            temperature=temperature,
-            top_p=top_p,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
-
-    # Decode and return the generated text
-    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=skip_special_tokens)
-    return generated_text
-
-
-def custom_pad(input_ids, tokenizer):
-    # if not hasattr(tokenizer, "pad_token_id") or tokenizer.pad_token_id is None:
-    #     tokenizer.pad_token_id = tokenizer.eos_token_id
-    # always use eos_token_id as pad_token_id
-    tokenizer.pad_token_id = tokenizer.eos_token_id
-
-    # Pad input_ids to the same length
-    # print(f' input_ids: {input_ids}')
-    max_length = max(len(ids) for ids in input_ids)
-    padded_input_ids = [
-        [tokenizer.pad_token_id] * (max_length - len(ids)) + ids for ids in input_ids
-    ]
-    padded_attention_mask = [[0] * (max_length - len(ids)) + [1] * len(ids) for ids in input_ids]
-    return padded_input_ids, padded_attention_mask
-
-
-def batch_complete_R1(
-    model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,
-    texts: List[str],
-    max_new_tokens: int = 150,
-    temperature: float = 0.6,
-    cfg=None,
-):
-    """
-    Complete the generated text using the R1 model.
-    """
-    tokenized_texts = tokenizer(
-        texts, padding=True, truncation=False, return_tensors="pt", padding_side="left"
-    )
-    tokenized_texts = tokenized_texts.to(model.device)
-    with torch.no_grad():
-        outputs = model.generate(
-            **tokenized_texts,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-        )
-    generated_texts = custom_decoding(cfg.model_path, tokenizer, outputs, skip_special_tokens=True)
-    return generated_texts
-
-
-def batch_generate_from_tokens(
-    model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,
-    input_ids_BL: List[List[int]],
-    max_generation_length: int = 1000,
-    max_new_tokens: Optional[int] = None,
-    skip_special_tokens: bool = False,
-    temperature: Optional[float] = None,
-    verbose: bool = False,
-    cfg=None,
-):
-    """
-    Generate text based on the input prompt.
-    Note, we assume tokenized input_ids were generated with special tokens.
-
-    Args:
-        model: The loaded model
-        tokenizer: The loaded tokenizer
-        input_ids: The input ids
-        max_length: The maximum length of the generated text
-        skip_special_tokens: Whether to skip the special tokens
-    """
-
-    padded_input_ids_BL, padded_attention_mask_BL = custom_pad(input_ids_BL, tokenizer)
-
-    # Convert to tensors
-    input_ids_tensor = torch.tensor(padded_input_ids_BL).to(model.device)
-    attention_mask_tensor = torch.tensor(padded_attention_mask_BL).to(model.device)
-
-    # Set sampling parameters
-    if temperature is not None:
-        do_sample = True
-    else:
-        do_sample = False
-
-    with torch.no_grad():
-        outputs = model.generate(
-            input_ids_tensor,
-            attention_mask=attention_mask_tensor,
-            max_length=max_generation_length,  # Use max_generation_length instead of max_length
-            max_new_tokens=max_new_tokens,
-            do_sample=do_sample,
-            temperature=temperature,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
-
-    if verbose:
-        for output in outputs:
-            decoded = [tokenizer.decode(o, skip_special_tokens=False) for o in output]
-            print("====================")
-            print("".join([f"{s}[{i}]" for i, s in zip(output, decoded)]))
-
-    model_name = cfg.model_path
-    generated_texts = custom_decoding(model_name, tokenizer, outputs, skip_special_tokens)
-
-    return generated_texts
 
 
 def batch_generate_from_tokens_vllm(
@@ -237,210 +71,58 @@ def batch_generate_from_tokens_vllm(
     return generated_texts
 
 
-def generate_text_from_tokens_NDIF(
-    model: LanguageModel,
-    tokenizer: AutoTokenizer,
-    input_ids_BL: List[List[int]],
-    max_generation_length: int = 1000,
-    max_new_tokens: Optional[int] = None,
-    skip_special_tokens: bool = False,
-    temperature: Optional[float] = None,
-):
-    # Generate text
-    padded_input_ids_BL, padded_attention_mask_BL = custom_pad(input_ids_BL, tokenizer)
-    padded_input_ids_BL = torch.tensor(padded_input_ids_BL)
-    padded_attention_mask_BL = torch.tensor(padded_attention_mask_BL)
-
-    # Set sampling parameters
-    if temperature is not None:
-        do_sample = True
-    else:
-        do_sample = False
-
-    # Generate text
-    with model.generate(
-        {"input_ids": padded_input_ids_BL, "attention_mask": padded_attention_mask_BL},
-        max_new_tokens=max_new_tokens,
-        do_sample=do_sample,
-        temperature=temperature,
-        pad_token_id=tokenizer.pad_token_id,
-        eos_token_id=tokenizer.eos_token_id,
-        remote=True,  # Run the model remotely on NDIF
-    ):
-        outputs = nnsight.list().save()
-
-        with model.lm_head.all():
-            outputs.append(model.lm_head.output[0][-1].argmax(dim=-1))
-
-    # Decode and return the generated text
-    outputs = outputs.value
-    in_out = torch.cat([torch.tensor(padded_input_ids_BL), outputs], dim=1)
-    in_out_tokens = custom_decoding(model_name, tokenizer, in_out, skip_special_tokens)
-    return in_out_tokens
-
-
 def batch_generate(
-    model,
-    tokenizer,
-    selected_topics: List[str],
-    message_segments: MessageSegments = MessageSegments(),
-    force_thought_skip: bool = False,
-    tokenization_template: str = "chat",
-    num_samples_per_topic: int = 1,
+    model: LLM,
+    tokenizer: AutoTokenizer,
+    messages: List[List[Dict]],
     max_new_tokens: int = 150,
     temperature: float = 0.6,
     verbose: bool = False,
     skip_special_tokens: bool = False,
-    remote: bool = False,
     cfg=None,
-) -> List[str]:
-    """Given a list of seed topics, return a list of raw model generations,
-    self.config.num_samples_per_topic determines number of generations for identical input topics.
+) -> Tuple[List[str], List[str]]:
+    """Generate text from a list of message dicts using the vLLM backend.
+
+    Args:
+        model: vLLM LLM instance
+        tokenizer: HuggingFace tokenizer
+        messages: List of message lists, each in OpenAI chat format.
+                  Each inner list has at most two messages:
+                  - [{"role":"user","content":...}]
+                  - [{"role":"user","content":...}, {"role":"assistant","content":...}]
+                  The assistant content is used as prefill (thought or assistant,
+                  depending on cfg.prefill_mode).
+        max_new_tokens: Maximum new tokens to generate
+        temperature: Sampling temperature (None → greedy)
+        verbose: Print input/output pairs
+        skip_special_tokens: Skip special tokens when decoding outputs
+        cfg: Config object with model_path and prefill_mode attributes
+
+    Returns:
+        Tuple of (generated_texts, input_strs)
     """
-
-    # Populate templates topic
-    filled_user_prompts = [
-        " ".join(
-            filter(
-                None,
-                [
-                    message_segments.user_prefix,
-                    message_segments.user_template.format(t),
-                    message_segments.user_suffix,
-                ],
-            )
-        )
-        for t in selected_topics
-    ]
-
-    # Repeat for multiple generations per topic
-    filled_user_prompts *= num_samples_per_topic
-
-    # Run generation
-
-    # Handle external APIs
-    if isinstance(model, str):
-        assert any(
-            keyword in model for keyword in ["claude", "grok"]
-        ), f"Model {model} must be either a loaded hf model or 'claude' or 'grok'"
-
-        system_prompt = ""
-        assistant_prefill = message_segments.assistant_prefix
-
-        if message_segments.thought_prefix != "":
-            system_prompt += (
-                "Organize your thoughts within XML tags using <think> </think> before responding."
-            )
-            assistant_prefill += f"\n<think> {message_segments.thought_prefix}"
-
-        # Use batched processing for all prompts at once
-        generated_texts = query_llm_api(
-            model_name=model,
-            prompt=filled_user_prompts,
-            assistant_prefill=assistant_prefill,
-            system_prompt=system_prompt,
-            verbose=True,
-            max_tokens=max_new_tokens,
-        )
-        return generated_texts
-
-    model_name = cfg.model_path
-
-    input_ids, input_strs = custom_batch_encoding(
-        model_name=model_name,
+    input_ids, input_strs = encode_for_generation(
         tokenizer=tokenizer,
-        user_messages=filled_user_prompts,
-        assistant_prefill=message_segments.assistant_prefix,
-        thinking_message=message_segments.thought_prefix,
-        force_thought_skip=force_thought_skip,
-        template=tokenization_template,
+        messages=messages,
     )
 
-    if remote:
-        for _ in range(num_samples_per_topic):
-            batch_generations = generate_text_from_tokens_NDIF(
-                model=model,
-                tokenizer=tokenizer,
-                input_ids_BL=input_ids,
-                max_new_tokens=max_new_tokens,
-                max_generation_length=None,
-                temperature=temperature,
-                skip_special_tokens=skip_special_tokens,
-            )
-            generated_texts.extend(batch_generations)
-    else:
-        # Dispatch to vLLM or transformers based on model type
-        if isinstance(model, LLM):
-            # vLLM backend
-            for _ in range(num_samples_per_topic):
-                generated_texts = batch_generate_from_tokens_vllm(
-                    model=model,
-                    tokenizer=tokenizer,
-                    input_ids_BL=input_ids,
-                    max_generation_length=None,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    skip_special_tokens=skip_special_tokens,
-                    verbose=False,
-                    cfg=cfg,
-                )
-        else:
-            # Transformers backend
-            generated_texts = []
-            for _ in range(num_samples_per_topic):
-                batch_generations = batch_generate_from_tokens(
-                    model=model,
-                    tokenizer=tokenizer,
-                    input_ids_BL=input_ids,
-                    max_generation_length=None,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    skip_special_tokens=skip_special_tokens,
-                    verbose=False,
-                    cfg=cfg,
-                )
-                generated_texts.extend(batch_generations)
-
-    if verbose:
-        input_tokens = custom_decoding(model_name, tokenizer, input_ids, skip_special_tokens)
-        for i, o in zip(input_tokens, generated_texts):
-            print(f"===========================\n====input: {i}\n\n==== output:\n {o}\n\n")
-    return generated_texts, input_strs
-
-
-if __name__ == "__main__":
-    from nnsight import CONFIG
-    from src.directory_config import INPUT_DIR
-
-    model_name = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
-    model_name = "meta-llama/Meta-Llama-3.1-8B"
-    model = LanguageModel(model_name)
-    tokenizer = model.tokenizer
-
-    with open(INPUT_DIR / "nns.txt", "r") as f:
-        NNS = f.read()
-    CONFIG.API.APIKEY = NNS.strip()
-    CONFIG.APP.REMOTE_LOGGING = False
-
-    TOPICS = [
-        "capital of France",
-        "main city of Germany",
-        "most populous city in Italy",
-    ]
-    USER_MESSAGE_TEMPLATE = "What is the {}?"
-    THINKING_MESSAGE = "I know that."
-
-    generated_texts, input_strs = batch_generate(
+    generated_texts = batch_generate_from_tokens_vllm(
         model=model,
         tokenizer=tokenizer,
-        selected_topics=TOPICS,
-        user_message_template=USER_MESSAGE_TEMPLATE,
-        thinking_message=THINKING_MESSAGE,
-        max_new_tokens=100,
-        tokenization_template="chat",
-        remote=True,
+        input_ids_BL=input_ids,
+        max_generation_length=None,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        skip_special_tokens=skip_special_tokens,
+        verbose=False,
+        cfg=cfg,
     )
-    print(generated_texts)
+
+    if verbose:
+        for input_str, output in zip(input_strs, generated_texts):
+            print(f"===========================\n====input: {input_str}\n\n==== output:\n {output}\n\n")
+
+    return generated_texts, input_strs
 
 
 def query_llm_api(
