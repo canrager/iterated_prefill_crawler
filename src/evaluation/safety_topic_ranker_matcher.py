@@ -7,7 +7,7 @@ import time
 import re
 from collections import defaultdict
 
-from src.generation_utils import query_llm_api
+from src.openrouter_utils import query_llm_api
 from src.directory_config import RESULT_DIR, INPUT_DIR
 
 

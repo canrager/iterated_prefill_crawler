@@ -279,7 +279,7 @@ def test_topic_aggregation_50_topics(temp_pbr_dir, monkeypatch):
     # Monkey patch the API calls
     monkeypatch.setattr("core.generation_utils.query_llm_api", mock_query_llm_api)
     monkeypatch.setattr(
-        "core.generation_utils.async_query_llm_api", mock_async_query_llm_api
+        "core.generation_utils.async_query_openrouter", mock_async_query_llm_api
     )
 
     # Run aggregation

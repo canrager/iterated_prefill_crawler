@@ -11,7 +11,7 @@ from src.evaluation.ranking import WinCountRanking, EloRanking, TrueSkillRanking
 from src.evaluation.ranking_eval import RankingTracker
 import random
 import torch
-from src.generation_utils import query_llm_api
+from src.openrouter_utils import query_llm_api
 
 from src.directory_config import INPUT_DIR, INTERIM_DIR, RESULT_DIR
 
