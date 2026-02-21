@@ -4,11 +4,14 @@ from unittest.mock import patch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, AutoModelForCausalLM
 
 from src.crawler.crawler import Crawler
-from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.config import CrawlerConfig
 from src.crawler.topic_queue import Topic
 from src.llm_utils import load_zh_en_translation_model, load_model_and_tokenizer
-from configs.directory_config import MODELS_DIR, DEVICE, resolve_cache_dir
+from src.directory_config import MODELS_DIR, resolve_cache_dir
 from src.tokenization_utils import custom_batch_encoding
+
+
+DEVICE = "cuda:0"
 
 
 @pytest.fixture

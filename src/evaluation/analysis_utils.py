@@ -13,7 +13,7 @@ import random
 import torch
 from src.generation_utils import query_llm_api
 
-from configs.directory_config import INPUT_DIR, INTERIM_DIR, RESULT_DIR
+from src.directory_config import INPUT_DIR, INTERIM_DIR, RESULT_DIR
 
 
 @dataclass
@@ -104,9 +104,7 @@ def llm_query_with_dict_output(
         if replace_ids:
             for k, placeholder_list in response_dict.items():
                 response_dict[k] = [
-                    v
-                    for placeholder in placeholder_list
-                    for v in id_to_value[placeholder]
+                    v for placeholder in placeholder_list for v in id_to_value[placeholder]
                 ]
 
         return response_dict
@@ -118,9 +116,7 @@ def llm_query_with_dict_output(
 
 def get_deduplication_prompt():
     """Returns the system prompt and content prompt for deduplicating clusters."""
-    system_prompt = (
-        "You are a world class expert in summarizing topics and linguistics."
-    )
+    system_prompt = "You are a world class expert in summarizing topics and linguistics."
 
     content_prompt = """
     <cache_block>
@@ -195,9 +191,7 @@ def llm_judge_topic_deduplication_batched(
 
     # Create batches of topics
     batches = create_batched_topics(topic_to_list, num_topics_per_batch)
-    print(
-        f"Created {len(batches)} batches with {num_topics_per_batch} topics per batch"
-    )
+    print(f"Created {len(batches)} batches with {num_topics_per_batch} topics per batch")
 
     # Process each batch
     all_clusters = {}
@@ -294,9 +288,7 @@ def plot_first_occurrence_ids_across_runs(
 
             # Create x and y data points ensuring they are lists for appending
             x_data = list(first_occurences)
-            y_data = list(
-                range(len(first_occurences))
-            )  # y is the cumulative count of clusters
+            y_data = list(range(len(first_occurences)))  # y is the cumulative count of clusters
 
             # Extend the last step to max_steps if needed
             if x_data and x_data[-1] < max_steps:
@@ -316,14 +308,10 @@ def plot_first_occurrence_ids_across_runs(
             )
 
         except FileNotFoundError:
-            print(
-                f"Warning: No clustered topics file found for run {run_title} at {input_file}"
-            )
+            print(f"Warning: No clustered topics file found for run {run_title} at {input_file}")
             continue
         except json.JSONDecodeError:
-            print(
-                f"Warning: Could not decode JSON for run {run_title} from {input_file}"
-            )
+            print(f"Warning: Could not decode JSON for run {run_title} from {input_file}")
             continue
 
     if not all_run_titles:
@@ -349,9 +337,7 @@ def plot_first_occurrence_ids_across_runs(
     # Save the plot
     date_str = datetime.now().strftime("%Y%m%d")
     # Use only alphanumeric chars and underscores from run titles for filename safety
-    safe_run_titles = [
-        "".join(c for c in rt if c.isalnum() or c == "_") for rt in all_run_titles
-    ]
+    safe_run_titles = ["".join(c for c in rt if c.isalnum() or c == "_") for rt in all_run_titles]
     run_titles_str = "--".join(safe_run_titles)
     # Updated output filename
     output_file = os.path.join(
@@ -381,9 +367,7 @@ def plot_precision_recall_curve(
     plt.rcParams.update({"font.size": 14, "font.family": "Palatino"})
 
     # Load rankings with safety topic matches
-    clusters_file = os.path.join(
-        RESULT_DIR, f"topics_clustered_ranked_matched_{run_title}.json"
-    )
+    clusters_file = os.path.join(RESULT_DIR, f"topics_clustered_ranked_matched_{run_title}.json")
     if not os.path.exists(clusters_file):
         raise FileNotFoundError(f"Error: {clusters_file} does not exist")
     with open(clusters_file, "r") as f:
@@ -393,16 +377,12 @@ def plot_precision_recall_curve(
         RESULT_DIR, f"topics_matched_first_occurence_id_{run_title}.json"
     )
     if not os.path.exists(gt_topic_to_first_occurence_id_file):
-        raise FileNotFoundError(
-            f"Error: {gt_topic_to_first_occurence_id_file} does not exist"
-        )
+        raise FileNotFoundError(f"Error: {gt_topic_to_first_occurence_id_file} does not exist")
     with open(gt_topic_to_first_occurence_id_file, "r") as f:
         gt_topic_to_first_occurence_id = json.load(f)
 
     # Get the number of topics from rankings
-    first_occurences = sorted(
-        [i for i in gt_topic_to_first_occurence_id.values() if i is not None]
-    )
+    first_occurences = sorted([i for i in gt_topic_to_first_occurence_id.values() if i is not None])
     num_gt = len(gt_topic_to_first_occurence_id)
     num_clusters = len(clusters)
 
@@ -429,9 +409,7 @@ def plot_precision_recall_curve(
     plt.legend(loc="upper right")
 
     if save_fig:
-        output_file = os.path.join(
-            RESULT_DIR, f"precision_recall_curve_{run_title}.png"
-        )
+        output_file = os.path.join(RESULT_DIR, f"precision_recall_curve_{run_title}.png")
         plt.savefig(output_file)
         plt.close()
         print(f"Precision-recall curve saved to {output_file}")
@@ -468,9 +446,7 @@ def plot_ROC_curve(
                 RESULT_DIR, f"topics_clustered_ranked_matched_{run_title}.json"
             )
         elif ranking_mode == "individual":
-            clusters_file = os.path.join(
-                RESULT_DIR, f"topics_ranked_matched_{run_title}.json"
-            )
+            clusters_file = os.path.join(RESULT_DIR, f"topics_ranked_matched_{run_title}.json")
         else:
             raise ValueError(f"Invalid ranking mode: {ranking_mode}")
         if not os.path.exists(clusters_file):
@@ -552,9 +528,7 @@ def format_topic_df_to_longtable(df: pd.DataFrame) -> Tuple[str, str]:
             - latex_document: Complete, renderable LaTeX document
     """
     # Get crawl columns (all columns except category, dataset, and topic)
-    crawl_columns = [
-        col for col in df.columns if col not in ["category", "dataset", "topic"]
-    ]
+    crawl_columns = [col for col in df.columns if col not in ["category", "dataset", "topic"]]
 
     # Build the table content
     table_content = ""
@@ -618,7 +592,9 @@ def format_topic_df_to_longtable(df: pd.DataFrame) -> Tuple[str, str]:
     latex_document += "}\n"
 
     # Caption and label
-    latex_document += "\\caption{Topic presence across different crawls}\\label{table:topic-counts}\\\\\n"
+    latex_document += (
+        "\\caption{Topic presence across different crawls}\\label{table:topic-counts}\\\\\n"
+    )
 
     # Table header for first page
     latex_document += "\\toprule\n"
@@ -628,9 +604,7 @@ def format_topic_df_to_longtable(df: pd.DataFrame) -> Tuple[str, str]:
     for i, label in enumerate(crawl_columns):
         # Different makebox width and horizontal shift based on column position
         width = "20" if i == 0 else "30"  # First column needs less width
-        hshift = (
-            "0" if i == 0 else f"{i * 5}"
-        )  # Progressively shift columns to the right
+        hshift = "0" if i == 0 else f"{i * 5}"  # Progressively shift columns to the right
         header_commands.append(f"\\tightHeader{{{width}}}{{{hshift}}}{{{label}}}")
 
     rotated_headers = " & ".join(header_commands)
@@ -728,9 +702,7 @@ def format_topic_df_to_shorttable(df: pd.DataFrame) -> Tuple[str, str]:
             - latex_document: Complete, renderable LaTeX document
     """
     # Get crawl columns (all columns except category, dataset, and topic)
-    crawl_columns = [
-        col for col in df.columns if col not in ["category", "dataset", "topic"]
-    ]
+    crawl_columns = [col for col in df.columns if col not in ["category", "dataset", "topic"]]
 
     # Build the table content
     table_content = ""
@@ -806,9 +778,7 @@ def format_topic_df_to_shorttable(df: pd.DataFrame) -> Tuple[str, str]:
     for i, label in enumerate(crawl_columns):
         # Different makebox width and horizontal shift based on column position
         width = "28" if i == 0 else f"{28 - (i * 3)}"  # First column needs less width
-        hshift = (
-            "0"  # if i == 0 else f"{i * 5}"  # Progressively shift columns to the right
-        )
+        hshift = "0"  # if i == 0 else f"{i * 5}"  # Progressively shift columns to the right
         header_commands.append(f"\\tightHeader{{{width}}}{{{hshift}}}{{{label}}}")
 
     rotated_headers = " & ".join(header_commands)
@@ -997,13 +967,10 @@ def plot_recall_curves_across_files(
     date_str = datetime.now().strftime("%Y%m%d")
     # Use only alphanumeric chars and underscores from labels for filename safety
     safe_labels = [
-        "".join(c for c in label if c.isalnum() or c == "_")
-        for label in label_to_file.keys()
+        "".join(c for c in label if c.isalnum() or c == "_") for label in label_to_file.keys()
     ]
     labels_str = "--".join(safe_labels)
-    output_file = os.path.join(
-        result_dir, f"recall_curves_comparison_{date_str}_{labels_str}.png"
-    )
+    output_file = os.path.join(result_dir, f"recall_curves_comparison_{date_str}_{labels_str}.png")
     plt.savefig(output_file, bbox_inches="tight", dpi=250)
     plt.close()
 
@@ -1043,9 +1010,7 @@ def plot_precision_at_k_across_files(
                 data = json.load(f)
 
             # Get topics sorted by their ELO rank index
-            ranked_topics = sorted(
-                data.items(), key=lambda x: x[1]["ranking"]["elo"]["rank_idx"]
-            )
+            ranked_topics = sorted(data.items(), key=lambda x: x[1]["ranking"]["elo"]["rank_idx"])
 
             if not ranked_topics:
                 print(f"Warning: No ranked topics found in {file_path}")
@@ -1057,9 +1022,7 @@ def plot_precision_at_k_across_files(
             for k in k_values:
                 # Count how many topics are matches within first k ranked topics
                 matches = sum(
-                    1
-                    for _, topic_info in ranked_topics[:k]
-                    if topic_info.get("is_match", False)
+                    1 for _, topic_info in ranked_topics[:k] if topic_info.get("is_match", False)
                 )
                 precision = matches / k
                 precision_data[k].append(precision)
@@ -1113,13 +1076,10 @@ def plot_precision_at_k_across_files(
     date_str = datetime.now().strftime("%Y%m%d")
     # Use only alphanumeric chars and underscores from labels for filename safety
     safe_labels = [
-        "".join(c for c in label if c.isalnum() or c == "_")
-        for label in label_to_file.keys()
+        "".join(c for c in label if c.isalnum() or c == "_") for label in label_to_file.keys()
     ]
     labels_str = "--".join(safe_labels)
-    output_file = os.path.join(
-        result_dir, f"precision_at_k_comparison_{date_str}_{labels_str}.png"
-    )
+    output_file = os.path.join(result_dir, f"precision_at_k_comparison_{date_str}_{labels_str}.png")
     plt.savefig(output_file, bbox_inches="tight", dpi=200)
     plt.close()
 
@@ -1213,19 +1173,14 @@ def plot_recall_curves_for_gt_topics(
                         for gt_topic in matched_topics:
                             if gt_topic and gt_topic.lower() != "none":
                                 # Process the topic to get the part after the last colon and convert to lowercase
-                                processed_topic = (
-                                    gt_topic.split(":")[-1].strip().lower()
-                                )
+                                processed_topic = gt_topic.split(":")[-1].strip().lower()
 
                                 if processed_topic in all_gt_topics:
                                     # Only record the first occurrence if it hasn't been seen before
-                                    if (
-                                        processed_topic
-                                        not in gt_topic_to_first_occurrence
-                                    ):
-                                        gt_topic_to_first_occurrence[
-                                            processed_topic
-                                        ] = first_occurence_id
+                                    if processed_topic not in gt_topic_to_first_occurrence:
+                                        gt_topic_to_first_occurrence[processed_topic] = (
+                                            first_occurence_id
+                                        )
 
             # Extract first occurrence IDs and sort them
             first_occurrences = sorted(gt_topic_to_first_occurrence.values())
@@ -1277,8 +1232,7 @@ def plot_recall_curves_for_gt_topics(
     date_str = datetime.now().strftime("%Y%m%d")
     # Use only alphanumeric chars and underscores from labels for filename safety
     safe_labels = [
-        "".join(c for c in label if c.isalnum() or c == "_")
-        for label in label_to_file.keys()
+        "".join(c for c in label if c.isalnum() or c == "_") for label in label_to_file.keys()
     ]
     labels_str = "--".join(safe_labels)
     output_file = os.path.join(
@@ -1292,9 +1246,7 @@ def plot_recall_curves_for_gt_topics(
     # Prepare overall stats
     overall_stats = {
         "total_unique_gt_topics": num_gt_topics,
-        "all_unique_gt_topics": sorted(
-            list(all_gt_topics)
-        ),  # Save all unique ground truth topics
+        "all_unique_gt_topics": sorted(list(all_gt_topics)),  # Save all unique ground truth topics
         "per_file_stats": {},
     }
 
@@ -1329,36 +1281,24 @@ def plot_recall_curves_for_gt_topics(
                                 processed_topic not in gt_topic_to_first_occurrence
                                 and first_occurence_id is not None
                             ):
-                                gt_topic_to_first_occurrence[processed_topic] = (
-                                    first_occurence_id
-                                )
-                                gt_topic_to_first_occurrence_text[processed_topic] = (
-                                    topic_key
-                                )
+                                gt_topic_to_first_occurrence[processed_topic] = first_occurence_id
+                                gt_topic_to_first_occurrence_text[processed_topic] = topic_key
 
             # Store detailed statistics for this file
             overall_stats["per_file_stats"][label] = {
                 "total_gt_topics": num_gt_topics,
                 "found_gt_topics_count": len(found_gt_topics),
-                "found_gt_topics": sorted(
-                    list(found_gt_topics)
-                ),  # Save found ground truth topics
+                "found_gt_topics": sorted(list(found_gt_topics)),  # Save found ground truth topics
                 "gt_topic_to_first_occurrence": gt_topic_to_first_occurrence,  # Save when each topic was found
                 "gt_topic_to_first_occurrence_text": gt_topic_to_first_occurrence_text,  # Save the original topic text
-                "recall": (
-                    len(found_gt_topics) / num_gt_topics if num_gt_topics > 0 else 0
-                ),
+                "recall": (len(found_gt_topics) / num_gt_topics if num_gt_topics > 0 else 0),
             }
 
         except Exception as e:
-            overall_stats["per_file_stats"][label] = {
-                "error": f"Failed to process file: {str(e)}"
-            }
+            overall_stats["per_file_stats"][label] = {"error": f"Failed to process file: {str(e)}"}
 
     # Save statistics
-    stats_file = os.path.join(
-        result_dir, f"gt_recall_stats_{date_str}_{labels_str}.json"
-    )
+    stats_file = os.path.join(result_dir, f"gt_recall_stats_{date_str}_{labels_str}.json")
     with open(stats_file, "w") as f:
         json.dump(overall_stats, f, indent=2)
 

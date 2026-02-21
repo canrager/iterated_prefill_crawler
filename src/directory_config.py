@@ -1,15 +1,16 @@
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).parent.parent
+
+# Project directories
+ROOT_DIR = Path(__file__).parent.parent.parent
 INPUT_DIR = ROOT_DIR / "artifacts" / "input"
 INTERIM_DIR = ROOT_DIR / "artifacts" / "interim"
 RESULT_DIR = ROOT_DIR / "artifacts" / "result"
 CONFIG_DIR = ROOT_DIR / "configs"
-
 MODELS_DIR = ROOT_DIR.parent
-DEVICE = "cuda"
 
 
+# Project directory helper functions
 def resolve_cache_dir(cache_dir: str = None) -> Path:
     """
     Resolve cache_dir path relative to ROOT_DIR.parent.

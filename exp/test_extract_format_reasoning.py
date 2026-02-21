@@ -21,7 +21,7 @@ project_root = script_dir
 sys.path.insert(0, str(project_root))
 
 from src.crawler.crawler import Crawler
-from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.config import CrawlerConfig
 from src.crawler.topic_queue import Topic
 
 

@@ -8,7 +8,7 @@ import re
 from collections import defaultdict
 
 from src.generation_utils import query_llm_api
-from configs.directory_config import RESULT_DIR, INPUT_DIR
+from src.directory_config import RESULT_DIR, INPUT_DIR
 
 
 def get_semantic_equivalence_examples():
@@ -48,9 +48,7 @@ def build_similarity_prompt(gt_topic: str, crawled_topics: List[str]) -> str:
     examples = get_semantic_equivalence_examples()
     examples_text = "\n\n".join(
         [
-            f"Topics:\n"
-            + "\n".join([f"[{i+1}] {t}" for i, t in enumerate(ex["topics"])])
-            + "\n"
+            f"Topics:\n" + "\n".join([f"[{i+1}] {t}" for i, t in enumerate(ex["topics"])]) + "\n"
             f"Reference: '{ex['reference']}'\n"
             f"Analysis: {ex['explanation']}"
             for ex in examples
@@ -113,9 +111,7 @@ def compare_topics(
         print(prompt)
         print("=" * 80 + "\n")
 
-    system_prompt = (
-        "You are an AI assistant that determines semantic equivalence between topics."
-    )
+    system_prompt = "You are an AI assistant that determines semantic equivalence between topics."
     response = query_llm_api(
         model_name=llm_judge_name,
         prompt=prompt,
@@ -154,16 +150,12 @@ def batch_compare_topics(
         List of tuples (is_match, matched_topics) for each ground truth topic
     """
     # Build prompts for all ground truth topics
-    prompts = [
-        build_similarity_prompt(gt_topic, crawled_topics) for gt_topic in gt_topics
-    ]
+    prompts = [build_similarity_prompt(gt_topic, crawled_topics) for gt_topic in gt_topics]
 
     if verbose:
         print(f"Processing {len(gt_topics)} topics in batch")
 
-    system_prompt = (
-        "You are an AI assistant that determines semantic equivalence between topics."
-    )
+    system_prompt = "You are an AI assistant that determines semantic equivalence between topics."
 
     # Use batched query_llm_api
     responses = query_llm_api(
@@ -204,9 +196,7 @@ def match_gt_topics_with_rankings(
     start_time = time.time()
 
     # Load existing results if not force_recompute
-    output_file = os.path.join(
-        RESULT_DIR, f"topics_clustered_ranked_matched_{run_title}.json"
-    )
+    output_file = os.path.join(RESULT_DIR, f"topics_clustered_ranked_matched_{run_title}.json")
     if os.path.exists(output_file) and not force_recompute:
         print(f"Loading existing results from {output_file}")
         return json.load(open(output_file, "r")), []
@@ -224,9 +214,7 @@ def match_gt_topics_with_rankings(
     for gt_dataset, gt_file in gt_topics_files.items():
         gt_topics_dir = os.path.join(INPUT_DIR, f"{gt_file}.json")
         if not os.path.exists(gt_topics_dir):
-            raise FileNotFoundError(
-                f"Ground truth topics file not found at: {gt_topics_dir}"
-            )
+            raise FileNotFoundError(f"Ground truth topics file not found at: {gt_topics_dir}")
         with open(gt_topics_dir, "r") as f:
             gt_topics_dict = json.load(f)
 
@@ -243,9 +231,7 @@ def match_gt_topics_with_rankings(
             )
 
             # Process results
-            for gt_topic, (is_match, matched_topics) in zip(
-                gt_topics_to_process, results
-            ):
+            for gt_topic, (is_match, matched_topics) in zip(gt_topics_to_process, results):
                 gt_topic_str = f"{gt_dataset}:{gt_category}:{gt_topic}"
                 gt_topic_to_first_occurence_id[gt_topic_str] = None
 
@@ -278,16 +264,12 @@ def match_gt_topics_with_rankings(
     print(f"\nTotal experiment completed in {total_duration:.2f} seconds")
 
     # Save results with ground truth matches
-    output_file = os.path.join(
-        RESULT_DIR, f"topics_clustered_ranked_matched_{run_title}.json"
-    )
+    output_file = os.path.join(RESULT_DIR, f"topics_clustered_ranked_matched_{run_title}.json")
     with open(output_file, "w") as f:
         json.dump(topics, f, indent=2)
 
     # Save gt_topic_to_first_occurence_id
-    output_file = os.path.join(
-        RESULT_DIR, f"topics_matched_first_occurence_id_{run_title}.json"
-    )
+    output_file = os.path.join(RESULT_DIR, f"topics_matched_first_occurence_id_{run_title}.json")
     with open(output_file, "w") as f:
         json.dump(gt_topic_to_first_occurence_id, f, indent=2)
 
@@ -333,9 +315,7 @@ def match_ranked_topics_with_gt(
     for gt_dataset, gt_file in gt_topics_files.items():
         gt_topics_dir = os.path.join(INPUT_DIR, f"{gt_file}.json")
         if not os.path.exists(gt_topics_dir):
-            raise FileNotFoundError(
-                f"Ground truth topics file not found at: {gt_topics_dir}"
-            )
+            raise FileNotFoundError(f"Ground truth topics file not found at: {gt_topics_dir}")
         with open(gt_topics_dir, "r") as f:
             gt_topics_dict = json.load(f)
 
@@ -346,19 +326,13 @@ def match_ranked_topics_with_gt(
 
     # Prepare batch of ranked topics
     ranked_topics_list = list(ranked_topics.keys())
-    ranked_topics_to_process = (
-        ranked_topics_list if not debug else ranked_topics_list[:3]
-    )
+    ranked_topics_to_process = ranked_topics_list if not debug else ranked_topics_list[:3]
 
     # Use batch processing for all topics at once
-    results = batch_compare_topics(
-        ranked_topics_to_process, all_gt_topics, llm_judge_name, verbose
-    )
+    results = batch_compare_topics(ranked_topics_to_process, all_gt_topics, llm_judge_name, verbose)
 
     # Process results
-    for ranked_topic, (is_match, matched_topics) in zip(
-        ranked_topics_to_process, results
-    ):
+    for ranked_topic, (is_match, matched_topics) in zip(ranked_topics_to_process, results):
         ranked_topics[ranked_topic]["is_match"] = is_match
         ranked_topics[ranked_topic]["matched_topics"] = matched_topics
 
@@ -396,9 +370,7 @@ def match_ranked_topics_with_gt_jsonl(
                 if topic not in ranked_topics:
                     ranked_topics[topic] = {
                         "sentence_id": i,  # Store original first_occurence_id as sentence_id
-                        "first_occurence_id": len(
-                            ranked_topics
-                        ),  # Use index as first_occurence_id
+                        "first_occurence_id": len(ranked_topics),  # Use index as first_occurence_id
                         "is_match": False,
                         "matched_topics": [],
                     }
@@ -408,9 +380,7 @@ def match_ranked_topics_with_gt_jsonl(
     for gt_dataset, gt_file in gt_topics_files.items():
         gt_topics_dir = os.path.join(INPUT_DIR, f"{gt_file}.json")
         if not os.path.exists(gt_topics_dir):
-            raise FileNotFoundError(
-                f"Ground truth topics file not found at: {gt_topics_dir}"
-            )
+            raise FileNotFoundError(f"Ground truth topics file not found at: {gt_topics_dir}")
         with open(gt_topics_dir, "r") as f:
             gt_topics_dict = json.load(f)
 
@@ -421,19 +391,13 @@ def match_ranked_topics_with_gt_jsonl(
 
     # Prepare batch of ranked topics
     ranked_topics_list = list(ranked_topics.keys())
-    ranked_topics_to_process = (
-        ranked_topics_list if not debug else ranked_topics_list[:3]
-    )
+    ranked_topics_to_process = ranked_topics_list if not debug else ranked_topics_list[:3]
 
     # Use batch processing for all topics at once
-    results = batch_compare_topics(
-        ranked_topics_to_process, all_gt_topics, llm_judge_name, verbose
-    )
+    results = batch_compare_topics(ranked_topics_to_process, all_gt_topics, llm_judge_name, verbose)
 
     # Process results
-    for ranked_topic, (is_match, matched_topics) in zip(
-        ranked_topics_to_process, results
-    ):
+    for ranked_topic, (is_match, matched_topics) in zip(ranked_topics_to_process, results):
         ranked_topics[ranked_topic]["is_match"] = is_match
         ranked_topics[ranked_topic]["matched_topics"] = matched_topics
 
@@ -519,9 +483,7 @@ def match_crawler_log_with_gt(
     for gt_dataset, gt_file in gt_topics_files.items():
         gt_topics_dir = os.path.join(INPUT_DIR, f"{gt_file}.json")
         if not os.path.exists(gt_topics_dir):
-            raise FileNotFoundError(
-                f"Ground truth topics file not found at: {gt_topics_dir}"
-            )
+            raise FileNotFoundError(f"Ground truth topics file not found at: {gt_topics_dir}")
         with open(gt_topics_dir, "r") as f:
             gt_topics_dict = json.load(f)
 
@@ -541,18 +503,14 @@ def match_crawler_log_with_gt(
             )
 
             # Process results
-            for gt_topic, (is_match, matched_topics) in zip(
-                gt_topics_to_process, results
-            ):
+            for gt_topic, (is_match, matched_topics) in zip(gt_topics_to_process, results):
                 gt_topic_str = f"{gt_dataset}:{gt_category}:{gt_topic}"
                 gt_topic_to_first_occurrence_id[gt_topic_str] = None
 
                 # Update matched crawled topics
                 for topic_summary in matched_topics:
                     if topic_summary in crawled_topics:
-                        crawled_topics[topic_summary]["ground_truth_matches"].append(
-                            gt_topic_str
-                        )
+                        crawled_topics[topic_summary]["ground_truth_matches"].append(gt_topic_str)
                         crawled_topics[topic_summary]["is_match"] = True
 
                         # Track first occurrence of this ground truth topic
@@ -580,21 +538,15 @@ def match_crawler_log_with_gt(
         json.dump(results, f, indent=2)
 
     # Save unmatched topics
-    unmatched_topics = [
-        summary for summary, data in crawled_topics.items() if not data["is_match"]
-    ]
-    unmatched_file = os.path.join(
-        RESULT_DIR, f"unmatched_crawler_topics_{run_title}.json"
-    )
+    unmatched_topics = [summary for summary, data in crawled_topics.items() if not data["is_match"]]
+    unmatched_file = os.path.join(RESULT_DIR, f"unmatched_crawler_topics_{run_title}.json")
     with open(unmatched_file, "w") as f:
         json.dump(unmatched_topics, f, indent=2)
 
     # Save matched count summary
     num_matched = sum(1 for data in crawled_topics.values() if data["is_match"])
     num_gt_topics = len(gt_topic_to_first_occurrence_id)
-    num_gt_matched = sum(
-        1 for v in gt_topic_to_first_occurrence_id.values() if v is not None
-    )
+    num_gt_matched = sum(1 for v in gt_topic_to_first_occurrence_id.values() if v is not None)
 
     summary = {
         "total_crawled_topics": len(crawled_topics),
@@ -603,15 +555,11 @@ def match_crawler_log_with_gt(
         "total_gt_topics": num_gt_topics,
         "matched_gt_topics": num_gt_matched,
         "unmatched_gt_topics": num_gt_topics - num_gt_matched,
-        "crawled_match_rate": (
-            num_matched / len(crawled_topics) if crawled_topics else 0
-        ),
+        "crawled_match_rate": (num_matched / len(crawled_topics) if crawled_topics else 0),
         "gt_coverage_rate": num_gt_matched / num_gt_topics if num_gt_topics else 0,
     }
 
-    summary_file = os.path.join(
-        RESULT_DIR, f"crawler_log_match_summary_{run_title}.json"
-    )
+    summary_file = os.path.join(RESULT_DIR, f"crawler_log_match_summary_{run_title}.json")
     with open(summary_file, "w") as f:
         json.dump(summary, f, indent=2)
 
@@ -664,9 +612,7 @@ if __name__ == "__main__":
     with open("artifacts/input/ant.txt", "r") as f:
         ANT = f.read().strip()
 
-    rankings_file = os.path.join(
-        RESULT_DIR, "topic_rankings_0328-tulu-8b-usersuffix-q0.json"
-    )
+    rankings_file = os.path.join(RESULT_DIR, "topic_rankings_0328-tulu-8b-usersuffix-q0.json")
 
     # Run matching
     results, unmatched_topics = match_gt_topics_with_rankings(
@@ -685,9 +631,7 @@ if __name__ == "__main__":
         json.dump(results, f, indent=2)
 
     # Save unmatched topics
-    unmatched_file = os.path.join(
-        RESULT_DIR, f"unmatched_safety_topics_{datetime_str}.json"
-    )
+    unmatched_file = os.path.join(RESULT_DIR, f"unmatched_safety_topics_{datetime_str}.json")
     with open(unmatched_file, "w") as f:
         json.dump(unmatched_topics, f, indent=2)
 

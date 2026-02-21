@@ -16,9 +16,10 @@ import os
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import multiprocessing
+
 # Set multiprocessing start method to 'spawn' for CUDA compatibility
 try:
-    multiprocessing.set_start_method('spawn', force=True)
+    multiprocessing.set_start_method("spawn", force=True)
 except RuntimeError:
     pass  # Already set
 
@@ -31,15 +32,18 @@ from datetime import datetime
 from scipy.stats import spearmanr, kendalltau
 
 from src.evaluation.ranking import DEFAULT_RANKING_CONFIG, setup_ranking_experiment
-from configs.directory_config import MODELS_DIR, RESULT_DIR, resolve_cache_dir
+from src.directory_config import MODELS_DIR, RESULT_DIR, resolve_cache_dir
 
 
 @dataclass
 class PairwiseComparisonGTConfig:
     """Configuration for ground truth pairwise comparison ranking"""
+
     # Ground truth and benchmark files
     gt_topics_file: str = "artifacts/input/tulu3_ground_truth_safety_topics.json"
-    benchmark_results_file: str = "artifacts/result/Llama-3.1-Tulu-3-8B-SFT_20251121_051021_results.json"
+    benchmark_results_file: str = (
+        "artifacts/result/Llama-3.1-Tulu-3-8B-SFT_20251121_051021_results.json"
+    )
 
     # Model configuration
     lm_judge_name: str = "allenai/Llama-3.1-Tulu-3-8B-SFT"
@@ -68,7 +72,7 @@ class PairwiseComparisonGTEvaluator:
     def load_ground_truth_topics(self) -> Dict[str, List[str]]:
         """Load ground truth safety topics from JSON file"""
         print(f"Loading ground truth topics from: {self.config.gt_topics_file}")
-        with open(self.config.gt_topics_file, 'r') as f:
+        with open(self.config.gt_topics_file, "r") as f:
             gt_topics = json.load(f)
 
         # Flatten the structure to get all subcategories
@@ -91,7 +95,7 @@ class PairwiseComparisonGTEvaluator:
     def load_benchmark_results(self) -> Dict:
         """Load benchmark evaluation results"""
         print(f"Loading benchmark results from: {self.config.benchmark_results_file}")
-        with open(self.config.benchmark_results_file, 'r') as f:
+        with open(self.config.benchmark_results_file, "r") as f:
             benchmark_results = json.load(f)
 
         print(f"Loaded benchmark results from {benchmark_results['metadata']['timestamp']}")
@@ -113,19 +117,21 @@ class PairwiseComparisonGTEvaluator:
         for subcategory_key, stats in by_subcategory.items():
             # Extract the subcategory name from the "category/subcategory" format
             # We need to match it with the ground truth subcategory names
-            subcategory_name = subcategory_key.split('/')[-1]
+            subcategory_name = subcategory_key.split("/")[-1]
             # Convert underscore format to title case to match ground truth format
             # e.g., "express_curiosity" -> "Express curiosity"
-            subcategory_display = subcategory_name.replace('_', ' ').capitalize()
+            subcategory_display = subcategory_name.replace("_", " ").capitalize()
 
-            refusal_rankings.append({
-                "subcategory_key": subcategory_key,
-                "subcategory_name": subcategory_display,
-                "refusal_rate": stats["refusal_rate"],
-                "total_prompts": stats["total_prompts"],
-                "total_refusals": stats["total_refusals"],
-                "total_generations": stats["total_generations"],
-            })
+            refusal_rankings.append(
+                {
+                    "subcategory_key": subcategory_key,
+                    "subcategory_name": subcategory_display,
+                    "refusal_rate": stats["refusal_rate"],
+                    "total_prompts": stats["total_prompts"],
+                    "total_refusals": stats["total_refusals"],
+                    "total_generations": stats["total_generations"],
+                }
+            )
 
         # Sort by refusal rate (descending - higher refusal rate = higher rank)
         refusal_rankings.sort(key=lambda x: x["refusal_rate"], reverse=True)
@@ -135,9 +141,9 @@ class PairwiseComparisonGTEvaluator:
 
     def run_pairwise_ranking(self, subcategories: List[str]) -> Dict[str, Dict]:
         """Run pairwise comparison ranking on ground truth subcategories"""
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("Running pairwise comparison ranking...")
-        print("="*80)
+        print("=" * 80)
 
         # Convert subcategories to topic_dicts format
         topic_dicts = self.create_topic_dicts_from_subcategories(subcategories)
@@ -167,12 +173,14 @@ class PairwiseComparisonGTEvaluator:
         """Save pairwise ranking results to JSON file"""
         # Generate filename
         model_name = self.config.lm_judge_name.split("/")[-1]
-        gt_file_name = os.path.basename(self.config.gt_topics_file).replace('.json', '')
-        filename = f"{self.config.experiment_name}_{self.timestamp}_{gt_file_name}_{model_name}.json"
+        gt_file_name = os.path.basename(self.config.gt_topics_file).replace(".json", "")
+        filename = (
+            f"{self.config.experiment_name}_{self.timestamp}_{gt_file_name}_{model_name}.json"
+        )
         filepath = os.path.join(self.config.output_dir, filename)
 
         print(f"\nSaving pairwise ranking results to: {filepath}")
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(ranking_results, f, indent=2)
 
         return filepath
@@ -189,7 +197,7 @@ class PairwiseComparisonGTEvaluator:
         for rank_idx, item in enumerate(refusal_rankings):
             item["rank_idx"] = rank_idx
 
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(refusal_rankings, f, indent=2)
 
         return filepath
@@ -198,7 +206,7 @@ class PairwiseComparisonGTEvaluator:
         self,
         pairwise_ranking: Dict[str, Dict],
         refusal_rankings: List[Dict],
-        gt_topics: Dict[str, List[str]]
+        gt_topics: Dict[str, List[str]],
     ) -> Tuple[List[str], List[float], List[float]]:
         """
         Match topics between pairwise ranking and refusal rate ranking.
@@ -208,9 +216,9 @@ class PairwiseComparisonGTEvaluator:
             pairwise_ranks: List of rank indices from pairwise ranking
             refusal_ranks: List of rank indices from refusal rate ranking
         """
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("Matching topics for correlation analysis...")
-        print("="*80)
+        print("=" * 80)
 
         # Create mapping from normalized subcategory names to original GT names
         gt_subcategory_mapping = {}
@@ -228,10 +236,10 @@ class PairwiseComparisonGTEvaluator:
             subcat_name = item["subcategory_name"]
 
             # Extract the actual subcategory from category/subcategory format
-            category_part, subcat_part = subcat_key.split('/')
+            category_part, subcat_part = subcat_key.split("/")
 
             # Normalize the subcategory part
-            normalized = subcat_part.replace('_', ' ').lower().strip()
+            normalized = subcat_part.replace("_", " ").lower().strip()
 
             refusal_lookup[normalized] = {
                 "rank_idx": item["rank_idx"],
@@ -270,9 +278,7 @@ class PairwiseComparisonGTEvaluator:
         return matched_topics, pairwise_ranks, refusal_ranks
 
     def compute_correlations(
-        self,
-        pairwise_ranks: List[float],
-        refusal_ranks: List[float]
+        self, pairwise_ranks: List[float], refusal_ranks: List[float]
     ) -> Tuple[float, float, float, float]:
         """
         Compute Spearman and Kendall's Tau correlations.
@@ -280,9 +286,9 @@ class PairwiseComparisonGTEvaluator:
         Returns:
             spearman_rho, spearman_pval, kendall_tau, kendall_pval
         """
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("Computing correlations...")
-        print("="*80)
+        print("=" * 80)
 
         # Compute Spearman correlation
         spearman_rho, spearman_pval = spearmanr(pairwise_ranks, refusal_ranks)
@@ -308,9 +314,9 @@ class PairwiseComparisonGTEvaluator:
         Returns:
             filepath: Path to saved plot
         """
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("Generating correlation scatterplot...")
-        print("="*80)
+        print("=" * 80)
 
         # Create figure
         fig, ax = plt.subplots(figsize=(10, 8))
@@ -322,15 +328,22 @@ class PairwiseComparisonGTEvaluator:
         z = np.polyfit(pairwise_ranks, refusal_ranks, 1)
         p = np.poly1d(z)
         x_line = np.linspace(min(pairwise_ranks), max(pairwise_ranks), 100)
-        ax.plot(x_line, p(x_line), "r--", alpha=0.8, linewidth=2, label=f'Linear fit: y={z[0]:.2f}x+{z[1]:.2f}')
+        ax.plot(
+            x_line,
+            p(x_line),
+            "r--",
+            alpha=0.8,
+            linewidth=2,
+            label=f"Linear fit: y={z[0]:.2f}x+{z[1]:.2f}",
+        )
 
         # Labels and title
-        ax.set_xlabel('Pairwise Comparison Rank Index', fontsize=12)
-        ax.set_ylabel('Refusal Rate Rank Index', fontsize=12)
+        ax.set_xlabel("Pairwise Comparison Rank Index", fontsize=12)
+        ax.set_ylabel("Refusal Rate Rank Index", fontsize=12)
         ax.set_title(
-            f'Correlation between Pairwise Comparison and Refusal Rate Rankings\n'
-            f'Spearman ρ={spearman_rho:.3f}, Kendall τ={kendall_tau:.3f}',
-            fontsize=14
+            f"Correlation between Pairwise Comparison and Refusal Rate Rankings\n"
+            f"Spearman ρ={spearman_rho:.3f}, Kendall τ={kendall_tau:.3f}",
+            fontsize=14,
         )
 
         # Add legend
@@ -341,7 +354,9 @@ class PairwiseComparisonGTEvaluator:
 
         # Add diagonal reference line (perfect correlation)
         max_rank = max(max(pairwise_ranks), max(refusal_ranks))
-        ax.plot([0, max_rank], [0, max_rank], 'k:', alpha=0.3, linewidth=1, label='Perfect correlation')
+        ax.plot(
+            [0, max_rank], [0, max_rank], "k:", alpha=0.3, linewidth=1, label="Perfect correlation"
+        )
 
         # Tight layout
         plt.tight_layout()
@@ -351,16 +366,16 @@ class PairwiseComparisonGTEvaluator:
         filepath = os.path.join(self.config.output_dir, filename)
 
         print(f"Saving correlation plot to: {filepath}")
-        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.savefig(filepath, dpi=300, bbox_inches="tight")
         plt.close()
 
         return filepath
 
     def run(self):
         """Run the full evaluation pipeline"""
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("Starting Pairwise Comparison Ground Truth Ranking Evaluation")
-        print("="*80)
+        print("=" * 80)
         print(f"Experiment name: {self.config.experiment_name}")
         print(f"Timestamp: {self.timestamp}")
         print(f"LM Judge: {self.config.lm_judge_name}")
@@ -417,21 +432,20 @@ class PairwiseComparisonGTEvaluator:
                 "pairwise_ranking": pairwise_ranking_file,
                 "refusal_ranking": refusal_ranking_file,
                 "correlation_plot": plot_file,
-            }
+            },
         }
 
         summary_file = os.path.join(
-            self.config.output_dir,
-            f"{self.timestamp}_{self.config.experiment_name}_summary.json"
+            self.config.output_dir, f"{self.timestamp}_{self.config.experiment_name}_summary.json"
         )
         print(f"\nSaving summary to: {summary_file}")
-        with open(summary_file, 'w') as f:
+        with open(summary_file, "w") as f:
             json.dump(summary, f, indent=2)
 
         # Print final summary
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("EVALUATION COMPLETE")
-        print("="*80)
+        print("=" * 80)
         print(f"\nCorrelation Results:")
         print(f"  Spearman's ρ: {spearman_rho:.4f} (p={spearman_pval:.4e})")
         print(f"  Kendall's τ: {kendall_tau:.4f} (p={kendall_pval:.4e})")
@@ -441,7 +455,7 @@ class PairwiseComparisonGTEvaluator:
         print(f"  Refusal Ranking: {refusal_ranking_file}")
         print(f"  Correlation Plot: {plot_file}")
         print(f"  Summary: {summary_file}")
-        print("="*80)
+        print("=" * 80)
 
         return summary
 
@@ -457,48 +471,31 @@ def main():
         "--gt_topics_file",
         type=str,
         default="artifacts/input/tulu3_ground_truth_safety_topics.json",
-        help="Path to ground truth topics JSON file"
+        help="Path to ground truth topics JSON file",
     )
     parser.add_argument(
         "--benchmark_results_file",
         type=str,
         default="artifacts/result/Llama-3.1-Tulu-3-8B-SFT_20251121_051021_results.json",
-        help="Path to benchmark results JSON file"
+        help="Path to benchmark results JSON file",
     )
     parser.add_argument(
         "--lm_judge_name",
         type=str,
         default="allenai/Llama-3.1-Tulu-3-8B-SFT",
-        help="LLM judge model name"
+        help="LLM judge model name",
+    )
+    parser.add_argument("--device", type=str, default="cuda", help="Device to use (cuda or cpu)")
+    parser.add_argument(
+        "--output_dir", type=str, default=str(RESULT_DIR), help="Directory to save results"
     )
     parser.add_argument(
-        "--device",
-        type=str,
-        default="cuda",
-        help="Device to use (cuda or cpu)"
+        "--experiment_name", type=str, default="pairwise_comparison_gt", help="Experiment name"
     )
     parser.add_argument(
-        "--output_dir",
-        type=str,
-        default=str(RESULT_DIR),
-        help="Directory to save results"
+        "--force_recompute", action="store_true", help="Force recompute even if results exist"
     )
-    parser.add_argument(
-        "--experiment_name",
-        type=str,
-        default="pairwise_comparison_gt",
-        help="Experiment name"
-    )
-    parser.add_argument(
-        "--force_recompute",
-        action="store_true",
-        help="Force recompute even if results exist"
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Use debug mode (fewer comparisons)"
-    )
+    parser.add_argument("--debug", action="store_true", help="Use debug mode (fewer comparisons)")
 
     args = parser.parse_args()
 

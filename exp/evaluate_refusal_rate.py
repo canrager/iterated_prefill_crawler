@@ -14,10 +14,11 @@ import os
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import multiprocessing
+
 # Set multiprocessing start method to 'spawn' for CUDA compatibility
 # MUST be set before importing torch or any CUDA libraries
 try:
-    multiprocessing.set_start_method('spawn', force=True)
+    multiprocessing.set_start_method("spawn", force=True)
 except RuntimeError:
     pass  # Already set
 
@@ -28,15 +29,16 @@ from datetime import datetime
 from tqdm import tqdm
 
 from src.crawler.crawler import Crawler
-from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.config import CrawlerConfig
 from src.generation_utils import batch_generate
 from src.llm_utils import load_model_and_tokenizer
-from configs.directory_config import MODELS_DIR, resolve_cache_dir
+from src.directory_config import MODELS_DIR, resolve_cache_dir
 
 
 @dataclass
 class BenchmarkEvalConfig:
     """Configuration for benchmark evaluation"""
+
     benchmark_file: str = "artifacts/input/tulu3_jailbreak_benchmark.json"
     model_path: str = "allenai/Llama-3.1-Tulu-3-8B-SFT"
     output_dir: str = "artifacts/result"
@@ -70,8 +72,7 @@ class BenchmarkEvaluator:
         # Create a Crawler instance to access refusal checking logic
         # We use a dummy save filename since we won't actually save crawler state
         self.crawler = Crawler(
-            crawler_config=self.crawler_config,
-            save_filename="/tmp/dummy_crawler.json"
+            crawler_config=self.crawler_config, save_filename="/tmp/dummy_crawler.json"
         )
 
         self.model = None
@@ -80,7 +81,7 @@ class BenchmarkEvaluator:
     def load_benchmark(self) -> Dict:
         """Load benchmark JSON file"""
         print(f"Loading benchmark from: {self.config.benchmark_file}")
-        with open(self.config.benchmark_file, 'r') as f:
+        with open(self.config.benchmark_file, "r") as f:
             benchmark = json.load(f)
 
         # Count total prompts
@@ -97,7 +98,7 @@ class BenchmarkEvaluator:
         """Load model and tokenizer"""
         print(f"Loading model: {self.config.model_path}")
         print(f"Backend: {self.config.backend}")
-        
+
         # Resolve cache_dir relative to ROOT_DIR.parent and create if needed
         cache_dir_path = resolve_cache_dir(self.config.cache_dir)
         cache_dir_str = str(cache_dir_path)
@@ -115,10 +116,7 @@ class BenchmarkEvaluator:
 
         print("Model loaded successfully")
 
-    def generate_and_check_refusal(
-        self,
-        prompts: List[str]
-    ) -> List[List[Dict[str, any]]]:
+    def generate_and_check_refusal(self, prompts: List[str]) -> List[List[Dict[str, any]]]:
         """
         Generate multiple completions for each prompt and check for refusals.
 
@@ -138,7 +136,9 @@ class BenchmarkEvaluator:
         for prompt in prompts:
             repeated_prompts.extend([prompt] * self.config.num_generations_per_prompt)
 
-        print(f"Generating {len(repeated_prompts)} completions ({len(prompts)} prompts × {self.config.num_generations_per_prompt} generations)...")
+        print(
+            f"Generating {len(repeated_prompts)} completions ({len(prompts)} prompts × {self.config.num_generations_per_prompt} generations)..."
+        )
 
         # Generate completions - vLLM handles batching internally
         generations, _ = batch_generate(
@@ -164,10 +164,7 @@ class BenchmarkEvaluator:
             prompt_results = []
             for gen in prompt_generations:
                 is_refusal = self.crawler.is_refusal(gen)
-                prompt_results.append({
-                    "generation": gen,
-                    "is_refusal": is_refusal
-                })
+                prompt_results.append({"generation": gen, "is_refusal": is_refusal})
 
             all_results.append(prompt_results)
 
@@ -189,7 +186,7 @@ class BenchmarkEvaluator:
                 "timestamp": datetime.now().isoformat(),
             },
             "results": {},
-            "statistics": {}
+            "statistics": {},
         }
 
         # Process each category and subcategory
@@ -199,9 +196,7 @@ class BenchmarkEvaluator:
             results["results"][category] = {}
 
             for subcategory, prompts in tqdm(
-                subcategories.items(),
-                desc=f"  {category}",
-                leave=False
+                subcategories.items(), desc=f"  {category}", leave=False
             ):
                 print(f"\nProcessing {category}/{subcategory} ({len(prompts)} prompts)")
 
@@ -230,7 +225,7 @@ class BenchmarkEvaluator:
                 "refusal_rate": 0.0,
             },
             "by_category": {},
-            "by_subcategory": {}
+            "by_subcategory": {},
         }
 
         for category, subcategories in results.items():
@@ -257,8 +252,7 @@ class BenchmarkEvaluator:
 
                 if subcategory_stats["total_generations"] > 0:
                     subcategory_stats["refusal_rate"] = (
-                        subcategory_stats["total_refusals"] /
-                        subcategory_stats["total_generations"]
+                        subcategory_stats["total_refusals"] / subcategory_stats["total_generations"]
                     )
 
                 # Update category stats
@@ -272,8 +266,7 @@ class BenchmarkEvaluator:
 
             if category_stats["total_generations"] > 0:
                 category_stats["refusal_rate"] = (
-                    category_stats["total_refusals"] /
-                    category_stats["total_generations"]
+                    category_stats["total_refusals"] / category_stats["total_generations"]
                 )
 
             stats["by_category"][category] = category_stats
@@ -285,20 +278,21 @@ class BenchmarkEvaluator:
 
         if stats["overall"]["total_generations"] > 0:
             stats["overall"]["refusal_rate"] = (
-                stats["overall"]["total_refusals"] /
-                stats["overall"]["total_generations"]
+                stats["overall"]["total_refusals"] / stats["overall"]["total_generations"]
             )
 
         # Create ranked list of subcategories by refusal rate (descending)
         ranked_subcategories = []
         for subcategory_key, subcategory_stats in stats["by_subcategory"].items():
-            ranked_subcategories.append({
-                "subcategory": subcategory_key,
-                "refusal_rate": subcategory_stats["refusal_rate"],
-                "total_prompts": subcategory_stats["total_prompts"],
-                "total_generations": subcategory_stats["total_generations"],
-                "total_refusals": subcategory_stats["total_refusals"]
-            })
+            ranked_subcategories.append(
+                {
+                    "subcategory": subcategory_key,
+                    "refusal_rate": subcategory_stats["refusal_rate"],
+                    "total_prompts": subcategory_stats["total_prompts"],
+                    "total_generations": subcategory_stats["total_generations"],
+                    "total_refusals": subcategory_stats["total_refusals"],
+                }
+            )
 
         # Sort by refusal rate descending
         ranked_subcategories.sort(key=lambda x: x["refusal_rate"], reverse=True)
@@ -319,13 +313,13 @@ class BenchmarkEvaluator:
 
         # Save results
         print(f"\nSaving results to: {filepath}")
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(results, f, indent=2)
 
         # Print summary statistics
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("EVALUATION SUMMARY")
-        print("="*80)
+        print("=" * 80)
 
         stats = results["statistics"]
         print(f"\nOverall Statistics:")
@@ -342,9 +336,11 @@ class BenchmarkEvaluator:
 
         print(f"\nTop 10 Subcategories by Refusal Rate:")
         for i, subcat in enumerate(stats["ranked_subcategories"][:10], 1):
-            print(f"  {i}. {subcat['subcategory']}: {subcat['refusal_rate']:.2%} ({subcat['total_refusals']}/{subcat['total_generations']})")
+            print(
+                f"  {i}. {subcat['subcategory']}: {subcat['refusal_rate']:.2%} ({subcat['total_refusals']}/{subcat['total_generations']})"
+            )
 
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
 
         return filepath
 
@@ -380,73 +376,49 @@ def main():
         "--benchmark_file",
         type=str,
         default="artifacts/input/tulu3_jailbreak_benchmark.json",
-        help="Path to benchmark JSON file"
+        help="Path to benchmark JSON file",
     )
     parser.add_argument(
         "--model_path",
         type=str,
         default="allenai/Llama-3.1-Tulu-3-8B-SFT",
-        help="HuggingFace model path"
+        help="HuggingFace model path",
     )
     parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="artifacts/result",
-        help="Directory to save results"
+        "--output_dir", type=str, default="artifacts/result", help="Directory to save results"
     )
-    parser.add_argument(
-        "--temperature",
-        type=float,
-        default=0.6,
-        help="Sampling temperature"
-    )
+    parser.add_argument("--temperature", type=float, default=0.6, help="Sampling temperature")
     parser.add_argument(
         "--backend",
         type=str,
         default="vllm",
         choices=["vllm", "transformers", "api"],
-        help="Backend to use for generation"
+        help="Backend to use for generation",
     )
     parser.add_argument(
-        "--num_generations",
-        type=int,
-        default=10,
-        help="Number of generations per prompt"
+        "--num_generations", type=int, default=10, help="Number of generations per prompt"
     )
     parser.add_argument(
-        "--max_new_tokens",
-        type=int,
-        default=512,
-        help="Maximum number of new tokens to generate"
+        "--max_new_tokens", type=int, default=512, help="Maximum number of new tokens to generate"
     )
+    parser.add_argument("--verbose", action="store_true", help="Print verbose output")
     parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Print verbose output"
-    )
-    parser.add_argument(
-        "--cache_dir",
-        type=str,
-        default=str(MODELS_DIR),
-        help="Directory to cache models"
+        "--cache_dir", type=str, default=str(MODELS_DIR), help="Directory to cache models"
     )
     parser.add_argument(
         "--tensor_parallel_size",
         type=int,
         default=1,
-        help="Number of GPUs for vLLM tensor parallelism"
+        help="Number of GPUs for vLLM tensor parallelism",
     )
     parser.add_argument(
-        "--gpu_memory_utilization",
-        type=float,
-        default=0.9,
-        help="GPU memory fraction for vLLM"
+        "--gpu_memory_utilization", type=float, default=0.9, help="GPU memory fraction for vLLM"
     )
     parser.add_argument(
         "--vllm_max_model_len",
         type=int,
         default=None,
-        help="Max sequence length for vLLM (None = model default)"
+        help="Max sequence length for vLLM (None = model default)",
     )
 
     args = parser.parse_args()

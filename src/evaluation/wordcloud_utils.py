@@ -5,16 +5,17 @@ import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
-from configs.directory_config import RESULT_DIR
+from src.directory_config import RESULT_DIR
+
 
 def create_oval_mask(width: int, height: int) -> np.ndarray:
     """
     Create an oval mask for the wordcloud.
-    
+
     Args:
         width: Width of the mask
         height: Height of the mask
-        
+
     Returns:
         A 2D numpy array where 0 represents the mask area (where words will be placed) and 255 represents the background
     """
@@ -23,12 +24,13 @@ def create_oval_mask(width: int, height: int) -> np.ndarray:
     center_y = height // 2
     a = width // 2  # semi-major axis
     b = height // 2  # semi-minor axis
-    
+
     for y in range(height):
         for x in range(width):
-            if ((x - center_x) ** 2 / a ** 2 + (y - center_y) ** 2 / b ** 2) <= 1:
+            if ((x - center_x) ** 2 / a**2 + (y - center_y) ** 2 / b**2) <= 1:
                 mask[y, x] = 0  # Black for the oval area where words will be placed
     return mask
+
 
 def color_func(word, font_size, position, orientation, random_state=None, **kwargs):
     """
@@ -36,11 +38,12 @@ def color_func(word, font_size, position, orientation, random_state=None, **kwar
     Returns RGB color as a tuple of integers.
     """
     # Get the normalized score from the word_scores dictionary
-    normalized_score = kwargs.get('word_scores', {}).get(word, 0)
+    normalized_score = kwargs.get("word_scores", {}).get(word, 0)
     # Use the colormap to get the color based on the normalized score
-    color = kwargs.get('colormap')(normalized_score)
+    color = kwargs.get("colormap")(normalized_score)
     # Convert to RGB integers (0-255)
-    return tuple(int(x * 255 *0.9) for x in color[:3])
+    return tuple(int(x * 255 * 0.9) for x in color[:3])
+
 
 def generate_wordcloud_from_ranking(
     run_title: str,
@@ -56,7 +59,7 @@ def generate_wordcloud_from_ranking(
 ) -> None:
     """
     Generate a word cloud from ranking results where word sizes and colors are proportional to their scores.
-    
+
     Args:
         run_title: Title of the run to generate word cloud for
         result_dir: Directory containing the ranking results
@@ -74,17 +77,17 @@ def generate_wordcloud_from_ranking(
     if not os.path.exists(ranking_file):
         print(f"No ranking file found at {ranking_file}")
         return
-        
-    with open(ranking_file, 'r') as f:
+
+    with open(ranking_file, "r") as f:
         clusters = json.load(f)
-        
+
     # Create word frequency dictionary where frequency is the score
     word_scores = {}
     for cluster_str, cluster_data in clusters.items():
         word = cluster_str.strip()
         score = cluster_data["ranking"][method]["rank_score"]
         word_scores[word] = score
-        
+
     # Normalize scores to be between 0 and 1
     if word_scores:
         min_score = min(word_scores.values())
@@ -94,13 +97,13 @@ def generate_wordcloud_from_ranking(
             for word in word_scores:
                 normalized_score = (word_scores[word] - min_score) / score_range
                 word_scores[word] = normalized_score
-    
+
     # Create oval mask
     mask = create_oval_mask(width, height)
-    
+
     # Create colormap function
     cmap = plt.get_cmap(colormap)
-    
+
     # Generate word cloud
     wordcloud = WordCloud(
         width=width,
@@ -113,19 +116,24 @@ def generate_wordcloud_from_ranking(
         mask=mask,
         mode="RGBA",
         color_func=lambda word, font_size, position, orientation, random_state=None, **kwargs: color_func(
-            word, font_size, position, orientation, random_state, 
-            word_scores=word_scores, colormap=cmap
+            word,
+            font_size,
+            position,
+            orientation,
+            random_state,
+            word_scores=word_scores,
+            colormap=cmap,
         ),
     ).generate_from_frequencies(word_scores)
-    
+
     # Create and save the plot
     plt.figure(figsize=(20, 10))
-    plt.imshow(wordcloud, interpolation='bilinear')
-    plt.axis('off')
-    
+    plt.imshow(wordcloud, interpolation="bilinear")
+    plt.axis("off")
+
     # Save the word cloud
     output_file = os.path.join(result_dir, f"wordcloud_{method}_{run_title}.png")
-    plt.savefig(output_file, bbox_inches='tight', dpi=300)
+    plt.savefig(output_file, bbox_inches="tight", dpi=300)
     plt.close()
-    
-    print(f"Word cloud saved to {output_file}") 
+
+    print(f"Word cloud saved to {output_file}")

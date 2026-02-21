@@ -34,7 +34,7 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-from configs.directory_config import INTERIM_DIR
+from src.directory_config import INTERIM_DIR
 
 
 def parse_crawler_log_filename(filename: str) -> Optional[Dict[str, Any]]:
@@ -50,15 +50,15 @@ def parse_crawler_log_filename(filename: str) -> Optional[Dict[str, Any]]:
     basename = filename.replace(".json", "")
 
     # Pattern: crawler_log_YYYYMMDD_HHMMSS_model_rest...
-    pattern = r"crawler_log_(\d{8})_(\d{6})_(.+?)_(\d+)samples_(\d+)crawls_(.+?)filter_(.+?)prompt_(.+)"
+    pattern = (
+        r"crawler_log_(\d{8})_(\d{6})_(.+?)_(\d+)samples_(\d+)crawls_(.+?)filter_(.+?)prompt_(.+)"
+    )
 
     match = re.match(pattern, basename)
     if not match:
         return None
 
-    date_str, time_str, model, samples, crawls, filter_val, prefill_mode, backend = (
-        match.groups()
-    )
+    date_str, time_str, model, samples, crawls, filter_val, prefill_mode, backend = match.groups()
 
     # Parse datetime
     try:
@@ -126,14 +126,9 @@ def find_all_matching_crawler_logs(
 
             if not skip_file and model_normalized:
                 parsed_model = parsed["model"]
-                if (
-                    model_normalized not in parsed_model
-                    and parsed_model not in model_normalized
-                ):
+                if model_normalized not in parsed_model and parsed_model not in model_normalized:
                     parsed_model_last = (
-                        parsed_model.split("/")[-1]
-                        if "/" in parsed_model
-                        else parsed_model
+                        parsed_model.split("/")[-1] if "/" in parsed_model else parsed_model
                     )
                     model_normalized_last = (
                         model_normalized.split("/")[-1]
@@ -159,11 +154,7 @@ def find_all_matching_crawler_logs(
 
             if not skip_file and "do_filter_refusals" in config_filters:
                 filter_bool = config_filters["do_filter_refusals"]
-                filter_str = (
-                    str(filter_bool)
-                    if isinstance(filter_bool, bool)
-                    else str(filter_bool)
-                )
+                filter_str = str(filter_bool) if isinstance(filter_bool, bool) else str(filter_bool)
                 if parsed["filter"] != filter_str:
                     skip_file = True
 
@@ -227,17 +218,12 @@ def load_crawler_log_from_file_info(
                 config_model = config.get("model_path", "")
                 parsed_model = file_info["parsed"]["model"]
                 expected_model = (
-                    expected_value.split("/")[-1]
-                    if "/" in expected_value
-                    else expected_value
+                    expected_value.split("/")[-1] if "/" in expected_value else expected_value
                 )
                 config_model_last = (
                     config_model.split("/")[-1] if "/" in config_model else config_model
                 )
-                if (
-                    expected_model not in config_model_last
-                    and expected_model not in parsed_model
-                ):
+                if expected_model not in config_model_last and expected_model not in parsed_model:
                     matches_all = False
                     break
             continue
@@ -254,13 +240,9 @@ def load_crawler_log_from_file_info(
         if actual_value != expected_value:
             # Try type conversion for numeric types
             try:
-                if isinstance(expected_value, (int, float)) and isinstance(
-                    actual_value, str
-                ):
+                if isinstance(expected_value, (int, float)) and isinstance(actual_value, str):
                     actual_value = type(expected_value)(actual_value)
-                elif isinstance(actual_value, (int, float)) and isinstance(
-                    expected_value, str
-                ):
+                elif isinstance(actual_value, (int, float)) and isinstance(expected_value, str):
                     expected_value = type(actual_value)(expected_value)
             except (ValueError, TypeError):
                 pass
@@ -359,14 +341,9 @@ def find_latest_crawler_log(
 
             if not skip_file and model_normalized:
                 parsed_model = parsed["model"]
-                if (
-                    model_normalized not in parsed_model
-                    and parsed_model not in model_normalized
-                ):
+                if model_normalized not in parsed_model and parsed_model not in model_normalized:
                     parsed_model_last = (
-                        parsed_model.split("/")[-1]
-                        if "/" in parsed_model
-                        else parsed_model
+                        parsed_model.split("/")[-1] if "/" in parsed_model else parsed_model
                     )
                     model_normalized_last = (
                         model_normalized.split("/")[-1]
@@ -392,11 +369,7 @@ def find_latest_crawler_log(
 
             if not skip_file and "do_filter_refusals" in config_filters:
                 filter_bool = config_filters["do_filter_refusals"]
-                filter_str = (
-                    str(filter_bool)
-                    if isinstance(filter_bool, bool)
-                    else str(filter_bool)
-                )
+                filter_str = str(filter_bool) if isinstance(filter_bool, bool) else str(filter_bool)
                 if parsed["filter"] != filter_str:
                     skip_file = True
 
@@ -450,14 +423,10 @@ def find_latest_crawler_log(
                     config_model = config.get("model_path", "")
                     parsed_model = file_info["parsed"]["model"]
                     expected_model = (
-                        expected_value.split("/")[-1]
-                        if "/" in expected_value
-                        else expected_value
+                        expected_value.split("/")[-1] if "/" in expected_value else expected_value
                     )
                     config_model_last = (
-                        config_model.split("/")[-1]
-                        if "/" in config_model
-                        else config_model
+                        config_model.split("/")[-1] if "/" in config_model else config_model
                     )
                     if (
                         expected_model not in config_model_last
@@ -479,13 +448,9 @@ def find_latest_crawler_log(
             if actual_value != expected_value:
                 # Try type conversion for numeric types
                 try:
-                    if isinstance(expected_value, (int, float)) and isinstance(
-                        actual_value, str
-                    ):
+                    if isinstance(expected_value, (int, float)) and isinstance(actual_value, str):
                         actual_value = type(expected_value)(actual_value)
-                    elif isinstance(actual_value, (int, float)) and isinstance(
-                        expected_value, str
-                    ):
+                    elif isinstance(actual_value, (int, float)) and isinstance(expected_value, str):
                         expected_value = type(actual_value)(expected_value)
                 except (ValueError, TypeError):
                     pass
@@ -564,16 +529,14 @@ def main():
         # 'device': 'cuda:0',
         # 'do_filter_refusals': True,
         # etc.
-        "is_refusal_threshold": 0.0
+        "is_refusal_threshold": 0.0,
     }
     # ============================================================================
 
     # Options
     print_config = True  # Set to True to print the full CrawlerConfig
     print_data = False  # Set to True to print the full JSON data
-    return_data_only = (
-        False  # Set to True to only return the data (for programmatic use)
-    )
+    return_data_only = False  # Set to True to only return the data (for programmatic use)
     lazy_load = True  # Set to False to check all files (slower but more accurate)
     interim_dir = None  # Set to a Path if you want to search a different directory
     move_folder_name = Path("artifacts/threshold_ablation")
@@ -600,9 +563,7 @@ def main():
 
     while file_index < total_matching:
         file_info = matching_files[file_index]
-        result = load_crawler_log_from_file_info(
-            file_info, config_filters, lazy_load=lazy_load
-        )
+        result = load_crawler_log_from_file_info(file_info, config_filters, lazy_load=lazy_load)
 
         if result is None:
             # This file didn't pass config filters, skip it
@@ -636,9 +597,7 @@ def main():
             print(f"Total all topics: {cumulative.get('total_all', 0)}")
             print(f"Total deduped topics: {cumulative.get('total_deduped', 0)}")
             print(f"Total refusals: {cumulative.get('total_refusals', 0)}")
-            print(
-                f"Total unique refusals: {cumulative.get('total_unique_refusals', 0)}"
-            )
+            print(f"Total unique refusals: {cumulative.get('total_unique_refusals', 0)}")
 
             all_per_step = history.get("all_per_step", [])
             if all_per_step:
@@ -646,9 +605,7 @@ def main():
                 total_all = cumulative.get("total_all", 0)
                 total_refusals = cumulative.get("total_refusals", 0)
                 print(f"Average topics per step: {total_all / len(all_per_step):.2f}")
-                print(
-                    f"Average refusal rate: {total_refusals / (total_all + 1e-10):.4f}"
-                )
+                print(f"Average refusal rate: {total_refusals / (total_all + 1e-10):.4f}")
 
             if current_metrics:
                 print(f"\nCurrent metrics:")
@@ -663,9 +620,7 @@ def main():
         else:
             print("\n" + "=" * 80)
             print("Data loaded successfully.")
-            print(
-                "Set print_data=True or print_config=True in main() to see more details."
-            )
+            print("Set print_data=True or print_config=True in main() to see more details.")
             print("=" * 80)
 
         # Ask if user wants to copy to artifacts/latest

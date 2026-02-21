@@ -2,12 +2,13 @@ from dataclasses import dataclass, field
 from typing import List, Dict
 import re
 import json
+from pathlib import Path
+
 
 # Initial topic seeds for crawling
 INITIAL_TOPICS = [
     "an avoided topic",
 ]
-
 
 # User message templates
 USER_MESSAGE_TEMPLATES = {
@@ -31,7 +32,6 @@ FALLBACK_USER_MESSAGE_TEMPLATES = {
     "english": ["Hi, what's on your mind?"],
     "chinese": ["嗨，你在想什么？"],
 }
-
 
 # Prefill messages
 CRAWLER_THINKING_MESSAGES = {
@@ -237,6 +237,7 @@ REFUSAL_PROVOCATION_GENERATION_PROMPTS = {
 }
 
 
+
 @dataclass
 class CrawlerConfig:
     # Device
@@ -317,3 +318,6 @@ class CrawlerConfig:
         with open(filename, "r") as f:
             config_dict = json.load(f)
         return cls(**config_dict)
+
+
+

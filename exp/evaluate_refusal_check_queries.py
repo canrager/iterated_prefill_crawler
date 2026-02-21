@@ -37,10 +37,10 @@ from pathlib import Path
 from tqdm import tqdm
 
 from src.crawler.crawler import Crawler
-from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.config import CrawlerConfig
 from src.generation_utils import batch_generate
 from src.llm_utils import load_model_and_tokenizer
-from configs.directory_config import MODELS_DIR, resolve_cache_dir
+from src.directory_config import MODELS_DIR, resolve_cache_dir
 
 
 def extract_user_message(query: str) -> str:
@@ -88,9 +88,7 @@ def extract_user_message(query: str) -> str:
             query = user_match.group(1).strip()
         else:
             # Try to find content after user header until assistant header
-            parts = re.split(
-                r"<\|start_header_id\|>user<\|end_header_id\|>\s*\n", query
-            )
+            parts = re.split(r"<\|start_header_id\|>user<\|end_header_id\|>\s*\n", query)
             if len(parts) > 1:
                 query = parts[1]
                 # Remove everything after assistant header
@@ -160,16 +158,12 @@ def extract_user_message(query: str) -> str:
                     return ""
             else:
                 # Check if query ends with "Query:" or "查询:" - means no actual query
-                if query.rstrip().endswith("Query:") or query.rstrip().endswith(
-                    "查询:"
-                ):
+                if query.rstrip().endswith("Query:") or query.rstrip().endswith("查询:"):
                     return ""
 
                 # Try to find the last sentence or paragraph that looks like a query
                 # Split by common separators and take the last meaningful part
-                parts = re.split(
-                    r"\n\n|\n或者：|\n或者|\n再一个|\n一个例子|\n最后一个", query
-                )
+                parts = re.split(r"\n\n|\n或者：|\n或者|\n再一个|\n一个例子|\n最后一个", query)
                 if len(parts) > 1:
                     # Take the last part that's not too long and looks like a query
                     for part in reversed(parts):
@@ -244,9 +238,7 @@ def extract_refusal_check_queries_from_meta_clusters(
         raise ValueError("Expected meta_clusters to be a dictionary")
 
     # Create a Crawler instance for refusal detection
-    crawler = Crawler(
-        crawler_config=crawler_config, save_filename="/tmp/dummy_crawler.json"
-    )
+    crawler = Crawler(crawler_config=crawler_config, save_filename="/tmp/dummy_crawler.json")
 
     benchmark_queries = {}
 
@@ -271,9 +263,7 @@ def extract_refusal_check_queries_from_meta_clusters(
                             ):
                                 # Extract refusal_check_queries and refusal_check_responses
                                 refusal_queries = topic_obj.get("refusal_check_queries")
-                                refusal_responses = topic_obj.get(
-                                    "refusal_check_responses"
-                                )
+                                refusal_responses = topic_obj.get("refusal_check_responses")
 
                                 if (
                                     refusal_queries
@@ -285,17 +275,13 @@ def extract_refusal_check_queries_from_meta_clusters(
                                         queries_by_log[crawler_log_filename] = set()
 
                                     # Iterate over query-response pairs
-                                    for query, response in zip(
-                                        refusal_queries, refusal_responses
-                                    ):
+                                    for query, response in zip(refusal_queries, refusal_responses):
                                         # Only include queries where the response is a refusal
                                         if query and response:  # Skip null/empty
                                             # Check if the response is a refusal using the same method as evaluate_refusal_rate
                                             if crawler.is_refusal(response):
                                                 user_msg = extract_user_message(query)
-                                                if (
-                                                    user_msg
-                                                ):  # Only add non-empty user messages
+                                                if user_msg:  # Only add non-empty user messages
                                                     # Additional cleanup: remove any remaining "查询:" prefixes and suffixes
                                                     user_msg = re.sub(
                                                         r"^查询\s*[:：]\s*",
@@ -328,13 +314,9 @@ def extract_refusal_check_queries_from_meta_clusters(
                                                         flags=re.DOTALL,
                                                     )
                                                     user_msg = user_msg.strip()
-                                                    if (
-                                                        user_msg
-                                                    ):  # Check again after cleanup
+                                                    if user_msg:  # Check again after cleanup
                                                         # Filter out queries that are themselves refusals
-                                                        if not crawler.is_refusal(
-                                                            user_msg
-                                                        ):
+                                                        if not crawler.is_refusal(user_msg):
                                                             queries_by_log[
                                                                 crawler_log_filename
                                                             ].add(user_msg)
@@ -345,9 +327,7 @@ def extract_refusal_check_queries_from_meta_clusters(
                     topic_obj = topic_cluster[0]
                     crawler_log_filename = topic_cluster[1]
 
-                    if isinstance(topic_obj, dict) and isinstance(
-                        crawler_log_filename, str
-                    ):
+                    if isinstance(topic_obj, dict) and isinstance(crawler_log_filename, str):
                         refusal_queries = topic_obj.get("refusal_check_queries")
                         refusal_responses = topic_obj.get("refusal_check_responses")
 
@@ -361,9 +341,7 @@ def extract_refusal_check_queries_from_meta_clusters(
                                 queries_by_log[crawler_log_filename] = set()
 
                             # Iterate over query-response pairs
-                            for query, response in zip(
-                                refusal_queries, refusal_responses
-                            ):
+                            for query, response in zip(refusal_queries, refusal_responses):
                                 # Only include queries where the response is a refusal
                                 if query and response:  # Skip null/empty
                                     # Check if the response is a refusal using the same method as evaluate_refusal_rate
@@ -405,9 +383,9 @@ def extract_refusal_check_queries_from_meta_clusters(
                                             if user_msg:  # Check again after cleanup
                                                 # Filter out queries that are themselves refusals
                                                 if not crawler.is_refusal(user_msg):
-                                                    queries_by_log[
-                                                        crawler_log_filename
-                                                    ].add(user_msg)
+                                                    queries_by_log[crawler_log_filename].add(
+                                                        user_msg
+                                                    )
 
         # Sample uniformly across crawler_log files
         # If we want 10 queries total, distribute evenly across logs
@@ -540,9 +518,7 @@ def create_refusal_check_benchmark(
     print(f"Benchmark created successfully!")
     print(f"  Total meta clusters: {len(benchmark_queries)}")
     print(f"  Total queries: {total_queries}")
-    print(
-        f"  Average queries per meta cluster: {total_queries / len(benchmark_queries):.1f}"
-    )
+    print(f"  Average queries per meta cluster: {total_queries / len(benchmark_queries):.1f}")
 
     return benchmark_data
 
@@ -628,9 +604,7 @@ class BenchmarkEvaluator:
 
         print("Model loaded successfully")
 
-    def generate_and_check_refusal(
-        self, prompts: List[str]
-    ) -> List[List[Dict[str, any]]]:
+    def generate_and_check_refusal(self, prompts: List[str]) -> List[List[Dict[str, any]]]:
         """
         Generate multiple completions for each prompt and check for refusals.
 
@@ -713,9 +687,7 @@ class BenchmarkEvaluator:
                     print(f"\nSkipping {meta_cluster}: no queries")
                     continue
 
-                print(
-                    f"\nProcessing meta cluster: {meta_cluster} ({len(queries)} queries)"
-                )
+                print(f"\nProcessing meta cluster: {meta_cluster} ({len(queries)} queries)")
 
                 # Generate and check refusals
                 prompt_results = self.generate_and_check_refusal(queries)
@@ -761,17 +733,14 @@ class BenchmarkEvaluator:
 
             if meta_cluster_stats["total_generations"] > 0:
                 meta_cluster_stats["refusal_rate"] = (
-                    meta_cluster_stats["total_refusals"]
-                    / meta_cluster_stats["total_generations"]
+                    meta_cluster_stats["total_refusals"] / meta_cluster_stats["total_generations"]
                 )
 
             stats["by_meta_cluster"][meta_cluster] = meta_cluster_stats
 
             # Update overall stats
             stats["overall"]["total_prompts"] += meta_cluster_stats["total_prompts"]
-            stats["overall"]["total_generations"] += meta_cluster_stats[
-                "total_generations"
-            ]
+            stats["overall"]["total_generations"] += meta_cluster_stats["total_generations"]
             stats["overall"]["total_refusals"] += meta_cluster_stats["total_refusals"]
 
         # Create ranked list of meta clusters by refusal rate (descending)
@@ -793,8 +762,7 @@ class BenchmarkEvaluator:
 
         if stats["overall"]["total_generations"] > 0:
             stats["overall"]["refusal_rate"] = (
-                stats["overall"]["total_refusals"]
-                / stats["overall"]["total_generations"]
+                stats["overall"]["total_refusals"] / stats["overall"]["total_generations"]
             )
 
         return stats
@@ -880,9 +848,7 @@ def main():
         default="artifacts/pbr/evaluation_results",
         help="Directory to save results",
     )
-    parser.add_argument(
-        "--temperature", type=float, default=0.6, help="Sampling temperature"
-    )
+    parser.add_argument("--temperature", type=float, default=0.6, help="Sampling temperature")
     parser.add_argument(
         "--backend",
         type=str,
@@ -945,9 +911,7 @@ def main():
     # Set up paths
     meta_clusters_file = Path(args.meta_clusters_file)
     benchmark_file = Path(args.benchmark_file)
-    pbr_benchmark_file = (
-        Path(args.pbr_benchmark_file) if args.pbr_benchmark_file else None
-    )
+    pbr_benchmark_file = Path(args.pbr_benchmark_file) if args.pbr_benchmark_file else None
 
     # Create benchmark if it doesn't exist or if --create_benchmark_only is set
     if args.create_benchmark_only or not benchmark_file.exists():
@@ -1024,9 +988,7 @@ def main():
             "statistics": results["statistics"],
         }
 
-        print(
-            f"\nEvaluation complete for {model_name}! Results saved to: {output_file}"
-        )
+        print(f"\nEvaluation complete for {model_name}! Results saved to: {output_file}")
 
     # Print summary comparison across models
     if len(all_results) > 1:
@@ -1044,9 +1006,7 @@ def main():
             )
 
         # Save comparison summary
-        comparison_file = os.path.join(
-            args.output_dir, "refusal_check_model_comparison.json"
-        )
+        comparison_file = os.path.join(args.output_dir, "refusal_check_model_comparison.json")
         with open(comparison_file, "w") as f:
             json.dump(all_results, f, indent=2)
         print(f"\nComparison summary saved to: {comparison_file}")

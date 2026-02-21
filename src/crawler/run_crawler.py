@@ -18,13 +18,12 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from src.crawler.crawler import Crawler, get_run_name
-from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.config import CrawlerConfig
 from src.llm_utils import load_model_and_tokenizer, load_filter_models, load_from_path
-from configs.directory_config import INTERIM_DIR, RESULT_DIR, CONFIG_DIR, resolve_cache_dir
+from src.directory_config import INTERIM_DIR, RESULT_DIR, CONFIG_DIR, resolve_cache_dir
 
 
 @hydra.main(version_base=None, config_path=str(CONFIG_DIR), config_name="config")
-
 def main(cfg: DictConfig) -> None:
     # Set environment variables if specified
     if "env" in cfg and cfg.env is not None:

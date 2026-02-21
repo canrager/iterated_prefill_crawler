@@ -14,7 +14,7 @@ from vllm.inputs.data import TokensPrompt
 from dataclasses import dataclass
 
 from src.tokenization_utils import custom_decoding, custom_batch_encoding
-from configs.directory_config import INPUT_DIR
+from src.directory_config import INPUT_DIR
 
 
 @dataclass
@@ -74,9 +74,7 @@ def single_generate_from_tokens(
         )
 
     # Decode and return the generated text
-    generated_text = tokenizer.decode(
-        outputs[0], skip_special_tokens=skip_special_tokens
-    )
+    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=skip_special_tokens)
     return generated_text
 
 
@@ -92,9 +90,7 @@ def custom_pad(input_ids, tokenizer):
     padded_input_ids = [
         [tokenizer.pad_token_id] * (max_length - len(ids)) + ids for ids in input_ids
     ]
-    padded_attention_mask = [
-        [0] * (max_length - len(ids)) + [1] * len(ids) for ids in input_ids
-    ]
+    padded_attention_mask = [[0] * (max_length - len(ids)) + [1] * len(ids) for ids in input_ids]
     return padded_input_ids, padded_attention_mask
 
 
@@ -119,9 +115,7 @@ def batch_complete_R1(
             max_new_tokens=max_new_tokens,
             temperature=temperature,
         )
-    generated_texts = custom_decoding(
-        cfg.model_path, tokenizer, outputs, skip_special_tokens=True
-    )
+    generated_texts = custom_decoding(cfg.model_path, tokenizer, outputs, skip_special_tokens=True)
     return generated_texts
 
 
@@ -179,9 +173,7 @@ def batch_generate_from_tokens(
             print("".join([f"{s}[{i}]" for i, s in zip(output, decoded)]))
 
     model_name = cfg.model_path
-    generated_texts = custom_decoding(
-        model_name, tokenizer, outputs, skip_special_tokens
-    )
+    generated_texts = custom_decoding(model_name, tokenizer, outputs, skip_special_tokens)
 
     return generated_texts
 
@@ -220,9 +212,7 @@ def batch_generate_from_tokens_vllm(
     # Set up sampling parameters
     sampling_params = SamplingParams(
         temperature=temperature,
-        max_tokens=(
-            max_new_tokens if max_new_tokens is not None else max_generation_length
-        ),
+        max_tokens=(max_new_tokens if max_new_tokens is not None else max_generation_length),
         skip_special_tokens=skip_special_tokens,
     )
 
@@ -338,7 +328,9 @@ def batch_generate(
         assistant_prefill = message_segments.assistant_prefix
 
         if message_segments.thought_prefix != "":
-            system_prompt += "Organize your thoughts within XML tags using <think> </think> before responding."
+            system_prompt += (
+                "Organize your thoughts within XML tags using <think> </think> before responding."
+            )
             assistant_prefill += f"\n<think> {message_segments.thought_prefix}"
 
         # Use batched processing for all prompts at once
@@ -410,19 +402,15 @@ def batch_generate(
                 generated_texts.extend(batch_generations)
 
     if verbose:
-        input_tokens = custom_decoding(
-            model_name, tokenizer, input_ids, skip_special_tokens
-        )
+        input_tokens = custom_decoding(model_name, tokenizer, input_ids, skip_special_tokens)
         for i, o in zip(input_tokens, generated_texts):
-            print(
-                f"===========================\n====input: {i}\n\n==== output:\n {o}\n\n"
-            )
+            print(f"===========================\n====input: {i}\n\n==== output:\n {o}\n\n")
     return generated_texts, input_strs
 
 
 if __name__ == "__main__":
     from nnsight import CONFIG
-    from configs.directory_config import INPUT_DIR
+    from src.directory_config import INPUT_DIR
 
     model_name = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
     model_name = "meta-llama/Meta-Llama-3.1-8B"
@@ -542,9 +530,7 @@ def query_anthropic(
     message_args = {}
     message_args["messages"] = [{"role": "user", "content": prompt.strip()}]
     if assistant_prefill != "":
-        message_args["messages"].append(
-            {"role": "assistant", "content": assistant_prefill.strip()}
-        )
+        message_args["messages"].append({"role": "assistant", "content": assistant_prefill.strip()})
     if system_prompt != "":
         message_args["system"] = [
             {
@@ -787,9 +773,7 @@ async def async_query_anthropic(
     message_args = {}
     message_args["messages"] = [{"role": "user", "content": prompt.strip()}]
     if assistant_prefill != "":
-        message_args["messages"].append(
-            {"role": "assistant", "content": assistant_prefill.strip()}
-        )
+        message_args["messages"].append({"role": "assistant", "content": assistant_prefill.strip()})
     if system_prompt != "":
         message_args["system"] = [
             {

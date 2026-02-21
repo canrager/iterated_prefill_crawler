@@ -31,10 +31,10 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.crawler.crawler import Crawler
-from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.config import CrawlerConfig
 from src.generation_utils import batch_generate
 from src.llm_utils import load_model_and_tokenizer
-from configs.directory_config import resolve_cache_dir
+from src.directory_config import resolve_cache_dir
 
 
 @dataclass
@@ -212,9 +212,7 @@ class BenchmarkEvaluator:
                     print(f"\nSkipping {meta_cluster}: no queries")
                     continue
 
-                print(
-                    f"\nProcessing meta cluster: {meta_cluster} ({len(queries)} queries)"
-                )
+                print(f"\nProcessing meta cluster: {meta_cluster} ({len(queries)} queries)")
 
                 # Generate and capture prompt inputs/outputs
                 prompt_results, original_queries = self.generate_with_prompts(queries)
@@ -222,9 +220,7 @@ class BenchmarkEvaluator:
                 # Structure results
                 meta_cluster_results = []
                 for query, result_list in zip(original_queries, prompt_results):
-                    meta_cluster_results.append(
-                        {"query": query, "generations": result_list}
-                    )
+                    meta_cluster_results.append({"query": query, "generations": result_list})
 
                 results["results"][meta_cluster] = meta_cluster_results
 
@@ -242,9 +238,7 @@ class BenchmarkEvaluator:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
         # Print summary
-        total_queries = sum(
-            len(cluster_results) for cluster_results in results["results"].values()
-        )
+        total_queries = sum(len(cluster_results) for cluster_results in results["results"].values())
         total_generations = sum(
             len(gen["generations"])
             for cluster_results in results["results"].values()
@@ -288,9 +282,7 @@ def main():
         default="artifacts/pbr/tulu_prompt_outputs.json",
         help="Path to save results JSON file",
     )
-    parser.add_argument(
-        "--temperature", type=float, default=0.6, help="Sampling temperature"
-    )
+    parser.add_argument("--temperature", type=float, default=0.6, help="Sampling temperature")
     parser.add_argument(
         "--backend",
         type=str,
@@ -382,5 +374,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

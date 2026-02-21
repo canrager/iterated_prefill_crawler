@@ -8,7 +8,7 @@ import time
 import torch
 from src.llm_utils import load_model_and_tokenizer
 from src.generation_utils import batch_generate
-from configs.directory_config import INPUT_DIR
+from src.directory_config import INPUT_DIR
 
 # Small model for quick testing
 MODEL_NAME = "allenai/Llama-3.1-Tulu-3-8B-SFT"
@@ -33,6 +33,7 @@ USER_MESSAGE_TEMPLATE = "Tell me about {}. I'm curious."
 MAX_NEW_TOKENS = 100
 TEMPERATURE = 0.6
 NUM_SAMPLES = 1
+
 
 def benchmark_backend(backend_name: str):
     """Run benchmark for a specific backend."""
@@ -153,10 +154,18 @@ def main():
 
         print(f"{'Metric':<30} {'Transformers':<15} {'vLLM':<15} {'Speedup':<10}")
         print(f"{'-'*70}")
-        print(f"{'Load time (s)':<30} {results[0]['load_time']:<15.2f} {results[1]['load_time']:<15.2f} {results[1]['load_time']/results[0]['load_time']:<10.2f}x")
-        print(f"{'Generation time (s)':<30} {results[0]['gen_time']:<15.2f} {results[1]['gen_time']:<15.2f} {results[0]['gen_time']/results[1]['gen_time']:<10.2f}x")
-        print(f"{'Throughput (samples/s)':<30} {results[0]['throughput']:<15.2f} {results[1]['throughput']:<15.2f} {speedup:<10.2f}x")
-        print(f"{'Tokens/sec':<30} {results[0]['tokens_per_sec']:<15.2f} {results[1]['tokens_per_sec']:<15.2f} {token_speedup:<10.2f}x")
+        print(
+            f"{'Load time (s)':<30} {results[0]['load_time']:<15.2f} {results[1]['load_time']:<15.2f} {results[1]['load_time']/results[0]['load_time']:<10.2f}x"
+        )
+        print(
+            f"{'Generation time (s)':<30} {results[0]['gen_time']:<15.2f} {results[1]['gen_time']:<15.2f} {results[0]['gen_time']/results[1]['gen_time']:<10.2f}x"
+        )
+        print(
+            f"{'Throughput (samples/s)':<30} {results[0]['throughput']:<15.2f} {results[1]['throughput']:<15.2f} {speedup:<10.2f}x"
+        )
+        print(
+            f"{'Tokens/sec':<30} {results[0]['tokens_per_sec']:<15.2f} {results[1]['tokens_per_sec']:<15.2f} {token_speedup:<10.2f}x"
+        )
 
         print(f"\nvLLM is {speedup:.2f}x faster than transformers for generation!")
 

@@ -24,7 +24,7 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-from configs.directory_config import INTERIM_DIR
+from src.directory_config import INTERIM_DIR
 
 
 def parse_crawler_log_filename(filename: str) -> Optional[Dict[str, str]]:
@@ -40,7 +40,9 @@ def parse_crawler_log_filename(filename: str) -> Optional[Dict[str, str]]:
     basename = filename.replace(".json", "")
 
     # Try pattern with "prompt" separator
-    pattern1 = r"crawler_log_(\d{8})_(\d{6})_(.+?)_(\d+)samples_(\d+)crawls_(.+?)filter_(.+?)_prompt_(.+)"
+    pattern1 = (
+        r"crawler_log_(\d{8})_(\d{6})_(.+?)_(\d+)samples_(\d+)crawls_(.+?)filter_(.+?)_prompt_(.+)"
+    )
     match = re.match(pattern1, basename)
 
     if not match:
@@ -51,9 +53,7 @@ def parse_crawler_log_filename(filename: str) -> Optional[Dict[str, str]]:
     if not match:
         return None
 
-    date_str, time_str, model, samples, crawls, filter_val, prefill_mode, backend = (
-        match.groups()
-    )
+    date_str, time_str, model, samples, crawls, filter_val, prefill_mode, backend = match.groups()
 
     return {
         "model": model,
@@ -81,9 +81,7 @@ def load_topics_from_log_file(log_file_path: Path) -> Set[str]:
             data = json.load(f)
 
         # Extract head_refusal_topics
-        head_refusal_topics = (
-            data.get("queue", {}).get("topics", {}).get("head_refusal_topics", [])
-        )
+        head_refusal_topics = data.get("queue", {}).get("topics", {}).get("head_refusal_topics", [])
 
         # Extract topic summaries
         for topic in head_refusal_topics:
@@ -358,9 +356,7 @@ def compute_meta_cluster_recall_per_model(
             recall = 0.0
         else:
             # Recall = meta-clusters in this mode / total model meta-clusters
-            recall = len(meta_clusters_in_mode & model_meta_clusters) / len(
-                model_meta_clusters
-            )
+            recall = len(meta_clusters_in_mode & model_meta_clusters) / len(model_meta_clusters)
 
         results.append(
             {
@@ -370,9 +366,7 @@ def compute_meta_cluster_recall_per_model(
                 "meta_cluster_recall": recall,
                 "num_meta_clusters_in_mode": len(meta_clusters_in_mode),
                 "num_model_meta_clusters": len(model_meta_clusters),
-                "num_recalled_meta_clusters": len(
-                    meta_clusters_in_mode & model_meta_clusters
-                ),
+                "num_recalled_meta_clusters": len(meta_clusters_in_mode & model_meta_clusters),
             }
         )
 
@@ -492,9 +486,7 @@ def main(
 
     # Compute model meta-cluster union (union across prefill modes per model)
     print("\n" + "=" * 80)
-    print(
-        "Computing model meta-cluster union (union across prefill modes per model)..."
-    )
+    print("Computing model meta-cluster union (union across prefill modes per model)...")
     print("=" * 80)
     model_meta_cluster_union = compute_model_meta_cluster_union(coverage_df, log_files)
 
@@ -521,9 +513,7 @@ def main(
     print("\n" + "=" * 80)
     print("Computing recall per model+prefill mode...")
     print("=" * 80)
-    recall_df = compute_recall_per_prefill_mode(
-        log_files, model_refusal_topics, interim_dir
-    )
+    recall_df = compute_recall_per_prefill_mode(log_files, model_refusal_topics, interim_dir)
 
     # Save recall DataFrame
     recall_output = output_dir / "model_prefill_recall.csv"
@@ -575,17 +565,13 @@ def main(
     print("Topic Recall Summary Statistics")
     print("=" * 80)
     print(f"\nRecall by prefill mode:")
-    print(
-        recall_df.groupby("prefill_mode")["recall"].agg(["mean", "std", "min", "max"])
-    )
+    print(recall_df.groupby("prefill_mode")["recall"].agg(["mean", "std", "min", "max"]))
 
     print(f"\nRecall by model:")
     print(recall_df.groupby("model")["recall"].agg(["mean", "std", "min", "max"]))
 
     print(f"\nTop 10 models by average recall:")
-    model_avg_recall = (
-        recall_df.groupby("model")["recall"].mean().sort_values(ascending=False)
-    )
+    model_avg_recall = recall_df.groupby("model")["recall"].mean().sort_values(ascending=False)
     print(model_avg_recall.head(10))
 
     print(f"\nDetailed recall per model+prefill mode:")
@@ -628,9 +614,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(
-        meta_clusters_file=(
-            Path(args.meta_clusters_file) if args.meta_clusters_file else None
-        ),
+        meta_clusters_file=(Path(args.meta_clusters_file) if args.meta_clusters_file else None),
         interim_dir=Path(args.interim_dir) if args.interim_dir else None,
         output_dir=Path(args.output_dir) if args.output_dir else None,
     )

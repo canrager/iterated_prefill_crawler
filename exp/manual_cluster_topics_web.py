@@ -30,7 +30,7 @@ project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
 from src.llm_utils import load_vllm_model
-from configs.directory_config import resolve_cache_dir
+from src.directory_config import resolve_cache_dir
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
@@ -298,9 +298,7 @@ def init():
 
         # Extract head refusal topics
         head_refusal_topics = (
-            crawler_data.get("queue", {})
-            .get("topics", {})
-            .get("head_refusal_topics", [])
+            crawler_data.get("queue", {}).get("topics", {}).get("head_refusal_topics", [])
         )
 
         if not head_refusal_topics:
@@ -327,9 +325,7 @@ def init():
                     labeled_ids.add(topic_id)
 
         # Filter topics
-        unlabeled_topics = [
-            topic for topic in _topics if get_topic_id(topic) not in labeled_ids
-        ]
+        unlabeled_topics = [topic for topic in _topics if get_topic_id(topic) not in labeled_ids]
 
         return jsonify(
             {
@@ -459,9 +455,7 @@ def suggest_cluster():
     if _vllm_model is None or _vllm_tokenizer is None:
         return (
             jsonify(
-                {
-                    "error": "LLM model not loaded. Please start the server with --vllm_model_name"
-                }
+                {"error": "LLM model not loaded. Please start the server with --vllm_model_name"}
             ),
             400,
         )
@@ -491,9 +485,7 @@ def suggest_cluster():
     cluster_names = list(_clusters.keys())
     if not cluster_names:
         return (
-            jsonify(
-                {"error": "No clusters exist yet. Create at least one cluster first."}
-            ),
+            jsonify({"error": "No clusters exist yet. Create at least one cluster first."}),
             400,
         )
 
@@ -636,9 +628,7 @@ def main():
             _crawler_log_path = file_path
 
             head_refusal_topics = (
-                crawler_data.get("queue", {})
-                .get("topics", {})
-                .get("head_refusal_topics", [])
+                crawler_data.get("queue", {}).get("topics", {}).get("head_refusal_topics", [])
             )
 
             if head_refusal_topics:

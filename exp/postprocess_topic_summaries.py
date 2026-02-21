@@ -51,7 +51,7 @@ from src.evaluation.safety_topic_ranker_matcher import (
     parse_similarity_response,
 )
 from src.llm_utils import load_vllm_model
-from configs.directory_config import resolve_cache_dir
+from src.directory_config import resolve_cache_dir
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
@@ -257,9 +257,7 @@ def load_topics_from_log_file(log_file_path: Path) -> pd.DataFrame:
             data = json.load(f)
 
         # Extract head_refusal_topics
-        head_refusal_topics = (
-            data.get("queue", {}).get("topics", {}).get("head_refusal_topics", [])
-        )
+        head_refusal_topics = data.get("queue", {}).get("topics", {}).get("head_refusal_topics", [])
 
         if not head_refusal_topics:
             print(f"  Warning: No head_refusal_topics found in {log_file_name}")
@@ -315,9 +313,7 @@ def load_all_topic_summaries(pbr_dir: Path) -> Dict[str, pd.DataFrame]:
     print(f"\nTotal topics collected: {total_topics}")
     print(f"Topics per log file:")
     for log_file_name, df in log_file_dfs.items():
-        print(
-            f"  {log_file_name}: {len(df)} topics ({df['topic_summary'].nunique()} unique)"
-        )
+        print(f"  {log_file_name}: {len(df)} topics ({df['topic_summary'].nunique()} unique)")
 
     return log_file_dfs
 
@@ -374,9 +370,7 @@ def batch_compare_topics(
 
     # Parse responses and log
     results = []
-    for (gt_topic, crawled_topics), prompt, response in zip(
-        comparisons, prompts, responses
-    ):
+    for (gt_topic, crawled_topics), prompt, response in zip(comparisons, prompts, responses):
         is_match, matched_topics = parse_similarity_response(response)
 
         if log_file:
@@ -431,9 +425,9 @@ def aggregate_cluster_heads_across_log_files(
             if cluster_head not in cluster_head_to_log_file:
                 all_cluster_heads.append(cluster_head)
                 cluster_head_to_log_file[cluster_head] = log_file_name
-                cluster_head_to_topics[cluster_head] = df[
-                    df["cluster_head"] == cluster_head
-                ]["topic_summary"].tolist()
+                cluster_head_to_topics[cluster_head] = df[df["cluster_head"] == cluster_head][
+                    "topic_summary"
+                ].tolist()
 
     print(f"  Total cluster heads to merge: {len(all_cluster_heads)}")
 
@@ -545,9 +539,7 @@ def merge_cluster_heads_in_batches(
             if not final_cluster_heads:
                 first_head = chunk[0]
                 final_cluster_heads.append(first_head)
-                final_cluster_to_topics[first_head] = cluster_head_to_topics[
-                    first_head
-                ].copy()
+                final_cluster_to_topics[first_head] = cluster_head_to_topics[first_head].copy()
                 head_to_final_cluster[first_head] = first_head
                 pbar.update(1)
                 chunk = chunk[1:]  # Process remaining heads in chunk
@@ -566,12 +558,7 @@ def merge_cluster_heads_in_batches(
                     f"New cluster heads to merge ({len(chunk)}):\n"
                     + "\n".join([f"  {i+1}. {head}" for i, head in enumerate(chunk)])
                     + f"\n\nExisting final cluster heads ({len(final_cluster_heads)}):\n"
-                    + "\n".join(
-                        [
-                            f"  {i+1}. {head}"
-                            for i, head in enumerate(final_cluster_heads)
-                        ]
-                    ),
+                    + "\n".join([f"  {i+1}. {head}" for i, head in enumerate(final_cluster_heads)]),
                 )
 
             try:
@@ -663,8 +650,7 @@ def merge_cluster_heads_in_batches(
                         f"Clusters created ({len(clustering)}):\n"
                         + "\n".join(
                             [
-                                f"  {cluster_name}:\n    "
-                                + "\n    ".join(heads_in_cluster)
+                                f"  {cluster_name}:\n    " + "\n    ".join(heads_in_cluster)
                                 for cluster_name, heads_in_cluster in clustering.items()
                             ]
                         ),
@@ -701,9 +687,7 @@ def merge_cluster_heads_in_batches(
                                 cluster_head_to_topics[new_head]
                             )
                             head_to_final_cluster[new_head] = target_final_head
-                            merge_operations.append(
-                                f"Merged '{new_head}' -> '{target_final_head}'"
-                            )
+                            merge_operations.append(f"Merged '{new_head}' -> '{target_final_head}'")
                             pbar.update(1)
                     else:
                         # All heads in cluster are new - use first one as cluster head
@@ -736,17 +720,13 @@ def merge_cluster_heads_in_batches(
                 # Handle any new heads that weren't clustered (shouldn't happen, but safety check)
                 clustered_new_heads = set()
                 for heads_in_cluster in clustering.values():
-                    clustered_new_heads.update(
-                        [h for h in heads_in_cluster if h in chunk]
-                    )
+                    clustered_new_heads.update([h for h in heads_in_cluster if h in chunk])
 
                 for new_head in chunk:
                     if new_head not in clustered_new_heads:
                         # Add as new final cluster head
                         final_cluster_heads.append(new_head)
-                        final_cluster_to_topics[new_head] = cluster_head_to_topics[
-                            new_head
-                        ].copy()
+                        final_cluster_to_topics[new_head] = cluster_head_to_topics[new_head].copy()
                         head_to_final_cluster[new_head] = new_head
                         pbar.update(1)
 
@@ -1128,9 +1108,7 @@ def cluster_topics_in_batch(
             response = responses[0]
 
             # Parse clustering response
-            clustering, found_jsonl, is_valid = parse_batch_clustering_response(
-                response, topics
-            )
+            clustering, found_jsonl, is_valid = parse_batch_clustering_response(response, topics)
 
             if found_jsonl and is_valid:
                 break  # Successfully found jsonl and valid structure, exit retry loop
@@ -1285,9 +1263,7 @@ def iteratively_merge_semantic_duplicates(
             prev_num_clusters = len(current_cluster_heads)
 
             print(f"\n{'='*80}")
-            print(
-                f"Iteration {iteration}: Processing {len(current_cluster_heads)} cluster heads"
-            )
+            print(f"Iteration {iteration}: Processing {len(current_cluster_heads)} cluster heads")
             print(f"{'='*80}")
 
             # Log iteration start
@@ -1297,12 +1273,7 @@ def iteratively_merge_semantic_duplicates(
                     f"Iteration {iteration} - Start",
                     f"Processing {len(current_cluster_heads)} cluster heads\n"
                     f"Previous iteration had {prev_num_clusters} clusters\n\n"
-                    + "\n".join(
-                        [
-                            f"{i+1}. {head}"
-                            for i, head in enumerate(current_cluster_heads)
-                        ]
-                    ),
+                    + "\n".join([f"{i+1}. {head}" for i, head in enumerate(current_cluster_heads)]),
                 )
 
             # Split cluster heads into batches
@@ -1332,9 +1303,7 @@ def iteratively_merge_semantic_duplicates(
 
             # If no full batches, check for convergence
             if not full_batches:
-                print(
-                    f"  No full batches to process - all batches are smaller than batch_size"
-                )
+                print(f"  No full batches to process - all batches are smaller than batch_size")
                 # All items were ported to next iteration without processing
                 # This means we've compared everything, so check if we should stop
                 if len(all_new_clusters) == len(current_cluster_heads):
@@ -1425,8 +1394,8 @@ def iteratively_merge_semantic_duplicates(
                                     break
                                 response = retry_responses[0]
 
-                            batch_clusters, found_jsonl, is_valid = (
-                                parse_batch_clustering_response(response, batch)
+                            batch_clusters, found_jsonl, is_valid = parse_batch_clustering_response(
+                                response, batch
                             )
 
                             if found_jsonl and is_valid:
@@ -1465,9 +1434,7 @@ def iteratively_merge_semantic_duplicates(
                                 detailed_log_file,
                                 f"Iteration {iteration} - Batch {batch_idx + 1} Clustering Result",
                                 f"Input topics ({len(batch)}):\n"
-                                + "\n".join(
-                                    [f"  [{i+1}] {t}" for i, t in enumerate(batch)]
-                                )
+                                + "\n".join([f"  [{i+1}] {t}" for i, t in enumerate(batch)])
                                 + f"\n\nClusters created ({len(batch_clusters)}):\n"
                                 + "\n".join(
                                     [
@@ -1499,9 +1466,7 @@ def iteratively_merge_semantic_duplicates(
                                 all_new_clusters[cluster_name].extend(topics_in_cluster)
                             else:
                                 # New cluster with this description
-                                all_new_clusters[cluster_name] = (
-                                    topics_in_cluster.copy()
-                                )
+                                all_new_clusters[cluster_name] = topics_in_cluster.copy()
 
                 except Exception as e:
                     if verbose:
@@ -1591,7 +1556,7 @@ def iteratively_merge_semantic_duplicates(
                 print(f"\n{'='*80}")
                 print("Convergence reached - no more aggregation possible")
                 print(f"{'='*80}")
-                
+
                 # Log convergence to detailed log
                 if detailed_log_file:
                     write_detailed_log(
@@ -1604,13 +1569,10 @@ def iteratively_merge_semantic_duplicates(
                         f"Convergence reached - no more aggregation possible.\n"
                         f"Final cluster heads ({len(current_cluster_heads)}):\n"
                         + "\n".join(
-                            [
-                                f"  {i+1}. {head}"
-                                for i, head in enumerate(current_cluster_heads)
-                            ]
+                            [f"  {i+1}. {head}" for i, head in enumerate(current_cluster_heads)]
                         ),
                     )
-                
+
                 break
 
     # Add cluster_head column to DataFrame
@@ -1621,9 +1583,7 @@ def iteratively_merge_semantic_duplicates(
     print(f"{'='*80}")
     print(f"  Original unique topics: {len(unique_topics)}")
     print(f"  Final cluster heads: {len(current_cluster_heads)}")
-    print(
-        f"  Total reduction: {len(unique_topics) - len(current_cluster_heads)} topics merged"
-    )
+    print(f"  Total reduction: {len(unique_topics) - len(current_cluster_heads)} topics merged")
     print(f"  Iterations: {iteration}")
 
     # Write final summary to detailed log
@@ -1632,9 +1592,7 @@ def iteratively_merge_semantic_duplicates(
         final_cluster_summary = []
         for cluster_head in current_cluster_heads:
             topics_in_cluster = [
-                topic
-                for topic in unique_topics
-                if topic_to_cluster[topic] == cluster_head
+                topic for topic in unique_topics if topic_to_cluster[topic] == cluster_head
             ]
             final_cluster_summary.append(
                 f"{cluster_head} ({len(topics_in_cluster)} topics):\n  "
@@ -1648,9 +1606,7 @@ def iteratively_merge_semantic_duplicates(
             f"Original unique topics: {len(unique_topics)}\n"
             f"Final cluster heads: {len(current_cluster_heads)}\n"
             f"Total reduction: {len(unique_topics) - len(current_cluster_heads)} topics merged\n"
-            f"Iterations: {iteration}\n\n"
-            + "Final clusters:\n"
-            + "\n".join(final_cluster_summary),
+            f"Iterations: {iteration}\n\n" + "Final clusters:\n" + "\n".join(final_cluster_summary),
         )
 
     # Build hierarchy info
@@ -1891,7 +1847,7 @@ def generate_markdown_hierarchy_tree(
     )
     lines.append("into final cluster heads.")
     lines.append("")
-    
+
     # Add file-level statistics if available
     if per_file_hierarchies:
         lines.append("## File-Level Statistics")
@@ -1902,13 +1858,11 @@ def generate_markdown_hierarchy_tree(
             num_topics = len(topic_paths)
             lines.append(f"- **{log_file_name}**: {num_topics} topics, {num_iterations} iterations")
         lines.append("")
-    
+
     lines.append("## Legend")
     lines.append("- **Final Cluster**: Top-level cluster after cross-file aggregation")
     lines.append("- **Within-File Final**: Final cluster head from within-file clustering")
-    lines.append(
-        "- **Iteration N**: Cluster created in iteration N of within-file clustering"
-    )
+    lines.append("- **Iteration N**: Cluster created in iteration N of within-file clustering")
     lines.append("- **Original**: Original topic from crawler log")
     lines.append("")
 
@@ -1921,9 +1875,7 @@ def generate_markdown_hierarchy_tree(
 
     for cluster_idx, (final_head, cluster_data) in enumerate(final_clusters, 1):
         topic_count = cluster_data.get("topic_count", 0)
-        lines.append(
-            f'## {cluster_idx}. Final Cluster: "{final_head}" ({topic_count} topics)'
-        )
+        lines.append(f'## {cluster_idx}. Final Cluster: "{final_head}" ({topic_count} topics)')
         lines.append("")
 
         # Build tree for this cluster
@@ -2094,9 +2046,7 @@ def main(
             temperature=temperature,
             max_retries=max_retries,
         )
-        print(
-            f"  After aggregation: {df_aggregated['cluster_head'].nunique()} cluster heads"
-        )
+        print(f"  After aggregation: {df_aggregated['cluster_head'].nunique()} cluster heads")
 
         # Store hierarchy info for this log file
         per_file_hierarchies[log_file_name] = hierarchy_info
@@ -2108,8 +2058,7 @@ def main(
 
         # Save per-file results
         per_file_output = (
-            pbr_dir
-            / f"topic_summaries_{log_file_name.replace('.json', '')}_aggregated.json"
+            pbr_dir / f"topic_summaries_{log_file_name.replace('.json', '')}_aggregated.json"
         )
         df_aggregated.to_json(per_file_output, orient="records", indent=2)
         print(f"Saved per-file aggregated results to: {per_file_output}")
@@ -2155,9 +2104,7 @@ def main(
     print("Step 6: Generating hierarchy log")
     print("=" * 80)
     try:
-        hierarchy_tree = build_hierarchy_tree(
-            per_file_hierarchies, cross_file_mapping, df_final
-        )
+        hierarchy_tree = build_hierarchy_tree(per_file_hierarchies, cross_file_mapping, df_final)
         markdown_content = generate_markdown_hierarchy_tree(
             hierarchy_tree, df_final, per_file_hierarchies=per_file_hierarchies
         )
@@ -2179,9 +2126,7 @@ def main(
     print(f"Unique topics (before merging): {df_final['topic_summary'].nunique()}")
     print(f"Cluster heads (after merging): {df_final['cluster_head'].nunique()}")
     print(f"\nTop 10 clusters by topic count:")
-    cluster_counts = (
-        df_final.groupby("cluster_head").size().sort_values(ascending=False)
-    )
+    cluster_counts = df_final.groupby("cluster_head").size().sort_values(ascending=False)
     for cluster_head, count in cluster_counts.head(10).items():
         cluster_desc = df_final[df_final["cluster_head"] == cluster_head][
             "cluster_description"

@@ -9,7 +9,7 @@ import os
 import torch
 from src.generation_utils import batch_generate
 from src.llm_utils import load_model_and_tokenizer
-from configs.directory_config import RESULT_DIR
+from src.directory_config import RESULT_DIR
 from src.evaluation.ranking_eval import RankingTracker
 
 # Default ranking configuration
@@ -83,9 +83,7 @@ class WinCountRanking(RankingSystem):
 class EloRanking(RankingSystem):
     """Elo rating system"""
 
-    def __init__(
-        self, topics: List[str], initial_rating: float = 1000, k_factor: float = 32
-    ):
+    def __init__(self, topics: List[str], initial_rating: float = 1000, k_factor: float = 32):
         super().__init__(topics)
         self.ratings = {topic: initial_rating for topic in topics}
         self.k_factor = k_factor
@@ -147,16 +145,12 @@ class TrueSkillRanking(RankingSystem):
         # Update winner's rating
         sigma_winner_sq = winner_r.sigma**2
         mu_winner_new = winner_r.mu + (sigma_winner_sq / sigma_total) * v_val
-        sigma_winner_new = np.sqrt(
-            sigma_winner_sq * (1 - (sigma_winner_sq / sigma_sq) * w_val)
-        )
+        sigma_winner_new = np.sqrt(sigma_winner_sq * (1 - (sigma_winner_sq / sigma_sq) * w_val))
 
         # Update loser's rating
         sigma_loser_sq = loser_r.sigma**2
         mu_loser_new = loser_r.mu - (sigma_loser_sq / sigma_total) * v_val
-        sigma_loser_new = np.sqrt(
-            sigma_loser_sq * (1 - (sigma_loser_sq / sigma_sq) * w_val)
-        )
+        sigma_loser_new = np.sqrt(sigma_loser_sq * (1 - (sigma_loser_sq / sigma_sq) * w_val))
 
         # Incorporate dynamics (add tau noise)
         sigma_winner_new = np.sqrt(sigma_winner_new**2 + self.tau**2)
@@ -325,9 +319,7 @@ def setup_ranking_experiment(
 
     # Load model and tokenizer
     print(f"Loading model {model_name}...")
-    model, tokenizer = load_model_and_tokenizer(
-        model_name, device=device, cache_dir=cache_dir
-    )
+    model, tokenizer = load_model_and_tokenizer(model_name, device=device, cache_dir=cache_dir)
 
     # Initialize ranking systems based on config
     ranking_systems = {}
@@ -396,9 +388,7 @@ def rank_clustered_topics(
     # Optionally load pre-ranked topics
     save_dir = os.path.join(RESULT_DIR, f"topics_clustered_ranked_{run_title}.json")
     if os.path.exists(save_dir) and not force_recompute:
-        print(
-            f"Loading the ranked, aggregated topics, since they already exist at: {save_dir}"
-        )
+        print(f"Loading the ranked, aggregated topics, since they already exist at: {save_dir}")
         return json.load(open(save_dir, "r"))
 
     clusters_dir = os.path.join(RESULT_DIR, f"topics_clustered_{run_title}.json")
@@ -441,9 +431,7 @@ def rank_individual_topics(
     # Optionally load pre-ranked topics
     save_dir = os.path.join(RESULT_DIR, f"topics_ranked_{run_title}.json")
     if os.path.exists(save_dir) and not force_recompute:
-        print(
-            f"Loading the ranked, aggregated topics, since they already exist at: {save_dir}"
-        )
+        print(f"Loading the ranked, aggregated topics, since they already exist at: {save_dir}")
         return json.load(open(save_dir, "r"))
 
     # Run ranking experiment

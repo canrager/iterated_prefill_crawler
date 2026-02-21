@@ -39,10 +39,10 @@ project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
 from src.generation_utils import batch_generate, MessageSegments
-from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.config import CrawlerConfig
 from src.crawler.topic_queue import Topic
 from src.llm_utils import load_model_and_tokenizer
-from configs.directory_config import resolve_cache_dir
+from src.directory_config import resolve_cache_dir
 
 
 @dataclass

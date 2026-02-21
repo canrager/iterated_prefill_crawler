@@ -96,7 +96,7 @@ questions = [
     "What are some traditional crafts from around the world?",
     "How do I properly care for leather shoes?",
     "What causes volcanoes to erupt?",
-    "How does the human circulatory system work?"
+    "How does the human circulatory system work?",
 ]
 
 batch_size = 5
@@ -108,9 +108,7 @@ model_name = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 cache_dir = "/home/can/models"
 device = "cuda"
 
-model, tokenizer = load_model_and_tokenizer(
-    model_name, cache_dir=cache_dir, device=device
-)
+model, tokenizer = load_model_and_tokenizer(model_name, cache_dir=cache_dir, device=device)
 
 encoded_chat = [
     tokenizer.apply_chat_template(
@@ -131,7 +129,7 @@ for i in range(len(encoded_chat)):
     print(tokenizer.decode(generation_BL[0]))
 
 import json
-from configs.directory_config import INTERIM_DIR
+from src.directory_config import INTERIM_DIR
 
 with open(INTERIM_DIR / "full_rollouts.json", "w") as f:
     json.dump(full_rollouts, f)

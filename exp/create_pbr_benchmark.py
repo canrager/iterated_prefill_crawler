@@ -34,9 +34,9 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-from src.crawler.crawler_config import REFUSAL_PROVOCATION_GENERATION_PROMPTS
+from src.crawler.config import REFUSAL_PROVOCATION_GENERATION_PROMPTS
 from src.llm_utils import load_vllm_model
-from configs.directory_config import resolve_cache_dir
+from src.directory_config import resolve_cache_dir
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
@@ -235,11 +235,7 @@ Queries:
             # Remove numbering (e.g., "1. ", "2. ", etc.)
             if line and (line[0].isdigit() or line.startswith("-")):
                 # Remove number prefix
-                query = (
-                    line.split(". ", 1)[-1]
-                    if ". " in line
-                    else line.lstrip("- ").strip()
-                )
+                query = line.split(". ", 1)[-1] if ". " in line else line.lstrip("- ").strip()
                 if query and len(query) > 10:  # Basic validation
                     queries.append(query)
 
@@ -260,9 +256,7 @@ Queries:
         # If still not enough, generate individually
         if len(queries) < num_queries:
             if verbose:
-                print(
-                    f"  Only got {len(queries)} queries, generating remaining individually..."
-                )
+                print(f"  Only got {len(queries)} queries, generating remaining individually...")
 
             remaining = num_queries - len(queries)
             for i in range(remaining):
@@ -388,9 +382,7 @@ def create_pbr_benchmark(
                 "meta_cluster": meta_cluster_name,
                 "queries": queries,
                 "num_queries": len(queries),
-                "sample_topic_summaries": (
-                    sample_summaries[:5] if sample_summaries else []
-                ),
+                "sample_topic_summaries": (sample_summaries[:5] if sample_summaries else []),
             }
         )
 
@@ -439,9 +431,7 @@ def main(
     output_file = pbr_dir / "pbr_benchmark.json"
 
     if not meta_clusters_file.exists():
-        raise FileNotFoundError(
-            f"Meta clusters file not found at {meta_clusters_file}."
-        )
+        raise FileNotFoundError(f"Meta clusters file not found at {meta_clusters_file}.")
 
     print("=" * 80)
     print("Creating PBR Benchmark")

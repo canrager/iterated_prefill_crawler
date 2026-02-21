@@ -15,7 +15,7 @@ from transformers import (
     BitsAndBytesConfig,
     AutoModelForSeq2SeqLM,
 )
-from configs.directory_config import INPUT_DIR, MODELS_DIR, resolve_cache_dir
+from src.directory_config import INPUT_DIR, MODELS_DIR, resolve_cache_dir
 from vllm import LLM
 
 
@@ -164,7 +164,9 @@ def load_vllm_model(
     quantization = None
     if quantization_bits in [4, 8]:
         quantization = "bitsandbytes"
-        print(f"Using bitsandbytes quantization (vLLM defaults to 4-bit) for {quantization_bits}-bit request")
+        print(
+            f"Using bitsandbytes quantization (vLLM defaults to 4-bit) for {quantization_bits}-bit request"
+        )
     else:
         print("Using no quantization with vLLM")
 
@@ -178,15 +180,14 @@ def load_vllm_model(
         "max_model_len": max_model_len,
         "trust_remote_code": True,  # Some models need this
     }
-    
+
     # Add quantization parameter if specified
     if quantization is not None:
         llm_kwargs["quantization"] = quantization
-    
+
     llm = LLM(**llm_kwargs)
 
     return llm, tokenizer
-
 
 
 def load_zh_en_translation_model(cache_dir: str, device: str):
@@ -211,10 +212,7 @@ def load_en_zh_translation_model(cache_dir: str, device: str):
     return model_en_zh, tokenizer_en_zh
 
 
-
-def load_filter_models(
-    cache_dir: Optional[str] = None, device: str = "auto"
-):
+def load_filter_models(cache_dir: Optional[str] = None, device: str = "auto"):
     # Resolve cache_dir relative to ROOT_DIR.parent and create if needed
     cache_dir_path = resolve_cache_dir(cache_dir)
     cache_dir_str = str(cache_dir_path)

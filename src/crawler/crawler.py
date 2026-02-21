@@ -19,7 +19,7 @@ from src.generation_utils import (
     MessageSegments,
 )
 from src.crawler.topic_queue import TopicQueue, Topic
-from src.crawler.crawler_config import CrawlerConfig
+from src.crawler.config import CrawlerConfig
 from src.crawler.crawler_stats import CrawlerStats
 from src.response_formatting_utils import remove_thinking_context, TopicFormatter
 
