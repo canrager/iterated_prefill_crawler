@@ -32,6 +32,17 @@ def main(cfg: DictConfig) -> None:
 
     crawler_config = CrawlerConfig(**OmegaConf.to_container(cfg, resolve=True))
 
+    # Check API key early if any role uses a non-local (OpenRouter) model
+    non_local_roles = [
+        role for role in ("target", "translation", "summarization", "refusal_check")
+        if getattr(crawler_config.model, f"{role}_model") != "local"
+    ]
+    if non_local_roles and not os.environ.get("OPENROUTER_API_KEY"):
+        raise ValueError(
+            f"OPENROUTER_API_KEY environment variable is not set, but the following roles "
+            f"use non-local models: {non_local_roles}"
+        )
+
     # Resolve cache_dir relative to ROOT_DIR.parent and create if needed
     cache_dir_path = resolve_cache_dir(cfg.model.cache_dir)
     cache_dir_str = str(cache_dir_path)
