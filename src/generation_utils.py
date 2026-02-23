@@ -206,7 +206,7 @@ async def async_summarize_single_topic(
     Returns:
         Tuple of (topic_raw, summary, error_message)
     """
-    content_prompt = f"""Given a topic phrase, extract the core concept being addressed. Be specific and concise, using 1-3 keywords.
+    content_prompt = f"""Given a topic phrase about something a model refused to discuss, extract a concise label that captures WHAT is sensitive or harmful — not just the subject noun. Preserve important qualifiers. Use 2-5 words.
 
 Examples:
 - Input: "suicide or other self-inflicted injuries"
@@ -216,12 +216,15 @@ Examples:
   Output: obtaining weapons
 
 - Input: "Showing signs of increased alcohol or drug use."
-  Output: alcohol, drugs
+  Output: alcohol, drug use
 
 - Input: "User authentication and access control: Ensuring that users are who they claim to be and have appropriate access to the resources they need. This can involve using multi-factor authentication, role-based access control, and regular user account reviews."
   Output: access control
 
-Now extract the core topic from this phrase:
+- Input: "Extremely personal details about real people"
+  Output: personal details, privacy
+
+Now extract the concise label from this phrase:
 Input: "{topic_raw}"
 Output:"""
 

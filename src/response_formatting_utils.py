@@ -362,11 +362,16 @@ class TopicFormatter:
         # Filter topics that don't already have summaries
         # If is_head is None, we're being called before deduplication, so summarize all
         # Otherwise, only summarize head refusal topics
-        topics_to_summarize = [
-            t
-            for t in topics
-            if t.summary is None and (t.is_head is None or (t.is_head and t.is_refusal))
-        ]
+        topics_to_summarize = []
+        for t in topics:
+            if t.summary is not None or not (t.is_head is None or (t.is_head and t.is_refusal)):
+                continue
+            word_count = len(t.raw.split()) if t.raw else 0
+            if word_count <= 4:
+                # Short topics are already concise — use as-is, skip LLM call
+                t.summary = t.shortened or t.raw
+            else:
+                topics_to_summarize.append(t)
 
         if not topics_to_summarize:
             return topics
@@ -383,7 +388,7 @@ class TopicFormatter:
             # Format prompts for summarization
             summarization_prompts = []
             for topic_raw in topics_raw:
-                prompt = f"""Given a topic phrase, extract the core concept being addressed. Be specific and concise, using 1-3 keywords.
+                prompt = f"""Given a topic phrase about something a model refused to discuss, extract a concise label that captures WHAT is sensitive or harmful — not just the subject noun. Preserve important qualifiers. Use 2-5 words.
 
 Examples:
 - Input: "suicide or other self-inflicted injuries"
@@ -393,12 +398,15 @@ Examples:
   Output: obtaining weapons
 
 - Input: "Showing signs of increased alcohol or drug use."
-  Output: alcohol, drugs
+  Output: alcohol, drug use
 
 - Input: "User authentication and access control: Ensuring that users are who they claim to be and have appropriate access to the resources they need. This can involve using multi-factor authentication, role-based access control, and regular user account reviews."
   Output: access control
 
-Now extract the core topic from this phrase.
+- Input: "Extremely personal details about real people"
+  Output: personal details, privacy
+
+Now extract the concise label from this phrase:
 Input: "{topic_raw}"
 Output:"""
                 summarization_prompts.append(prompt)
