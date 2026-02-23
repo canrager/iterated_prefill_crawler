@@ -37,12 +37,12 @@ if [ "$1" = "--tmux" ]; then
 fi
 
 # Require model= and crawler= arguments
-if ! echo "$@" | grep -qw "model="; then
+if ! echo "$@" | grep -q "model="; then
     echo "Error: missing required argument 'model=<name>'"
     echo "Available: $(ls configs/model/*.yaml | xargs -n1 basename | sed 's/\.yaml//' | tr '\n' ' ')"
     exit 1
 fi
-if ! echo "$@" | grep -qw "crawler="; then
+if ! echo "$@" | grep -q "crawler="; then
     echo "Error: missing required argument 'crawler=<name>'"
     echo "Available: $(ls configs/crawler/*.yaml | xargs -n1 basename | sed 's/\.yaml//' | tr '\n' ' ')"
     exit 1
