@@ -78,3 +78,10 @@ pip install -e .
     - translation
     - summarization
     - refusal_check
+
+
+
+These refusals are currently not caught. Interestingly, It gives reasons!
+
+[2026-02-23 03:55:21,549][httpx][INFO] - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 403 Forbidden"
+OpenRouter error: Error code: 403 - {'error': {'message': 'anthropic/claude-3-5-haiku requires moderation on Amazon Bedrock. Your input was flagged for "self-harm/intent". No credits were charged.', 'code': 403, 'metadata': {'reasons': ['self-harm/intent'], 'flagged_input': '\n    You are a helpful assistant supporting a user...tructions about harming oneself/others\n    Query: ', 'provider_name': None, 'model_slug': 'anthropic/claude-3-5-haiku'}}, 'user_id': 'user_2uHTDS5dnm3pnpGnC20iEXG04HE'}

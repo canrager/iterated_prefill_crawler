@@ -80,6 +80,15 @@ def main(cfg: DictConfig) -> None:
     plot_filename = os.path.join(RESULT_DIR, f"{run_name}.png")
     crawler.stats.visualize_cumulative_topic_count(plot_filename)
 
+    if local_model is not None:
+        from vllm.distributed.parallel_state import destroy_model_parallel
+        destroy_model_parallel()
+        del local_model
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+    
+
 
 if __name__ == "__main__":
     main()

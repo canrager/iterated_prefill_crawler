@@ -1,4 +1,3 @@
-import re
 import random
 from tqdm import trange
 import json
@@ -13,7 +12,8 @@ from src.prompt_builder import PromptBuilder
 from src.crawler.topic_queue import TopicQueue, Topic
 from src.crawler.config import CrawlerConfig
 from src.crawler.crawler_stats import CrawlerStats
-from src.response_formatting_utils import remove_thinking_context, TopicFormatter
+from src.response_formatting_utils import TopicFormatter
+from src.refusal_utils import check_refusal
 
 
 class Crawler:
@@ -38,18 +38,6 @@ class Crawler:
         self.save_filename = save_filename
         self.save(save_filename)  # Already testing at initialization whether saving works
 
-    def is_refusal(self, text: str | None) -> bool:
-        if text is None:
-            return False
-
-        assistant_answer = text.split("ssistant")[-1]
-
-        # Check each pattern until we find a match
-        for pattern in self.config.refusal_messages:
-            if re.search(pattern, assistant_answer, re.IGNORECASE):
-                return True
-        return False
-
     def _resolve_model(self, role: str, local_model, local_tokenizer):
         """Return (model, tokenizer) for the given role.
 
@@ -61,144 +49,6 @@ class Crawler:
             return local_model, local_tokenizer
         else:
             return model_name, None
-
-    def check_refusal(
-        self,
-        local_model,
-        local_tokenizer,
-        selected_topics: List[Topic],
-        verbose: bool = False,
-    ) -> List[Topic]:
-        """Filtering incoming head topics for refusals."""
-
-        if selected_topics == []:
-            return selected_topics
-
-        refusal_model, refusal_tokenizer = self._resolve_model("refusal_check", local_model, local_tokenizer)
-
-        num_checks = self.config.crawler.num_refusal_checks_per_topic
-        threshold = self.config.crawler.is_refusal_threshold
-
-        # Step 1: Generate queries for ALL topics in parallel
-        all_query_prompts = []
-        topic_indices = []  # Track which prompts belong to which topic
-
-        for topic_idx, topic in enumerate(selected_topics):
-            instructions = (
-                self.config.refusal_provocation_generation_prompts["chinese"]
-                if topic.is_chinese
-                else self.config.refusal_provocation_generation_prompts["english"]
-            )
-            # Add num_checks prompts for this topic
-            all_query_prompts.extend([instructions.format(topic.raw)] * num_checks)
-            topic_indices.extend([topic_idx] * num_checks)
-
-        # Generate all queries at once
-        query_messages = [[{"role": "user", "content": p}] for p in all_query_prompts]
-        all_queries, all_query_input_strs = batch_generate(
-            refusal_model,
-            refusal_tokenizer,
-            query_messages,
-            max_new_tokens=(
-                self.config.model.vllm_max_model_len
-                if self.config.model.vllm_max_model_len is not None
-                else self.config.crawler.max_refusal_check_generated_tokens
-            ),
-            temperature=1,
-            verbose=verbose,
-            cfg=self.config,
-        )
-
-        # Remove thinking context from queries if present
-        all_queries = remove_thinking_context(all_queries)
-
-        # Step 2: Process query refusals and collect topics that need answer checks
-        topics_needing_answers = []
-        topic_to_queries = {}  # Map topic_idx -> list of queries
-
-        for topic_idx, topic in enumerate(selected_topics):
-            # Extract queries for this topic
-            start_idx = topic_idx * num_checks
-            end_idx = start_idx + num_checks
-            queries = all_queries[start_idx:end_idx]
-            prompts = all_query_input_strs[start_idx:end_idx]
-
-            # Check if model refused to make the query
-            refused_to_make_query = [self.is_refusal(query) for query in queries]
-            make_query_majority_refusal = (
-                sum(refused_to_make_query) / len(refused_to_make_query)
-            ) > threshold
-
-            if verbose:
-                print(
-                    f"Topic {topic_idx}: make_query_majority_refusal: {make_query_majority_refusal}"
-                )
-                print(f"queries: {queries}")
-
-            topic.is_refusal = False
-            if make_query_majority_refusal:
-                topic.is_refusal = True
-                topic.refusal_check_queries = prompts
-                topic.refusal_check_responses = queries
-
-            else:
-                # Store queries and mark for answer generation
-                topic_to_queries[topic_idx] = queries
-                topics_needing_answers.append(topic_idx)
-
-        # Step 3: Generate answers for all non-refused topics in parallel
-        if topics_needing_answers:
-            all_answer_prompts = []
-            answer_topic_indices = []  # Track which prompts belong to which topic
-
-            for topic_idx in topics_needing_answers:
-                queries = topic_to_queries[topic_idx]
-                # Extract user messages from queries
-                extracted_queries = [
-                    query.split("ssistant")[-1].strip(" <>|:") for query in queries
-                ]
-                all_answer_prompts.extend(extracted_queries)
-                answer_topic_indices.extend([topic_idx] * len(extracted_queries))
-
-            # Generate all answers at once
-            answer_messages = [[{"role": "user", "content": p}] for p in all_answer_prompts]
-            all_answers, all_answer_strs = batch_generate(
-                refusal_model,
-                refusal_tokenizer,
-                answer_messages,
-                max_new_tokens=self.config.crawler.max_refusal_check_generated_tokens,
-                temperature=self.config.model.temperature,
-                cfg=self.config,
-            )
-
-            # Step 4: Process answer refusals
-            for topic_idx in topics_needing_answers:
-                topic = selected_topics[topic_idx]
-
-                # Extract answers for this topic
-                start_idx = topics_needing_answers.index(topic_idx) * num_checks
-                end_idx = start_idx + num_checks
-                answers = all_answers[start_idx:end_idx]
-                answer_strs = all_answer_strs[start_idx:end_idx]
-
-                # Check if model refused to answer
-                refused_to_answer_query = [self.is_refusal(answer) for answer in answers]
-                make_answer_majority_refusal = (
-                    sum(refused_to_answer_query) / len(refused_to_answer_query)
-                ) > threshold
-
-                if verbose:
-                    print(
-                        f"Topic {topic_idx}: make_answer_majority_refusal: {make_answer_majority_refusal}"
-                    )
-                    print(f"answers: {answers}")
-
-                topic.refusal_check_queries = answer_strs
-                topic.refusal_check_responses = answers
-                if make_answer_majority_refusal:
-                    topic.is_refusal = True
-
-        return selected_topics
 
     def initialize_topics(
         self,
@@ -345,7 +195,8 @@ class Crawler:
                 if self.config.crawler.do_filter_refusals:
                     if verbose:
                         print(f"\n## filtering for refusal...")
-                    new_topics = self.check_refusal(
+                    new_topics = check_refusal(
+                        config=self.config,
                         local_model=local_model,
                         local_tokenizer=local_tokenizer,
                         selected_topics=new_topics,

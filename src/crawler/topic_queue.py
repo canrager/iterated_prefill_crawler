@@ -14,6 +14,7 @@ class Topic:
     is_chinese: bool = None
     is_head: bool = None
     is_refusal: bool = None
+    judge_refused: bool = None
     cluster_idx: int = None
     refusal_check_queries: List[str] = None
     refusal_check_responses: List[str] = None
@@ -30,6 +31,7 @@ class Topic:
             "is_chinese": self.is_chinese,
             "is_head": self.is_head,
             "is_refusal": self.is_refusal,
+            "judge_refused": self.judge_refused,
             "cluster_idx": self.cluster_idx,
             "parent_id": self.parent_id,
             "refusal_check_queries": self.refusal_check_queries,

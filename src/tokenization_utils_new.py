@@ -52,7 +52,7 @@ if __name__ == "__main__":
     from omegaconf import OmegaConf
 
     cfg = OmegaConf.load("configs/config.yaml")
-    model_name = cfg.model_path  # meta-llama/Llama-3.1-8B-Instruct
+    model_name = cfg.model.local_model  # meta-llama/Llama-3.1-8B-Instruct
 
     print(f"Loading tokenizer for: {model_name}")
     tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir="models")

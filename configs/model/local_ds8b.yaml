@@ -1,3 +1,10 @@
+# Model selection ("local" or openrouter path)
+target_model: "local"
+translation_model: "local"
+summarization_model: "local"
+refusal_check_model: "local"
+
+# Local model config
 local_model: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 quantization_bits: null
 device: "cuda"
@@ -5,7 +12,3 @@ cache_dir: "models"
 vllm_tensor_parallel_size: 1
 vllm_gpu_memory_utilization: 0.9
 vllm_max_model_len: 8192
-target_model: "local"
-translation_model: "local"
-summarization_model: "local"
-refusal_check_model: "local"

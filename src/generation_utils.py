@@ -74,9 +74,63 @@ def batch_generate_from_tokens_vllm(
     return generated_texts
 
 
+async def _async_openrouter_single(client, model_name: str, messages: List[Dict], max_new_tokens: int, temperature: float) -> str:
+    """Send a single chat conversation to OpenRouter and return the response text."""
+    try:
+        completion = await client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            max_tokens=max_new_tokens,
+            temperature=temperature,
+        )
+        return completion.choices[0].message.content or ""
+    except Exception as e:
+        print(f"OpenRouter error: {e}")
+        return ""
+
+
+def _openrouter_batch_generate(
+    model_name: str,
+    messages: List[List[Dict]],
+    max_new_tokens: int,
+    temperature: float,
+    verbose: bool = False,
+) -> Tuple[List[str], List[str]]:
+    """Send a batch of chat conversations to OpenRouter concurrently.
+
+    Returns:
+        Tuple of (generated_texts, input_strs) where input_strs are reconstructed from messages.
+    """
+    import os
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(
+        api_key=os.environ.get("OPENROUTER_API_KEY"),
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+    async def _run():
+        tasks = [
+            _async_openrouter_single(client, model_name, msg_list, max_new_tokens, temperature)
+            for msg_list in messages
+        ]
+        return list(await asyncio.gather(*tasks))
+
+    texts = asyncio.run(_run())
+
+    # Reconstruct input_strs from messages (join all content fields)
+    input_strs = [" ".join(m["content"] for m in msg_list) for msg_list in messages]
+
+    if verbose:
+        for input_str, output in zip(input_strs, texts):
+            print(f"===========================\n====input: {input_str}\n\n==== output:\n {output}\n\n")
+
+    return texts, input_strs
+
+
 def batch_generate(
-    model: LLM,
-    tokenizer: AutoTokenizer,
+    model,
+    tokenizer,
     messages: List[List[Dict]],
     max_new_tokens: int = 150,
     temperature: float = 0.6,
@@ -84,11 +138,13 @@ def batch_generate(
     skip_special_tokens: bool = False,
     cfg=None,
 ) -> Tuple[List[str], List[str]]:
-    """Generate text from a list of message dicts using the vLLM backend.
+    """Generate text from a list of message dicts.
+
+    Dispatches to OpenRouter (async) when model is a str, or vLLM when model is an LLM instance.
 
     Args:
-        model: vLLM LLM instance
-        tokenizer: HuggingFace tokenizer
+        model: vLLM LLM instance, or OpenRouter model ID string
+        tokenizer: HuggingFace tokenizer (ignored when model is a str)
         messages: List of message lists, each in OpenAI chat format.
                   Each inner list has at most two messages:
                   - [{"role":"user","content":...}]
@@ -99,11 +155,20 @@ def batch_generate(
         temperature: Sampling temperature (None → greedy)
         verbose: Print input/output pairs
         skip_special_tokens: Skip special tokens when decoding outputs
-        cfg: Config object with model_path and prefill_mode attributes
+        cfg: Config object with prefill_mode attributes
 
     Returns:
         Tuple of (generated_texts, input_strs)
     """
+    if isinstance(model, str):
+        return _openrouter_batch_generate(
+            model_name=model,
+            messages=messages,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            verbose=verbose,
+        )
+
     input_ids, input_strs = encode_for_generation(
         tokenizer=tokenizer,
         messages=messages,

@@ -1,3 +1,6 @@
+# Dot folders
+.*
+
 # Environment
 __pycache__/
 *.lock
@@ -17,6 +20,7 @@ artifacts/pbr
 exp/prototypes
 outputs
 docs
+hf_models
 
 # Keep directory structure with .gitkeep files
 !artifacts/input/.gitkeep
