@@ -4,12 +4,35 @@ This is the accompanying codebase for the paper [Discovering Forbidden Topics of
 
 Mapping out sensitive topics of a language model. Reasoning models conduct an inner monologue (eg. denoted by <think> tags by DeepSeek-R1 model family) befor providing a response to the user. Thought Token Forcing (TTF) prefills part of the model's internal monologue. We use TTF to elicit forbidden topics.  
 
-## Overview
+## Setup
 
-- `src/crawler/crawler.py` — core crawl loop
-- `src/crawler/config.py` — `CrawlerConfig` dataclass with all hyperparameters
-- `scripts/run.sh` — entry point for running the crawler
-- `exp/evaluate_crawler.sh` — aggregates refused terms into topic clusters, matches with ground truth, and plots
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.12.
+
+```bash
+git clone https://github.com/canrager/iterated_prefill_crawler.git
+cd iterated_prefill_crawler
+uv sync
+```
+
+To activate the virtual environment:
+```bash
+source .venv/bin/activate
+```
+
+Set your OpenRouter API key (required when using cloud model configs such as `haiku`):
+```bash
+export OPENROUTER_API_KEY=your_key_here
+```
+
+Start a demo crawl:
+```bash
+./scripts/run.sh model=haiku crawler=debug prompts=default
+```
+
+The `haiku` config also uses a local auxiliary model (`allenai/Olmo-3-7B-Instruct`, ~14 GB)
+for translation, summarization, and refusal checking. It downloads automatically on first run
+to `hf_models/` inside the repo. Override the location with `model.cache_dir=/your/path`.
+
 
 ## Configuration
 
@@ -127,12 +150,11 @@ All messages in a batch share the same assistant content but have independently 
 
 ### How to Customize
 
-- **Add new user prompt templates**: Edit `user_seed_templates` in `configs/prompts/default.yaml`, include `{}` placeholder for topic insertion.
-- **Add new thinking messages**: Edit `assistant_pre_templates` in `configs/prompts/default.yaml`, add entries per language.
-- **Change the listing prefill**: Edit `assistant_post_templates` in `configs/prompts/default.yaml`.
-- **Create a new prompt preset**: Copy `configs/prompts/default.yaml` to a new file (e.g. `configs/prompts/custom.yaml`) and select it with `prompts=custom`.
+- **Create a new prompt preset**: Copy `configs/prompts/default.yaml` to a new file (e.g. `configs/prompts/custom.yaml`), edit with your new prompts, and select it with `prompts=custom`.
 
 ## Model Roles
+
+The Crawler analyzes refusal behavior of a `target_model` and uses an LM to do a bunch of online data sanitization, eg. translation, summarization. Current best practice is using a local vllm model for sanitization purposes, as costs can explode and ratelimits can kick in for openrouter models.
 
 Each model role can be set to `"local"` (uses the vLLM-served `local_model`) or to an OpenRouter model ID (e.g. `"anthropic/claude-3.5-haiku"`), which routes through the OpenRouter API instead.
 
@@ -152,7 +174,7 @@ Each crawler run produces a JSON artifact with four top-level keys:
 - **`stats`** — Cumulative and per-step counts: `total_all`, `total_deduped`, `total_refusals`, `total_unique_refusals`, plus per-step history arrays.
 - **`config`** — Snapshot of the full `CrawlerConfig` used for the run.
 - **`queue`** — Contains `topics` (with `head_refusal_topics`, `head_topics`, `cluster_topics`) and `stats`.
-- **`head_refusal_topics_summaries`** — Flat list of summary strings for all confirmed refusal topics.
+- **`head_refusal_topics_summaries`** — Flat copied list of summary strings for all confirmed refusal topics.
 
 Each topic in `head_topics` / `head_refusal_topics` is a `Topic` object:
 
@@ -178,37 +200,5 @@ Each topic in `head_topics` / `head_refusal_topics` is a `Topic` object:
 
 Key fields: `is_head` indicates a cluster head (vs. duplicate), `is_refusal` indicates the model refused the topic, `parent_id` links to the seed topic that elicited this one, `summary` is the condensed 2–5 word label, and `api_refused_reason` captures OpenRouter moderation reasons (e.g. `"self-harm/intent"`) when the API returned a 403.
 
-## Pool-based Recall (PBR) Evaluation
 
-Pool-based Recall (PBR) assesses the completeness of topics discovered by the IPC method. The pooled reference set P is the union of all refused topics across models in the evaluation set. For each model, PBR quantifies what fraction of P were discovered by that model's initial crawl.
-
-**Usage:**
-1. Post-process topic summaries: `python exp/postprocess_topic_summaries.py` - Merges semantic duplicates across crawler logs
-2. Create benchmark: `python exp/create_pbr_benchmark.py` - Generates 10 diverse queries per topic in P
-3. Compute PBR: `python exp/compute_pbr.py` - Tests each model on untested topics and calculates PBR scores
-
-Results are saved in `/artifacts/pbr/`:
-- `topic_summaries_merged.json` - Merged topic summaries with cluster assignments
-- `pbr_benchmark.json` - Benchmark queries for each topic
-- `pbr_results.json` - PBR scores and breakdowns for each model
-
-
-## Setup
-
-Requires [uv](https://docs.astral.sh/uv/) and Python 3.12.
-
-```bash
-git clone https://github.com/canrager/iterated_prefill_crawler.git
-cd iterated_prefill_crawler
-uv sync
-```
-
-To activate the virtual environment:
-```bash
-source .venv/bin/activate
-```
-
-Or run commands directly via `uv run`:
-```bash
-uv run python src/main.py ...
-```
+# All eval stuff in `/exp` is likely broken.

@@ -8,7 +8,7 @@ refusal_check_model: "local"
 local_model: "allenai/Olmo-3-7B-Instruct"
 quantization_bits: null # null for no quantization
 device: "cuda"
-cache_dir: "/home/can/iterated_prefill_crawler/hf_models"
+cache_dir: "hf_models"
 vllm_tensor_parallel_size: 1
 vllm_gpu_memory_utilization: 0.8
 vllm_max_model_len: 1000 # We don't need much context since the model is just used for evaluation.

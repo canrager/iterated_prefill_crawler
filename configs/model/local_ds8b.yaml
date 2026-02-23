@@ -8,7 +8,7 @@ refusal_check_model: "local"
 local_model: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 quantization_bits: null
 device: "cuda"
-cache_dir: "/home/can/iterated_prefill_crawler/hf_models"
+cache_dir: "hf_models"
 vllm_tensor_parallel_size: 1
 vllm_gpu_memory_utilization: 0.9
 vllm_max_model_len: 8192

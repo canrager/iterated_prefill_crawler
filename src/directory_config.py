@@ -16,13 +16,16 @@ for _dir in (INPUT_DIR, INTERIM_DIR, RESULT_DIR, CONFIG_DIR):
 def resolve_cache_dir(cache_dir: str) -> Path:
     """
     Resolve cache_dir to an absolute Path and create it if it doesn't exist.
+    Relative paths are resolved against ROOT_DIR.
 
     Args:
-        cache_dir: Absolute path to the model cache directory
+        cache_dir: Path to the model cache directory (absolute or relative to project root)
 
     Returns:
         Path: Absolute path to the cache directory
     """
     cache_path = Path(cache_dir)
+    if not cache_path.is_absolute():
+        cache_path = ROOT_DIR / cache_path
     cache_path.mkdir(parents=True, exist_ok=True)
     return cache_path
