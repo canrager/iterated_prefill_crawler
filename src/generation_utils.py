@@ -6,7 +6,7 @@ import os
 from vllm import LLM, SamplingParams
 from vllm.inputs.data import TokensPrompt
 
-from src.tokenization_utils_new import encode_for_generation
+from src.tokenization_utils import encode_for_generation
 from src.directory_config import INPUT_DIR
 from src.openrouter_utils import (  # re-exported for backward compatibility
     async_query_openrouter,
