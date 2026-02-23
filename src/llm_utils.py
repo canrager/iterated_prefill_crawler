@@ -12,7 +12,7 @@ from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
 )
-from src.directory_config import INPUT_DIR, MODELS_DIR, resolve_cache_dir
+from src.directory_config import INPUT_DIR, resolve_cache_dir
 from vllm import LLM
 
 

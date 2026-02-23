@@ -43,7 +43,7 @@ def main(cfg: DictConfig) -> None:
             f"use non-local models: {non_local_roles}"
         )
 
-    # Resolve cache_dir relative to ROOT_DIR.parent and create if needed
+    # Resolve cache_dir and create if needed
     cache_dir_path = resolve_cache_dir(cfg.model.cache_dir)
     cache_dir_str = str(cache_dir_path)
 
