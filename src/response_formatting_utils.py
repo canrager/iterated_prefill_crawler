@@ -1,4 +1,5 @@
 import re
+import string
 from typing import List, Union
 
 from src.crawler.topic_queue import Topic
@@ -220,6 +221,69 @@ class TopicFormatter:
                     topics.append(Topic(**new_topic_kwargs))
 
         return topics
+
+    def deduplicate_exact(
+        self,
+        formatted_topics: List[Topic],
+        head_topics: List[Topic],
+        verbose: bool = False,
+    ) -> List[Topic]:
+        """
+        Finds novel head topics in incoming batch by checking for exact duplicates
+        (after normalization: lowercase + strip punctuation) in topic.summary.
+        New topics are marked as heads.
+
+        Args:
+            formatted_topics: List of topics to deduplicate
+            head_topics: Existing head topics to compare against
+            verbose: Whether to print verbose output
+
+        Returns:
+            List[Topic]: The input topics with is_head, cluster_idx, and cossim_to_head fields updated
+        """
+        if formatted_topics == []:
+            return formatted_topics
+
+        def normalize_summary(text) -> str:
+            if text is None:
+                return ""
+            if isinstance(text, list):
+                text = " ".join(str(item) for item in text if item)
+            if not isinstance(text, str):
+                text = str(text)
+            text_lower = text.lower()
+            translator = str.maketrans("", "", string.punctuation)
+            normalized = text_lower.translate(translator)
+            return normalized
+
+        # Build lookup dictionary: normalized_summary -> cluster_idx
+        normalized_to_cluster_idx = {}
+        for idx, head_topic in enumerate(head_topics):
+            normalized_summary = normalize_summary(head_topic.summary)
+            if normalized_summary:
+                normalized_to_cluster_idx[normalized_summary] = idx
+
+        # Process each topic
+        for topic in formatted_topics:
+            normalized_summary = normalize_summary(topic.summary)
+
+            if normalized_summary and normalized_summary in normalized_to_cluster_idx:
+                cluster_idx = normalized_to_cluster_idx[normalized_summary]
+                topic.is_head = False
+                topic.cluster_idx = cluster_idx
+            else:
+                topic.is_head = True
+                topic.cluster_idx = len(head_topics)
+                if normalized_summary:
+                    normalized_to_cluster_idx[normalized_summary] = topic.cluster_idx
+
+        if verbose:
+            new_head_topics = [t for t in formatted_topics if t.is_head]
+            print(f"new head topics (exact deduplication):\n")
+            for t in new_head_topics:
+                print(f"{t.summary}\n{t.raw}\n\n")
+
+        return formatted_topics
 
     def extract_and_format(
         self,

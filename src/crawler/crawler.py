@@ -1,6 +1,5 @@
 import re
 import random
-import string
 from tqdm import trange
 import json
 from typing import List, Dict, Tuple
@@ -38,75 +37,6 @@ class Crawler:
 
         self.save_filename = save_filename
         self.save(save_filename)  # Already testing at initialization whether saving works
-
-    def deduplicate_exact(
-        self,
-        formatted_topics: List[Topic],
-        verbose: bool = False,
-    ) -> List[Topic]:
-        """
-        Finds novel head topics in incoming batch by checking for exact duplicates
-        (after normalization: lowercase + strip punctuation) in topic.summary.
-        New topics are marked as heads.
-
-        Args:
-            formatted_topics: List of topics to deduplicate
-            verbose: Whether to print verbose output
-
-        Returns:
-            List[Topic]: The input topics with is_head, cluster_idx, and cossim_to_head fields updated
-        """
-        if formatted_topics == []:
-            return formatted_topics
-
-        # Normalization helper function: lowercase + strip punctuation
-        def normalize_summary(text) -> str:
-            if text is None:
-                return ""
-            # Handle list case - join into string
-            if isinstance(text, list):
-                text = " ".join(str(item) for item in text if item)
-            # Ensure text is a string
-            if not isinstance(text, str):
-                text = str(text)
-            # Convert to lowercase and remove all punctuation
-            text_lower = text.lower()
-            # Remove punctuation using translate
-            translator = str.maketrans("", "", string.punctuation)
-            normalized = text_lower.translate(translator)
-            return normalized
-
-        # Build lookup dictionary: normalized_summary -> cluster_idx
-        normalized_to_cluster_idx = {}
-        for idx, head_topic in enumerate(self.queue.head_topics):
-            normalized_summary = normalize_summary(head_topic.summary)
-            if normalized_summary:  # Only add non-empty normalized summaries
-                normalized_to_cluster_idx[normalized_summary] = idx
-
-        # Process each topic
-        for topic in formatted_topics:
-            normalized_summary = normalize_summary(topic.summary)
-
-            if normalized_summary and normalized_summary in normalized_to_cluster_idx:
-                # Exact match found - not a head
-                cluster_idx = normalized_to_cluster_idx[normalized_summary]
-                topic.is_head = False
-                topic.cluster_idx = cluster_idx
-            else:
-                # No match found - new head
-                topic.is_head = True
-                topic.cluster_idx = len(self.queue.head_topics)
-                # Add to lookup for future comparisons
-                if normalized_summary:
-                    normalized_to_cluster_idx[normalized_summary] = topic.cluster_idx
-
-        if verbose:
-            new_head_topics = [t for t in formatted_topics if t.is_head]
-            print(f"new head topics (exact deduplication):\n")
-            for t in new_head_topics:
-                print(f"{t.summary}\n{t.raw}\n\n")
-
-        return formatted_topics
 
     def is_refusal(self, text: str | None) -> bool:
         if text is None:
@@ -403,8 +333,9 @@ class Crawler:
 
                 if verbose:
                     print(f"\n## deduplicating...")
-                new_topics = self.deduplicate_exact(
+                new_topics = self.formatter.deduplicate_exact(
                     formatted_topics=new_topics,
+                    head_topics=self.queue.head_topics,
                     verbose=verbose,
                 )
 
