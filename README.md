@@ -6,10 +6,45 @@ Mapping out sensitive topics of a language model. Reasoning models conduct an in
 
 ## Overview
 
-- `core/crawler.py` contains the core main of the Iterated Prefill Crawler.
-- `core/crawler_config.py` contains hyperparameters, including the set of prefill phrases used to elicit forbidden topics.
-- `scripts/run_crawler.sh` is an example script for an end-to-end crawling run.
-- `exp/evaluate_crawler.sh` is the central script for aggregating refused terms into topic clusters, matching topic clusters with ground truth topics, and plotting.
+- `src/crawler/crawler.py` — core crawl loop
+- `src/crawler/config.py` — `CrawlerConfig` dataclass with all hyperparameters
+- `scripts/run.sh` — entry point for running the crawler
+- `exp/evaluate_crawler.sh` — aggregates refused terms into topic clusters, matches with ground truth, and plots
+
+## Running
+
+```bash
+./scripts/run.sh model=<name> crawler=<name> [overrides...]
+```
+
+Both `model` and `crawler` are required. They select a config file from `configs/model/` and `configs/crawler/` respectively.
+
+**Available model configs** (`configs/model/`):
+- `haiku` — Claude Haiku via OpenRouter
+- `local_ds8b` — local DeepSeek 8B (default)
+- `local_tulu8b` — local Tulu 8B
+- `local_meta8b` — local Meta 8B
+
+**Available crawler configs** (`configs/crawler/`):
+- `default` — production settings
+- `debug` — small-scale run for testing
+
+**Optional flag:**
+- `--tmux` — run in a detached tmux session with logging to `artifacts/log/`
+
+**Field overrides** (dot notation):
+```bash
+model.temperature=0.9
+crawler.num_crawl_steps=10
+crawler.prefill_mode=assistant_prefix
+```
+
+**Examples:**
+```bash
+./scripts/run.sh model=haiku crawler=default
+./scripts/run.sh model=haiku crawler=debug
+./scripts/run.sh --tmux model=local_tulu8b crawler=default crawler.num_crawl_steps=20
+```
 
 ## Pool-based Recall (PBR) Evaluation
 

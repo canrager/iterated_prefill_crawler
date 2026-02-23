@@ -1,10 +1,23 @@
 #!/bin/bash
 
 # Unified script to run crawler with Hydra configs in tmux
-# Usage: ./scripts/run.sh [--no-tmux] [hydra_args]
-# Example: ./scripts/run.sh model_path="allenai/Llama-3.1-Tulu-3-8B-SFT" prefill_mode=assistant_prefix
-# Example: ./scripts/run.sh --config-name=debug
-# Example: ./scripts/run.sh --no-tmux --config-name=debug  # Run directly in terminal without logging
+# Usage: ./scripts/run.sh [--tmux] [hydra_overrides]
+#
+# Config selection (corresponds to configs/model/*.yaml and configs/crawler/*.yaml):
+#   model=haiku              # use configs/model/haiku.yaml (default: local_ds8b)
+#   model=local_tulu8b       # use configs/model/local_tulu8b.yaml
+#   model=local_meta8b       # use configs/model/local_meta8b.yaml
+#   crawler=debug            # use configs/crawler/debug.yaml (default: default)
+#
+# Field overrides (dot notation into the nested config):
+#   model.temperature=0.9
+#   crawler.num_crawl_steps=5
+#   crawler.prefill_mode=assistant_prefix
+#
+# Examples:
+#   ./scripts/run.sh model=haiku crawler=default
+#   ./scripts/run.sh model=haiku crawler=debug
+#   ./scripts/run.sh --tmux model=local_tulu8b crawler=default crawler.num_crawl_steps=10
 
 # Get the directory of this script and the project root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -21,6 +34,18 @@ NO_TMUX=true
 if [ "$1" = "--tmux" ]; then
     NO_TMUX=false
     shift
+fi
+
+# Require model= and crawler= arguments
+if ! echo "$@" | grep -qw "model="; then
+    echo "Error: missing required argument 'model=<name>'"
+    echo "Available: $(ls configs/model/*.yaml | xargs -n1 basename | sed 's/\.yaml//' | tr '\n' ' ')"
+    exit 1
+fi
+if ! echo "$@" | grep -qw "crawler="; then
+    echo "Error: missing required argument 'crawler=<name>'"
+    echo "Available: $(ls configs/crawler/*.yaml | xargs -n1 basename | sed 's/\.yaml//' | tr '\n' ' ')"
+    exit 1
 fi
 
 # Build the full python command with all arguments
