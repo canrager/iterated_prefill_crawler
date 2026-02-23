@@ -29,6 +29,8 @@ Start a demo crawl:
 ./scripts/run.sh model=haiku crawler=debug prompts=default
 ```
 
+The output is saved to `artifacts/out/<run_name>.json`. It contains four top-level keys: `stats` (crawl counts), `config` (full run config), `queue` (all discovered topics with cluster structure), and `head_refusal_topics_summaries` (flat list of confirmed refusal topic labels). See [Output Format](#output-format) for the full schema.
+
 The `haiku` config also uses a local auxiliary model (`allenai/Olmo-3-7B-Instruct`, ~14 GB)
 for translation, summarization, and refusal checking. It downloads automatically on first run
 to `hf_models/` inside the repo. Override the location with `model.cache_dir=/your/path`.
