@@ -8,15 +8,7 @@ __pycache__/
 *.out
 
 # Directories
-artifacts/result
-artifacts/log
-artifacts/interim
-artifacts/old
-artifacts/latest
-artifacts/baseline_eval
-artifacts/threshold_ablation
-artifacts/pbr
-
+artifacts
 exp/prototypes
 outputs
 docs

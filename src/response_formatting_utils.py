@@ -427,7 +427,6 @@ Output:"""
                     ),
                     temperature=self.config.model.temperature,
                     verbose=verbose,
-                    cfg=self.config,
                 )
 
                 # Extract summaries (strip whitespace)

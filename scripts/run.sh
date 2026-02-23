@@ -12,7 +12,6 @@
 # Field overrides (dot notation into the nested config):
 #   model.temperature=0.9
 #   crawler.num_crawl_steps=5
-#   crawler.prefill_mode=assistant_prefix
 #
 # Examples:
 #   ./scripts/run.sh model=haiku crawler=default

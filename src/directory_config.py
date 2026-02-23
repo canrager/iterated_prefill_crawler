@@ -4,7 +4,7 @@ from pathlib import Path
 # Project directories
 ROOT_DIR = Path(__file__).parent.parent
 INPUT_DIR = ROOT_DIR / "artifacts" / "input"
-INTERIM_DIR = ROOT_DIR / "artifacts" / "interim"
+INTERIM_DIR = ROOT_DIR / "artifacts" / "out"
 RESULT_DIR = ROOT_DIR / "artifacts" / "result"
 CONFIG_DIR = ROOT_DIR / "configs"
 MODELS_DIR = ROOT_DIR.parent

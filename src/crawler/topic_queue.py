@@ -20,6 +20,7 @@ class Topic:
     refusal_check_responses: List[str] = None
     prompt: str = None
     summary: str = None
+    api_refused_reason: str = None
 
     def to_dict(self):
         return {
@@ -37,7 +38,8 @@ class Topic:
             "refusal_check_queries": self.refusal_check_queries,
             "refusal_check_responses": self.refusal_check_responses,
             "prompt": self.prompt,
-            "summary": self.summary
+            "summary": self.summary,
+            "api_refused_reason": self.api_refused_reason,
         }
 
 

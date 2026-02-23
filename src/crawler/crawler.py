@@ -28,9 +28,12 @@ class Crawler:
         self.formatter = TopicFormatter(crawler_config)
 
         self.prompt_builder = PromptBuilder(
-            user_pres=crawler_config.fallback_user_message_templates,
-            user_seed_templates=crawler_config.user_message_templates,
-            assistant_pres=crawler_config.crawler_thinking_messages,
+            user_pre_templates=crawler_config.prompts.user_pre_templates,
+            user_seed_templates=crawler_config.prompts.user_seed_templates,
+            user_post_templates=crawler_config.prompts.user_post_templates,
+            assistant_pre_templates=crawler_config.prompts.assistant_pre_templates,
+            assistant_seed_templates=crawler_config.prompts.assistant_seed_templates,
+            assistant_post_templates=crawler_config.prompts.assistant_post_templates,
             user_seed_topics=self.queue,
             languages=crawler_config.crawler.prompt_languages,
         )
@@ -133,11 +136,6 @@ class Crawler:
                 if verbose:
                     print(f"\n## generating...")
 
-                if "thought_suffix" in self.config.crawler.prefill_mode:
-                    assert (
-                        self.config.max_new_tokens == 2048
-                    ), "We need to allow longform generation to capture the full thought before prefilling!"
-
                 target_model, target_tokenizer = self._resolve_model("target", local_model, local_tokenizer)
                 generated_texts, input_strs = batch_generate(
                     target_model,
@@ -146,29 +144,7 @@ class Crawler:
                     max_new_tokens=self.config.crawler.max_generated_tokens,
                     temperature=self.config.model.temperature,
                     verbose=verbose,
-                    cfg=self.config,
                 )
-
-                # Post-generation prefilling
-                if self.config.crawler.prefill_mode == "thought_suffix":
-                    prefilled_texts = []
-                    for gen in generated_texts:
-                        if "</think>" in gen:
-                            gen = gen.split("</think>")[0]  # Only keep the text until </think>
-                            gen = (
-                                gen + "</think>\n\n" + thinking_message + "\n1. "
-                            )  # Prefill the generated text
-                            prefilled_texts.append(gen)
-                        else:
-                            pass  # dont use topics that lack a complete thinking process
-                    generated_texts = batch_complete_R1(
-                        model=target_model,
-                        tokenizer=target_tokenizer,
-                        texts=prefilled_texts,
-                        max_new_tokens=self.config.crawler.max_generated_tokens,
-                        temperature=self.config.model.temperature,
-                    )
-                    print(f"post suffixing: {generated_texts}")
 
                 if verbose:
                     print(f"\n## formatting...")
@@ -235,6 +211,7 @@ class Crawler:
             "stats": self.stats.to_dict(),
             "config": self.config.to_dict(),
             "queue": self.queue.to_dict(),
+            "head_refusal_topics_summaries": [t.summary for t in self.queue.head_refusal_topics],
         }
         return crawler_dict
 
@@ -263,12 +240,11 @@ def get_run_name(crawler_config: CrawlerConfig):
     else:
         model_name = target_model.split("/")[-1]
     run_name = (
-        "crawler_log"
+        "crawler_out"
         f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         f"_{model_name}"
         f"_{crawler_config.crawler.num_samples_per_topic}samples"
         f"_{crawler_config.crawler.num_crawl_steps}crawls"
         f"_{crawler_config.crawler.do_filter_refusals}filter"
-        f"_{crawler_config.crawler.prefill_mode}prompt"
     )
     return run_name

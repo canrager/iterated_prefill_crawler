@@ -24,7 +24,6 @@ def batch_generate_from_tokens_vllm(
     skip_special_tokens: bool = False,
     temperature: Optional[float] = None,
     verbose: bool = False,
-    cfg=None,
 ):
     """
     Generate text using vLLM backend.
@@ -74,8 +73,13 @@ def batch_generate_from_tokens_vllm(
     return generated_texts
 
 
+OPENROUTER_MODERATION_SENTINEL = "__OPENROUTER_MODERATION_REFUSED__"
+
+
 async def _async_openrouter_single(client, model_name: str, messages: List[Dict], max_new_tokens: int, temperature: float) -> str:
     """Send a single chat conversation to OpenRouter and return the response text."""
+    from openai import APIStatusError
+
     try:
         completion = await client.chat.completions.create(
             model=model_name,
@@ -84,6 +88,14 @@ async def _async_openrouter_single(client, model_name: str, messages: List[Dict]
             temperature=temperature,
         )
         return completion.choices[0].message.content or ""
+    except APIStatusError as e:
+        if e.status_code == 403 and "moderation" in str(e.message).lower():
+            reasons = e.body.get("error", {}).get("metadata", {}).get("reasons", []) if isinstance(e.body, dict) else []
+            reason_str = ", ".join(reasons) if reasons else "unknown"
+            print(f"OpenRouter moderation refusal: {reason_str}")
+            return f"{OPENROUTER_MODERATION_SENTINEL}: {reason_str}"
+        print(f"OpenRouter error: {e}")
+        return ""
     except Exception as e:
         print(f"OpenRouter error: {e}")
         return ""
@@ -136,7 +148,6 @@ def batch_generate(
     temperature: float = 0.6,
     verbose: bool = False,
     skip_special_tokens: bool = False,
-    cfg=None,
 ) -> Tuple[List[str], List[str]]:
     """Generate text from a list of message dicts.
 
@@ -149,13 +160,11 @@ def batch_generate(
                   Each inner list has at most two messages:
                   - [{"role":"user","content":...}]
                   - [{"role":"user","content":...}, {"role":"assistant","content":...}]
-                  The assistant content is used as prefill (thought or assistant,
-                  depending on cfg.prefill_mode).
+                  The assistant content is used as prefill.
         max_new_tokens: Maximum new tokens to generate
         temperature: Sampling temperature (None → greedy)
         verbose: Print input/output pairs
         skip_special_tokens: Skip special tokens when decoding outputs
-        cfg: Config object with prefill_mode attributes
 
     Returns:
         Tuple of (generated_texts, input_strs)
@@ -183,7 +192,6 @@ def batch_generate(
         temperature=temperature,
         skip_special_tokens=skip_special_tokens,
         verbose=False,
-        cfg=cfg,
     )
 
     if verbose:

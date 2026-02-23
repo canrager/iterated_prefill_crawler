@@ -16,18 +16,18 @@ class PromptBuilder:
 
     def __init__(
             self,
-            user_pres: List[str] | None = None,
+            user_pre_templates: List[str] | None = None,
             user_seed_templates: List[str] | None = None,
-            user_posts: List[str] | None = None,
-            assistant_pres: List[str] | None = None,
+            user_post_templates: List[str] | None = None,
+            assistant_pre_templates: List[str] | None = None,
             assistant_seed_templates: List[str] | None = None,
-            assistant_posts: List[str] | None = None,
+            assistant_post_templates: List[str] | str | None = None,
             user_seed_topics: TopicQueue | None = None,
             assistant_seed_topics: TopicQueue | None = None,
             languages: List[str] = ["english", "chinese"],
             ):
 
-        assert user_pres or user_seed_templates or user_posts, "Need to pass at least one user template."
+        assert user_pre_templates or user_seed_templates or user_post_templates, "Need to pass at least one user template."
         assert not user_seed_templates or user_seed_topics, "You passed user seed templates, pass user seed topics as well"
         assert not assistant_seed_templates or assistant_seed_topics, "You passed assistant seed templates, pass assistant seed topics as well"
 
@@ -36,12 +36,12 @@ class PromptBuilder:
             assert l in allowed_languages, f"Language {l} not recognized."
 
         
-        self.user_pre = user_pres
+        self.user_pre = user_pre_templates
         self.user_seed_template = user_seed_templates
-        self.user_post = user_posts
-        self.assistant_pre = assistant_pres
+        self.user_post = user_post_templates
+        self.assistant_pre = assistant_pre_templates
         self.assistant_seed_template = assistant_seed_templates
-        self.assistant_post = assistant_posts
+        self.assistant_post = assistant_post_templates
         self.user_seed_topics = user_seed_topics
         self.assistant_seed_topics = assistant_seed_topics
         self.languages = languages
@@ -86,7 +86,10 @@ class PromptBuilder:
             assistant_parts.append(assistant_mid_msg)
 
         if self.assistant_post:
-            assistant_post_msg = random.choice(self.assistant_post)
+            if isinstance(self.assistant_post, list):
+                assistant_post_msg = random.choice(self.assistant_post)
+            else:
+                assistant_post_msg = self.assistant_post
             assistant_parts.append(assistant_post_msg)
 
         
@@ -128,25 +131,26 @@ class PromptBuilder:
         Each message is [[{"role":"user","content":...}, {"role":"assistant","content":...}]].
 
         The assistant content holds the thinking/prefill content (thinking message +
-        listing prefix). batch_generate routes it to thinking_messages or
-        assistant_prefills based on cfg.prefill_mode.
+        assistant_post). batch_generate sends it as assistant prefill.
 
         Args:
             lang: Language key ("english" or "chinese")
             n: Total number of messages to produce
-            warmup_idx: If set, use this index into assistant_pres; otherwise random
+            warmup_idx: If set, use this index into assistant_pre_templates; otherwise random
 
         Returns:
             (messages, parent_ids)
         """
-        listing_prefill = "Topics:\n1. "
-
         # Choose thinking message (shared across the batch)
         if warmup_idx is not None:
             thinking_msg = self.assistant_pre[lang][warmup_idx]
         else:
             thinking_msg = random.choice(self.assistant_pre[lang])
-        assistant_content = f"{thinking_msg}\n{listing_prefill}"
+
+        if self.assistant_post:
+            assistant_content = f"{thinking_msg}\n{self.assistant_post}"
+        else:
+            assistant_content = thinking_msg
 
         # Build user messages and parent IDs
         if self.user_seed_template is not None:
@@ -176,8 +180,8 @@ class PromptBuilder:
 
 
 if __name__ == "__main__":
-    from src.crawler.config import USER_MESSAGE_TEMPLATES, CRAWLER_THINKING_MESSAGES
-    
+    from src.crawler.config import USER_SEED_TEMPLATES, ASSISTANT_PRE_TEMPLATES, ASSISTANT_POST_TEMPLATES
+
     topics = TopicQueue(
         head_refusal_topics=[
             Topic(english="AAAA", chinese="XXXX"),
@@ -186,9 +190,10 @@ if __name__ == "__main__":
     )
 
     prompt_builder = PromptBuilder(
-        user_seed_templates=USER_MESSAGE_TEMPLATES,
+        user_seed_templates=USER_SEED_TEMPLATES,
         user_seed_topics=topics,
-        assistant_pres=CRAWLER_THINKING_MESSAGES,
+        assistant_pre_templates=ASSISTANT_PRE_TEMPLATES,
+        assistant_post_templates=ASSISTANT_POST_TEMPLATES,
         languages=["english", "chinese"]
     )
 

@@ -1,7 +1,7 @@
 import re
 from typing import List
 
-from src.generation_utils import batch_generate
+from src.generation_utils import batch_generate, OPENROUTER_MODERATION_SENTINEL
 from src.response_formatting_utils import remove_thinking_context
 from src.crawler.topic_queue import Topic
 from src.crawler.config import CrawlerConfig
@@ -23,6 +23,8 @@ def _resolve_model(config: CrawlerConfig, role: str, local_model, local_tokenize
 def is_refusal(text: str | None, refusal_patterns: list[str]) -> bool:
     if text is None:
         return False
+    if text.startswith(OPENROUTER_MODERATION_SENTINEL):
+        return True
 
     assistant_answer = text.split("ssistant")[-1]
 
@@ -78,7 +80,6 @@ def check_refusal(
         ),
         temperature=1,
         verbose=verbose,
-        cfg=config,
     )
 
     # Remove thinking context from queries if present
@@ -142,7 +143,6 @@ def check_refusal(
             answer_messages,
             max_new_tokens=config.crawler.max_refusal_check_generated_tokens,
             temperature=config.model.temperature,
-            cfg=config,
         )
 
         # Step 4: Process answer refusals
@@ -172,5 +172,14 @@ def check_refusal(
             topic.refusal_check_responses = answers
             if make_answer_majority_refusal:
                 topic.is_refusal = True
+
+            # Extract API moderation reasons if present
+            api_reasons = []
+            for answer in answers:
+                if answer.startswith(OPENROUTER_MODERATION_SENTINEL):
+                    api_reasons.append(answer.split(": ", 1)[1] if ": " in answer else "unknown")
+            if api_reasons:
+                topic.api_refused_reason = "; ".join(api_reasons)
+                topic.summary = topic.api_refused_reason
 
     return selected_topics

@@ -1,4 +1,3 @@
-prefill_mode: "user_prefill_with_seed"
 load_fname: null
 num_samples_per_topic: 1
 num_crawl_steps: 100

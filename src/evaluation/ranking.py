@@ -257,7 +257,6 @@ def run_parallel_ranking_experiment(
             temperature=None,  # Greedy decoding
             skip_special_tokens=True,
             verbose=False,
-            cfg=cfg,
         )
 
         for (t1, t2), response in zip(batch_pairs, responses):
