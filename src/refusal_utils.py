@@ -180,6 +180,8 @@ def check_refusal(
                     api_reasons.append(answer.split(": ", 1)[1] if ": " in answer else "unknown")
             if api_reasons:
                 topic.api_refused_reason = "; ".join(api_reasons)
-                topic.summary = topic.api_refused_reason
+                meaningful_reasons = [r for r in api_reasons if r.lower() != "unknown"]
+                if meaningful_reasons:
+                    topic.summary = "; ".join(meaningful_reasons)
 
     return selected_topics
