@@ -1,0 +1,14 @@
+# Model selection ("local" or openrouter path)
+target_model: "qwen/qwen3.5-flash-02-23"
+translation_model: "local"
+summarization_model: "local"
+refusal_check_model: "local"
+
+# Local model config (needed to fulfill OmegaConf typecheck)
+local_model: "allenai/Olmo-3-7B-Instruct"
+quantization_bits: null # null for no quantization
+device: "auto"
+cache_dir: "hf_models"
+vllm_tensor_parallel_size: 1
+vllm_gpu_memory_utilization: 0.85
+vllm_max_model_len: 992 # We don't need much context since the model is just used for evaluation. Must be multiple of 16
