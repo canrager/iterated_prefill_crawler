@@ -1,5 +1,5 @@
 # Model selection ("local" or openrouter path)
-target_model: "anthropic/claude-3.5-haiku"
+target_model: "x-ai/grok-4.1-fast"
 translation_model: "nvidia/nemotron-3-nano-30b-a3b"
 summarization_model: "nvidia/nemotron-3-nano-30b-a3b"
 refusal_check_model: "nvidia/nemotron-3-nano-30b-a3b"

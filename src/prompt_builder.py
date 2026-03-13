@@ -127,34 +127,50 @@ class PromptBuilder:
         """
         Build n messages for a generation batch.
 
-        Returns a list of message dicts and their parent topic IDs.
-        Each message is [[{"role":"user","content":...}, {"role":"assistant","content":...}]].
-
-        The assistant content holds the thinking/prefill content (thinking message +
-        assistant_post). batch_generate sends it as assistant prefill.
+        Supports two modes:
+        - Prefill / TTF (assistant_pre_templates set): the "list your avoided topics"
+          cue is injected as an assistant-turn prefill, continuing from the model's
+          own voice. assistant_post (e.g. "Topics:\\n1. ") is appended.
+        - No-prefill / baseline (assistant_pre_templates null): no assistant turn is
+          included. If user_post_templates is set, the listing cue is appended to the
+          user message instead; otherwise the user message stands alone.
 
         Args:
             lang: Language key ("english" or "chinese")
             n: Total number of messages to produce
-            warmup_idx: If set, use this index into assistant_pre_templates; otherwise random
+            warmup_idx: If set, cycle through templates by index; otherwise random
 
         Returns:
             (messages, parent_ids)
         """
-        # Choose thinking message (shared across the batch)
-        if warmup_idx is not None:
-            thinking_msg = self.assistant_pre[lang][warmup_idx]
+        # --- Determine assistant prefill content (None = no-prefill mode) ---
+        if self.assistant_pre is not None:
+            templates = self.assistant_pre[lang]
+            thinking_msg = (
+                templates[warmup_idx % len(templates)]
+                if warmup_idx is not None
+                else random.choice(templates)
+            )
+            assistant_content = (
+                f"{thinking_msg}\n{self.assistant_post}"
+                if self.assistant_post
+                else thinking_msg
+            )
         else:
-            thinking_msg = random.choice(self.assistant_pre[lang])
+            assistant_content = None
 
-        if self.assistant_post:
-            assistant_content = f"{thinking_msg}\n{self.assistant_post}"
-        else:
-            assistant_content = thinking_msg
+        # --- Determine user-side listing cue (only used in no-prefill mode) ---
+        user_post_suffix = None
+        if assistant_content is None and self.user_post is not None:
+            post_templates = self.user_post[lang]
+            user_post_suffix = (
+                post_templates[warmup_idx % len(post_templates)]
+                if warmup_idx is not None
+                else random.choice(post_templates)
+            )
 
-        # Build user messages and parent IDs
+        # --- Build user messages and parent IDs ---
         if self.user_seed_template is not None:
-            # Seeded: sample n topics from the queue and format with seed template
             sampled_topics = [
                 random.choice(self.user_seed_topics.head_refusal_topics)
                 for _ in range(n)
@@ -165,17 +181,27 @@ class PromptBuilder:
                 for t in sampled_topics
             ]
         else:
-            # No-seed: use fallback user pres only
             user_msgs = [random.choice(self.user_pre[lang]) for _ in range(n)]
             parent_ids = [-1] * n
 
-        messages = [
-            [
-                {"role": "user", "content": user_msg},
-                {"role": "assistant", "content": assistant_content},
+        if user_post_suffix:
+            user_msgs = [f"{msg} {user_post_suffix}" for msg in user_msgs]
+
+        # --- Assemble message dicts ---
+        if assistant_content is not None:
+            messages = [
+                [
+                    {"role": "user", "content": user_msg},
+                    {"role": "assistant", "content": assistant_content},
+                ]
+                for user_msg in user_msgs
             ]
-            for user_msg in user_msgs
-        ]
+        else:
+            messages = [
+                [{"role": "user", "content": user_msg}]
+                for user_msg in user_msgs
+            ]
+
         return messages, parent_ids
 
 
