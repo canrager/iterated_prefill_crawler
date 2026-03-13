@@ -120,7 +120,7 @@ def check_refusals_cascade(
 
     if texts_for_classifier and config.model.refusal_classifier_model:
         classifier = get_classifier(config.model.refusal_classifier_model)
-        results = classifier(texts_for_classifier)
+        results = classifier(texts_for_classifier, truncation=True, max_length=512)
         for i, res, text in zip(indices_for_classifier, results, texts_for_classifier):
             is_rejection = res["label"].upper() in ["REJECTION", "LABEL_1"]
             if res["score"] >= config.crawler.refusal_classifier_threshold:
