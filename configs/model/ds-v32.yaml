@@ -1,7 +1,7 @@
 # Model selection ("local" or openrouter path)
 target_model: "deepseek/deepseek-v3.2"
-translation_model: "google/gemini-2.5-flash-lite-preview-09-2025"
-summarization_model: "openai/gpt-oss-120b"
+translation_model: "local"
+summarization_model: "local"
 refusal_check_model: "local"
 
 # Local model config (needed to fulfill OmegaConf typecheck)
