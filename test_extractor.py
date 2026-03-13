@@ -82,7 +82,7 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
-        default="nvidia/nemotron-3-nano-30b-a3b",
+        default="allenai/olmo-3.1-32b-instruct",
         help="OpenRouter model to use for extraction",
     )
     parser.add_argument(
