@@ -213,7 +213,7 @@ class CrawlerRunConfig:
     max_crawl_topics: int = 1_000_000
     max_context_tokens: int = 1000
     max_generated_tokens: int = 100
-    max_refusal_check_generated_tokens: int = 1000
+    max_refusal_check_generated_tokens: int = 512
     max_extracted_topics_per_generation: int = 10
     num_refusal_checks_per_topic: int = 10
     is_refusal_threshold: float = 0.25
