@@ -53,7 +53,7 @@ YAML presets override a subset of the dataclass defaults. They are organized int
 
 - `configs/model/*.yaml` — model presets (`haiku`, `local_ds8b`, `local_tulu8b`, `local_meta8b`). Each sets fields from `ModelConfig`.
 - `configs/crawler/*.yaml` — crawler presets (`default` for production, `debug` for small-scale testing). Each sets fields from `CrawlerRunConfig`.
-- `configs/prompts/*.yaml` — prompt templates (`default`, `user_content`, `user_elicitation`). Each sets fields from `PromptsConfig`.
+- `configs/prompts/*.yaml` — prompt templates (`baseline`, `user_seeded`, `jailbreak`, `default`). Each sets fields from `PromptsConfig`.
 
 The override chain is: **dataclass defaults** → **YAML preset** → **CLI overrides**.
 
@@ -160,13 +160,14 @@ All messages in a batch share the same assistant content when assistant prefilli
 
 ### Prompt Strategies
 
-Three prompt configs are provided:
+Four prompt configs are provided:
 
-| Config             | Method                      | Mechanism                                                                                                              | Best for                                     |
-| ------------------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `default`          | Thought Token Forcing (TTF) | Natural language assistant prefill; `<think>` added by chat template for R1 models                                     | Local vLLM with R1/Qwen models               |
-| `user_content`     | User-turn prefill           | Same prefill content placed in the user message instead of assistant turn                                              | APIs that don't support assistant prefilling |
-| `user_elicitation` | User elicitation            | User-side suffix prompting with policy-citation and fictional-document framings, optionally paired with system prompts | APIs that don't support assistant prefilling |
+| Config        | Method                              | Mechanism                                                                                                 | Best for                                     |
+| ------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `baseline`    | Direct prompting (Control)          | Repeatedly asks about policies. No topic seeding or injection.                                            | Establishing a baseline for disclosure       |
+| `user_seeded` | User topic seeding                  | Initial direct prompting followed by iterative topic seeding.                                             | Basic enumeration on compliant models        |
+| `jailbreak`   | Adversarial + seeding               | Combines CoT policy forgery, roleplay, and comparative framing with topic seeding.                        | APIs that don't support assistant prefilling |
+| `default`     | Thought Token Forcing (TTF) + seeds | Natural language assistant prefill; `<think>` added by chat template for R1 models. Includes topic seeds. | Local vLLM or APIs with prefill support      |
 
 ### How to Customize
 
