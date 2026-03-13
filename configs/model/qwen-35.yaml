@@ -3,6 +3,7 @@ target_model: "qwen/qwen3.5-397b-a17b"
 translation_model: "local"
 summarization_model: "local"
 refusal_check_model: "local"
+refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 
 # Local model config (needed to fulfill OmegaConf typecheck)
 local_model: "allenai/Olmo-3-7B-Instruct" # null to skip loading

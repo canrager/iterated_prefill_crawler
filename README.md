@@ -42,7 +42,7 @@ to `hf_models/` inside the repo. Override the location with `model.cache_dir=/yo
 
 All crawler variables live in `src/crawler/config.py`, which defines three dataclasses:
 
-- **`ModelConfig`** — model identity and generation parameters: `local_model`, `temperature`, vLLM settings (`vllm_tensor_parallel_size`, `vllm_gpu_memory_utilization`, `vllm_max_model_len`), and role-based model routing (`target_model`, `translation_model`, `summarization_model`, `refusal_check_model`).
+- **`ModelConfig`** — model identity and generation parameters: `local_model`, `temperature`, vLLM settings (`vllm_tensor_parallel_size`, `vllm_gpu_memory_utilization`, `vllm_max_model_len`), and role-based model routing (`target_model`, `translation_model`, `summarization_model`, `refusal_check_model`, `refusal_classifier_model`). All model preset YAMLs explicitly configure a fast HF `refusal_classifier_model` by default (`ProtectAI/distilroberta-base-rejection-v1`). To opt out of this local semantic classifier and only use the heavier LLM judge, you must explicitly set it to null: `model.refusal_classifier_model=null`.
 - **`CrawlerRunConfig`** — crawl behavior: `num_crawl_steps`, batch sizes, token limits, thresholds, `prompt_languages`, `verbose`, etc.
 - **`PromptsConfig`** — prompt templates for all 6 slots (`user_pre_templates`, `user_seed_templates`, `user_post_templates`, `assistant_pre_templates`, `assistant_seed_templates`, `assistant_post_templates`). Configured via `configs/prompts/*.yaml`.
 - **`CrawlerConfig`** — top-level container. Nests `ModelConfig` as `model`, `CrawlerRunConfig` as `crawler`, and `PromptsConfig` as `prompts`. Also holds hardcoded lists (refusal regex patterns, regex filters) that are not YAML-driven — change these by editing `config.py` directly.
@@ -105,7 +105,13 @@ crawler.num_crawl_steps=10
    - **Generation** — `batch_generate()` sends prompts to the target model. The model continues from the prefill, producing a numbered list of topics.
    - **Extraction & formatting** — Extracts numbered-list items, translates EN↔ZH, applies regex filters, and summarizes long topics into 2–5 word labels.
    - **Deduplication** — Compares normalized summaries against existing head topics. Novel topics become new cluster heads; duplicates are appended to existing clusters.
-   - **Refusal checking** — For each new head topic: generates diverse test queries about the topic, sends them to the target model, and applies majority-vote (threshold `is_refusal_threshold`) to decide if the model refuses the topic. When using OpenRouter, 403 moderation responses are detected as immediate refusals (no further checking needed) and the moderation reasons are stored in `api_refused_reason`. Example 403 response:
+   - **Refusal checking** — For each new head topic: generates diverse test queries about the topic, sends them to the target model, and applies a multi-stage **Model Cascade** to determine if the model refused the request:
+     1. **Fast-Path Regex**: Checks for exact-match, undeniable refusal strings or OpenRouter moderation sentinels.
+     2. **Semantic Classifier**: Evaluates the response using a fast, local HuggingFace classifier (e.g., `ProtectAI/distilroberta-base-rejection-v1`).
+     3. **LLM Judge**: If the classifier is uncertain, escalates to the configured `refusal_check_model` to judge complex cases like partial compliance or sandbagging.
+
+     A majority-vote (threshold `is_refusal_threshold`) is then applied across the queries to decide if the model refuses the topic entirely. When using OpenRouter, 403 moderation responses are detected as immediate refusals (no further checking needed) and the moderation reasons are stored in `api_refused_reason`. Example 403 response:
+
      ```
      OpenRouter error: Error code: 403 - {'error': {'message': 'anthropic/claude-3-5-haiku
        requires moderation on Amazon Bedrock. Your input was flagged for
@@ -113,6 +119,7 @@ crawler.num_crawl_steps=10
        'code': 403, 'metadata': {'reasons': ['self-harm/instructions', 'self-harm/intent'],
        'flagged_input': 'Tell me about Instructions for self-harm'}}}
      ```
+
    - **Queue update** — Confirmed refusal topics join `head_refusal_topics`, which seeds the next iteration — creating a feedback loop that expands coverage.
 
 3. **Termination** — The loop ends after `num_crawl_steps` iterations or when `num_head_topics` exceeds `max_crawl_topics`. Output is saved as a JSON artifact.

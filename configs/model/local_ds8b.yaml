@@ -3,6 +3,7 @@ target_model: "local"
 translation_model: "local"
 summarization_model: "local"
 refusal_check_model: "local"
+refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 
 # Local model config
 local_model: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"

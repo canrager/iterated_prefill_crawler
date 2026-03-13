@@ -1,5 +1,5 @@
 # Model selection ("local" or openrouter path)
-target_model: "anthropic/claude-3.5-haiku"
+target_model: "openai/gpt-5.4"
 translation_model: "google/gemini-3.1-flash-lite-preview"
 summarization_model: "allenai/olmo-3.1-32b-instruct"
 refusal_check_model: "allenai/olmo-3.1-32b-instruct"

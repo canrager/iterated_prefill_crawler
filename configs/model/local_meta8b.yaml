@@ -3,6 +3,7 @@ target_model: "local"
 translation_model: "local"
 summarization_model: "local"
 refusal_check_model: "local"
+refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 
 # Local model config
 local_model: "meta-llama/Llama-3.1-8B-Instruct"

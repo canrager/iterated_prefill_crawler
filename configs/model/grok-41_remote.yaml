@@ -1,8 +1,9 @@
 # Model selection ("local" or openrouter path)
 target_model: "x-ai/grok-4.1-fast"
-translation_model: "allenai/olmo-3.1-32b-instruct"
+translation_model: "google/gemini-3.1-flash-lite-preview"
 summarization_model: "allenai/olmo-3.1-32b-instruct"
 refusal_check_model: "allenai/olmo-3.1-32b-instruct"
+refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 
 # Local model config — set to null for API-only (no GPU) runs.
 # Auxiliary roles above are routed to OpenRouter instead.
