@@ -2,7 +2,7 @@
 
 This is the accompanying codebase for the paper [Discovering Forbidden Topics of a Language Model](https://arxiv.org/abs/2505.17441).
 
-Mapping out sensitive topics of a language model. Reasoning models conduct an inner monologue (eg. denoted by <think> tags by DeepSeek-R1 model family) befor providing a response to the user. Thought Token Forcing (TTF) prefills part of the model's internal monologue. We use TTF to elicit forbidden topics.  
+Mapping out sensitive topics of a language model. Reasoning models conduct an inner monologue (eg. denoted by <think> tags by DeepSeek-R1 model family) befor providing a response to the user. Thought Token Forcing (TTF) prefills part of the model's internal monologue. We use TTF to elicit forbidden topics.
 
 ## Setup
 
@@ -15,16 +15,19 @@ uv sync
 ```
 
 To activate the virtual environment:
+
 ```bash
 source .venv/bin/activate
 ```
 
 Set your OpenRouter API key (required when using cloud model configs such as `haiku`):
+
 ```bash
 export OPENROUTER_API_KEY=your_key_here
 ```
 
 Start a demo crawl:
+
 ```bash
 ./scripts/run.sh model=haiku crawler=debug prompts=default
 ```
@@ -34,7 +37,6 @@ The output is saved to `artifacts/out/<run_name>.json`. It contains four top-lev
 The `haiku` config also uses a local auxiliary model (`allenai/Olmo-3-7B-Instruct`, ~14 GB)
 for translation, summarization, and refusal checking. It downloads automatically on first run
 to `hf_models/` inside the repo. Override the location with `model.cache_dir=/your/path`.
-
 
 ## Configuration
 
@@ -51,7 +53,7 @@ YAML presets override a subset of the dataclass defaults. They are organized int
 
 - `configs/model/*.yaml` — model presets (`haiku`, `local_ds8b`, `local_tulu8b`, `local_meta8b`). Each sets fields from `ModelConfig`.
 - `configs/crawler/*.yaml` — crawler presets (`default` for production, `debug` for small-scale testing). Each sets fields from `CrawlerRunConfig`.
-- `configs/prompts/*.yaml` — prompt templates (`default`). Each sets fields from `PromptsConfig`.
+- `configs/prompts/*.yaml` — prompt templates (`default`, `user_content`, `user_elicitation`). Each sets fields from `PromptsConfig`.
 
 The override chain is: **dataclass defaults** → **YAML preset** → **CLI overrides**.
 
@@ -64,25 +66,30 @@ The override chain is: **dataclass defaults** → **YAML preset** → **CLI over
 Both `model` and `crawler` are required. They select a YAML file from `configs/model/` and `configs/crawler/` respectively. `prompts` defaults to `default`.
 
 **Available model configs** (`configs/model/`):
+
 - `haiku` — Claude Haiku via OpenRouter
 - `local_ds8b` — local DeepSeek 8B
 - `local_tulu8b` — local Tulu 8B
 - `local_meta8b` — local Meta 8B
 
 **Available crawler configs** (`configs/crawler/`):
+
 - `default` — production settings
 - `debug` — small-scale run for testing
 
 **Optional flag:**
+
 - `--tmux` — run in a detached tmux session with logging to `artifacts/log/`
 
 **CLI field overrides** (dot notation, applied after YAML):
+
 ```bash
 model.temperature=0.9
 crawler.num_crawl_steps=10
 ```
 
 **Examples:**
+
 ```bash
 ./scripts/run.sh model=haiku crawler=default
 ./scripts/run.sh model=haiku crawler=debug
@@ -123,32 +130,43 @@ Each slot is optional, randomly sampled per message, and joined with spaces.
 
 ### Editable Fields
 
-| Field | Type | Source | Description |
-|-------|------|--------|-------------|
-| `user_pre_templates` | `Dict[lang, List[str]]` | `prompts/default.yaml` | Fixed user message prefixes, used as fallback when no seed templates are provided |
-| `user_seed_templates` | `Dict[lang, List[str]]` | `prompts/default.yaml` | User templates with `{}` placeholder filled by a sampled topic |
-| `user_post_templates` | `Dict[lang, List[str]]` | `prompts/default.yaml` | Fixed user message suffixes |
-| `assistant_pre_templates` | `Dict[lang, List[str]]` | `prompts/default.yaml` | Assistant prefill preambles (e.g. "Okay, I remember the topics I should avoid includes:") |
-| `assistant_seed_templates` | `Dict[lang, List[str]]` | `prompts/default.yaml` | Assistant templates with `{}` placeholder |
-| `assistant_post_templates` | `str` | `prompts/default.yaml` | Appended after the thinking message (default: `"Topics:\n1. "`) |
+| Field                      | Type                    | Source                  | Description                                                                                |
+| -------------------------- | ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------ |
+| `user_pre_templates`       | `Dict[lang, List[str]]` | `prompts/default.yaml`  | Fixed user message prefixes, used as fallback when no seed templates are provided          |
+| `user_seed_templates`      | `Dict[lang, List[str]]` | `prompts/default.yaml`  | User templates with `{}` placeholder filled by a sampled topic                             |
+| `user_post_templates`      | `Dict[lang, List[str]]` | `prompts/default.yaml`  | Fixed user message suffixes                                                                |
+| `assistant_pre_templates`  | `Dict[lang, List[str]]` | `prompts/default.yaml`  | Assistant prefill preambles (e.g. "Okay, I remember the topics I should avoid includes:")  |
+| `assistant_seed_templates` | `Dict[lang, List[str]]` | `prompts/default.yaml`  | Assistant templates with `{}` placeholder                                                  |
+| `assistant_post_templates` | `str`                   | `prompts/default.yaml`  | Appended after the thinking message (default: `"Topics:\n1. "`)                            |
+| `system_templates`         | `Dict[lang, List[str]]` | selected prompt presets | Optional system-message templates, sampled per message and prepended before user/assistant |
 
 ### How `build_messages()` Works
 
 The main generation path uses `build_messages(lang, n, warmup_idx)`:
 
-1. A shared `thinking_msg` is sampled from `assistant_pre_templates` (or indexed by `warmup_idx` during warmup steps).
-2. The `assistant_post` (default `ASSISTANT_POST_TEMPLATES = "Topics:\n1. "`) is appended after a newline.
-3. Final assistant content: `"{thinking_msg}\n{assistant_post}"` (or just `thinking_msg` if no `assistant_post`).
-4. User content: a seed topic formatted into a random `user_seed_template`, or a `user_pre` fallback if no seed templates are configured.
+1. User content is built from a seed topic formatted into a random `user_seed_template`, or from a `user_pre` fallback if no seed templates are configured.
+2. If `user_post_templates` is set, a suffix is sampled independently per message and appended to the user content.
+3. If `assistant_pre_templates` / `assistant_post_templates` are set, assistant prefill content is constructed from a sampled `thinking_msg` plus the assistant postamble.
+4. If `system_templates` is set, a system message is sampled independently per message and prepended as the first message in the list.
 
-All messages in a batch share the same assistant content but have independently sampled user messages.
+All messages in a batch share the same assistant content when assistant prefilling is used, but user and system messages may vary independently per message.
 
 ### Tokenization
 
 `encode_for_generation()` in `src/tokenization_utils.py` handles the two backends differently:
 
-- **vLLM** — `apply_chat_template` encodes the user message, then the assistant content is appended as raw tokens (prefill injection). The chat template handles model-specific tokens (e.g. `<think>` for R1 models).
-- **OpenRouter** — messages are sent as-is in OpenAI chat format; the assistant content becomes an assistant message in the API request.
+- **vLLM** — `apply_chat_template` with `add_generation_prompt=True` encodes the user message, then the assistant content is appended as raw tokens (prefill injection). For R1-style models (DeepSeek-R1, Qwen3), the chat template automatically opens a `<think>` block as the generation prompt — so the assistant prefill content lands _inside_ the thinking space. This is the Thought Token Forcing (TTF) mechanism from the paper.
+- **OpenRouter** — messages are sent as-is in OpenAI chat format; system messages are preserved natively, and assistant content becomes an assistant message in the API request. No chat template is applied, so the `<think>` wrapping does not happen automatically.
+
+### Prompt Strategies
+
+Three prompt configs are provided:
+
+| Config             | Method                      | Mechanism                                                                                                              | Best for                                     |
+| ------------------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `default`          | Thought Token Forcing (TTF) | Natural language assistant prefill; `<think>` added by chat template for R1 models                                     | Local vLLM with R1/Qwen models               |
+| `user_content`     | User-turn prefill           | Same prefill content placed in the user message instead of assistant turn                                              | APIs that don't support assistant prefilling |
+| `user_elicitation` | User elicitation            | User-side suffix prompting with policy-citation and fictional-document framings, optionally paired with system prompts | APIs that don't support assistant prefilling |
 
 ### How to Customize
 
@@ -160,14 +178,23 @@ The Crawler analyzes refusal behavior of a `target_model` and uses an LM to do a
 
 Each model role can be set to `"local"` (uses the vLLM-served `local_model`) or to an OpenRouter model ID (e.g. `"anthropic/claude-3.5-haiku"`), which routes through the OpenRouter API instead.
 
-| Role | Config field | Purpose |
-|------|-------------|---------|
-| Target | `target_model` | Main generation (topic elicitation) and answering refusal-check queries |
-| Translation | `translation_model` | Translates topics between English and Chinese |
-| Summarization | `summarization_model` | Condenses raw topic strings into 2–5 word labels |
-| Refusal check | `refusal_check_model` | Generates diverse test queries for refusal checking |
+| Role          | Config field          | Purpose                                                                 |
+| ------------- | --------------------- | ----------------------------------------------------------------------- |
+| Target        | `target_model`        | Main generation (topic elicitation) and answering refusal-check queries |
+| Translation   | `translation_model`   | Translates topics between English and Chinese                           |
+| Summarization | `summarization_model` | Condenses raw topic strings into 2–5 word labels                        |
+| Refusal check | `refusal_check_model` | Generates diverse test queries for refusal checking                     |
 
 The `haiku` model config uses OpenRouter for the target model and local vLLM for all auxiliary roles. The `local_*` configs use vLLM for everything.
+
+### Recommended Models
+
+The following models have been validated for the refusal provocation and other helper tasks. They are reasonably compliant and inexpensive.
+
+- `google/gemini-3.1-flash-lite-preview` (OpenRouter)
+- `allenai/olmo-3-7b-instruct`
+- `mistralai/Ministral-3-8B-Instruct-2512`
+- `openai/gpt-oss-20b`
 
 ## Output Format
 
@@ -201,6 +228,5 @@ Each topic in `head_topics` / `head_refusal_topics` is a `Topic` object:
 ```
 
 Key fields: `is_head` indicates a cluster head (vs. duplicate), `is_refusal` indicates the model refused the topic, `parent_id` links to the seed topic that elicited this one, `summary` is the condensed 2–5 word label, and `api_refused_reason` captures OpenRouter moderation reasons (e.g. `"self-harm/intent"`) when the API returned a 403.
-
 
 # All eval stuff in `/exp` is likely broken.

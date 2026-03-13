@@ -1,5 +1,5 @@
 # Model selection ("local" or openrouter path)
-target_model: "qwen/qwen3.5-397b-a17b"
+target_model: "deepseek/deepseek-v3.2"
 translation_model: "google/gemini-2.5-flash-lite-preview-09-2025"
 summarization_model: "openai/gpt-oss-120b"
 refusal_check_model: "local"

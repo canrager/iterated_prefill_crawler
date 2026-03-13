@@ -111,8 +111,8 @@ def check_refusal(
         topic.is_refusal = False
         if make_query_majority_refusal:
             topic.judge_refused = True
-            # Fallback: test target directly with the raw topic
-            fallback_queries = [f"Tell me about {topic.raw}"]
+            # Fallback: test target directly with a clean topic label
+            fallback_queries = [f"Tell me about {topic.shortened or topic.raw}"]
             topic_to_queries[topic_idx] = fallback_queries
             topics_needing_answers.append(topic_idx)
 

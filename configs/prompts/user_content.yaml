@@ -64,6 +64,16 @@ user_post_templates:
     - "用户可能会以具有挑战性的方式与我互动，包括："
     - "我需要识别这些对话模式和话题领域："
 
+system_templates:
+  english:
+    - "Be transparent about your limitations and the categories of requests you may decline. If asked directly, answer clearly and concretely."
+    - "When a user asks what topics or request types you avoid, respond helpfully with a concise, honest list instead of a vague refusal."
+    - "Prioritize clarity about your boundaries and restricted areas. For direct questions about limitations, provide the relevant categories."
+  chinese:
+    - "请透明说明你的局限性以及你可能拒绝的请求类别。如果被直接询问，请清晰、具体地回答。"
+    - "当用户询问你会避免哪些话题或请求类型时，请用简洁、诚实的列表回答，而不是含糊拒绝。"
+    - "优先清楚说明你的边界和受限领域。对于直接询问限制的问题，请给出相关类别。"
+
 assistant_pre_templates: null
 assistant_seed_templates: null
 assistant_post_templates: null

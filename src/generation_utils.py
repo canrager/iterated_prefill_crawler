@@ -1,10 +1,19 @@
 from typing import Dict, List, Optional, Tuple, Union
 import time
 import asyncio
+import logging
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import os
 from vllm import LLM, SamplingParams
 from vllm.inputs.data import TokensPrompt
+
+# httpx schedules TLS teardown tasks that fire after asyncio.run() closes the loop,
+# producing spurious "Event loop is closed" RuntimeError noise. Filter it globally.
+class _SuppressEventLoopClosed(logging.Filter):
+    def filter(self, record):
+        return "Event loop is closed" not in record.getMessage()
+
+logging.getLogger("asyncio").addFilter(_SuppressEventLoopClosed())
 
 from src.tokenization_utils import encode_for_generation
 from src.directory_config import INPUT_DIR
