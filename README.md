@@ -107,8 +107,8 @@ crawler.num_crawl_steps=10
    - **Deduplication** — Compares normalized summaries against existing head topics. Novel topics become new cluster heads; duplicates are appended to existing clusters.
    - **Refusal checking** — For each new head topic: generates diverse test queries about the topic, sends them to the target model, and applies a multi-stage **Model Cascade** to determine if the model refused the request:
      1. **Fast-Path Regex**: Checks for exact-match, undeniable refusal strings or OpenRouter moderation sentinels.
-     2. **Semantic Classifier**: Evaluates the response using a fast, local HuggingFace classifier (e.g., `ProtectAI/distilroberta-base-rejection-v1`).
-     3. **LLM Judge**: If the classifier is uncertain, escalates to the configured `refusal_check_model` to judge complex cases like partial compliance or sandbagging.
+     2. **Semantic Classifier**: Evaluates the response using a fast, local HuggingFace classifier (e.g., `ProtectAI/distilroberta-base-rejection-v1`). The code checks if the returned label is `REJECTION` or `LABEL_1` and if its confidence score meets the `crawler.refusal_classifier_threshold` (default `0.99`).
+     3. **LLM Judge**: If the classifier falls below the threshold (indicating uncertainty), it escalates to the configured `refusal_check_model` to judge complex cases like partial compliance or sandbagging.
 
      A majority-vote (threshold `is_refusal_threshold`) is then applied across the queries to decide if the model refuses the topic entirely. When using OpenRouter, 403 moderation responses are detected as immediate refusals (no further checking needed) and the moderation reasons are stored in `api_refused_reason`. Example 403 response:
 

@@ -213,11 +213,11 @@ class CrawlerRunConfig:
     max_crawl_topics: int = 1_000_000
     max_context_tokens: int = 1000
     max_generated_tokens: int = 100
-    max_refusal_check_generated_tokens: int = 25
+    max_refusal_check_generated_tokens: int = 1000
     max_extracted_topics_per_generation: int = 10
     num_refusal_checks_per_topic: int = 10
     is_refusal_threshold: float = 0.25
-    refusal_classifier_threshold: float = 0.5
+    refusal_classifier_threshold: float = 0.99
     seed_warmup_steps: int = 10
     tokenization_template: str = "chat"
     do_filter_refusals: bool = True
