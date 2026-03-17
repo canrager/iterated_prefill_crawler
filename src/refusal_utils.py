@@ -15,7 +15,7 @@ _classifier_pipeline = None
 def get_classifier(model_name: str):
     global _classifier_pipeline
     if _classifier_pipeline is None:
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        device = "cpu"
         _classifier_pipeline = pipeline(
             "text-classification", model=model_name, device=device
         )
