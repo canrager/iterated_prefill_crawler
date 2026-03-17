@@ -1,19 +1,18 @@
-import random
-from tqdm import trange
 import json
-from typing import List, Dict, Tuple
-
+import random
 from datetime import datetime
+from typing import Dict, List, Tuple
 
 import torch
+from tqdm import trange
 
-from src.generation_utils import batch_generate
-from src.prompt_builder import PromptBuilder
-from src.crawler.topic_queue import TopicQueue, Topic
 from src.crawler.config import CrawlerConfig
 from src.crawler.crawler_stats import CrawlerStats
-from src.response_formatting_utils import TopicFormatter
+from src.crawler.topic_queue import Topic, TopicQueue
+from src.generation_utils import batch_generate
+from src.prompt_builder import PromptBuilder
 from src.refusal_utils import check_refusal
+from src.response_formatting_utils import TopicFormatter
 
 
 class Crawler:
@@ -31,6 +30,7 @@ class Crawler:
             user_pre_templates=crawler_config.prompts.user_pre_templates,
             user_seed_templates=crawler_config.prompts.user_seed_templates,
             user_post_templates=crawler_config.prompts.user_post_templates,
+            system_templates=crawler_config.prompts.system_templates,
             assistant_pre_templates=crawler_config.prompts.assistant_pre_templates,
             assistant_seed_templates=crawler_config.prompts.assistant_seed_templates,
             assistant_post_templates=crawler_config.prompts.assistant_post_templates,
@@ -39,7 +39,9 @@ class Crawler:
         )
 
         self.save_filename = save_filename
-        self.save(save_filename)  # Already testing at initialization whether saving works
+        self.save(
+            save_filename
+        )  # Already testing at initialization whether saving works
 
     def _resolve_model(self, role: str, local_model, local_tokenizer):
         """Return (model, tokenizer) for the given role.
@@ -115,8 +117,12 @@ class Crawler:
             )
 
         # Iterate through crawling steps
-        for crawl_step_idx in trange(self.config.crawler.num_crawl_steps, desc="Crawling topics"):
-            print(f"Crawl step: {crawl_step_idx} / {self.config.crawler.num_crawl_steps}")
+        for crawl_step_idx in trange(
+            self.config.crawler.num_crawl_steps, desc="Crawling topics"
+        ):
+            print(
+                f"Crawl step: {crawl_step_idx} / {self.config.crawler.num_crawl_steps}"
+            )
 
             # Generate with prefilling, iterating over all languages to incentivize language balance
             for lang in self.config.crawler.prompt_languages:
@@ -128,7 +134,10 @@ class Crawler:
                 else:
                     warmup_step_idx = None
 
-                n = self.config.crawler.generation_batch_size * self.config.crawler.num_samples_per_topic
+                n = (
+                    self.config.crawler.generation_batch_size
+                    * self.config.crawler.num_samples_per_topic
+                )
                 messages, topic_parent_ids = self.prompt_builder.build_messages(
                     lang, n, warmup_step_idx
                 )
@@ -136,7 +145,9 @@ class Crawler:
                 if verbose:
                     print(f"\n## generating...")
 
-                target_model, target_tokenizer = self._resolve_model("target", local_model, local_tokenizer)
+                target_model, target_tokenizer = self._resolve_model(
+                    "target", local_model, local_tokenizer
+                )
                 generated_texts, input_strs = batch_generate(
                     target_model,
                     target_tokenizer,
@@ -211,7 +222,9 @@ class Crawler:
             "stats": self.stats.to_dict(),
             "config": self.config.to_dict(),
             "queue": self.queue.to_dict(),
-            "head_refusal_topics_summaries": [t.summary for t in self.queue.head_refusal_topics],
+            "head_refusal_topics_summaries": [
+                t.summary for t in self.queue.head_refusal_topics if t.parent_id != -5
+            ],
         }
         return crawler_dict
 
@@ -236,7 +249,11 @@ class Crawler:
 def get_run_name(crawler_config: CrawlerConfig):
     target_model = crawler_config.model.target_model
     if target_model == "local":
-        model_name = crawler_config.model.local_model.split("/")[-1] if crawler_config.model.local_model else "no_model"
+        model_name = (
+            crawler_config.model.local_model.split("/")[-1]
+            if crawler_config.model.local_model
+            else "no_model"
+        )
     else:
         model_name = target_model.split("/")[-1]
     run_name = (

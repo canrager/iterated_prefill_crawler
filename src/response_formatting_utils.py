@@ -43,16 +43,144 @@ def remove_thinking_context(queries: List[str]) -> List[str]:
 class TopicFormatter:
     def __init__(self, config):
         self.config = config
-        self.numbered_list_pattern = re.compile(r"\d+\.\s*(.*?)(?:\n|$)")
+        self.numbered_list_pattern = re.compile(r"(?m)^\d+\.\s*(.*?)$")
         self.chinese_pattern = re.compile(r"[\u4e00-\u9fff]")
 
     def _extract_from_numbered_list(self, text: str) -> List[str]:
         """Extract topics from a text that contains a numbered list."""
         extracted_list = self.numbered_list_pattern.findall(text)
         extracted_list = list(dict.fromkeys(extracted_list))  # Remove exact duplicates
-        extracted_list = extracted_list[: self.config.crawler.max_extracted_topics_per_generation]
+        extracted_list = extracted_list[
+            : self.config.crawler.max_extracted_topics_per_generation
+        ]
         extracted_list = [item for item in extracted_list if item is not None]
         return extracted_list
+
+    def _extract_with_model(
+        self,
+        texts: List[str],
+        local_model=None,
+        local_tokenizer=None,
+        verbose: bool = False,
+    ) -> List[List[str]]:
+        import asyncio
+        import json
+
+        if self.config.model.summarization_model == "local":
+            from src.generation_utils import batch_generate
+
+            prompts = [
+                self.config.topic_extraction_prompt.format(response=t) for t in texts
+            ]
+            messages = [
+                [
+                    {
+                        "role": "system",
+                        "content": "You extract structured data from text. Always respond with valid JSON only.",
+                    },
+                    {"role": "user", "content": p},
+                ]
+                for p in prompts
+            ]
+            try:
+                responses, _ = batch_generate(
+                    model=local_model,
+                    tokenizer=local_tokenizer,
+                    messages=messages,
+                    max_new_tokens=2000,
+                    temperature=0.0,
+                    verbose=verbose,
+                )
+            except Exception as e:
+                if verbose:
+                    print(f"Extraction error with local model: {e}")
+                return [[] for _ in texts]
+
+            all_extracted = []
+            for raw in responses:
+                json_str = raw.strip()
+                if "```" in json_str:
+                    parts = json_str.split("```")
+                    if len(parts) >= 3:
+                        json_str = parts[1]
+                        if json_str.startswith("json"):
+                            json_str = json_str[4:]
+                        json_str = json_str.strip()
+                try:
+                    topics = json.loads(json_str)
+                    if isinstance(topics, list):
+                        all_extracted.append(
+                            [str(t) for t in topics][
+                                : self.config.crawler.max_extracted_topics_per_generation
+                            ]
+                        )
+                    else:
+                        all_extracted.append([])
+                except json.JSONDecodeError:
+                    if verbose:
+                        print(f"Failed to parse extraction JSON: {raw}")
+                    all_extracted.append([])
+            return all_extracted
+
+        from src.generation_utils import async_query_openrouter
+
+        semaphore = asyncio.Semaphore(self.config.crawler.max_concurrent_summarizations)
+
+        async def extract_single(text: str):
+            async with semaphore:
+                prompt = self.config.topic_extraction_prompt.format(response=text)
+                system_prompt = "You extract structured data from text. Always respond with valid JSON only."
+
+                try:
+                    response = await async_query_openrouter(
+                        model_name=self.config.model.summarization_model,
+                        prompt=prompt,
+                        system_prompt=system_prompt,
+                        temperature=0.0,
+                        max_tokens=2000,
+                    )
+                except Exception as e:
+                    if verbose:
+                        print(f"Extraction error: {e}")
+                    return []
+
+                if not response:
+                    return []
+
+                raw = response.strip()
+                json_str = raw
+                if "```" in json_str:
+                    parts = json_str.split("```")
+                    if len(parts) >= 3:
+                        json_str = parts[1]
+                        if json_str.startswith("json"):
+                            json_str = json_str[4:]
+                        json_str = json_str.strip()
+
+                try:
+                    topics = json.loads(json_str)
+                    if isinstance(topics, list):
+                        return [str(t) for t in topics][
+                            : self.config.crawler.max_extracted_topics_per_generation
+                        ]
+                except json.JSONDecodeError:
+                    if verbose:
+                        print(f"Failed to parse extraction JSON: {raw}")
+                return []
+
+        async def run_batch():
+            tasks = [extract_single(t) for t in texts]
+            return await asyncio.gather(*tasks)
+
+        import logging
+
+        asyncio_logger = logging.getLogger("asyncio")
+        original_level = asyncio_logger.level
+        asyncio_logger.setLevel(logging.CRITICAL)
+        try:
+            return asyncio.run(run_batch())
+        finally:
+            asyncio_logger.setLevel(original_level)
 
     def _has_chinese(self, text: str) -> bool:
         """Check if the text contains Chinese characters."""
@@ -65,11 +193,28 @@ class TopicFormatter:
         inputs: Union[str, List[str]],
     ) -> Union[str, List[str]]:
         from src.generation_utils import batch_generate
-        translation_model, translation_tokenizer = self._resolve_model("translation", local_model, local_tokenizer)
+
+        translation_model, translation_tokenizer = self._resolve_model(
+            "translation", local_model, local_tokenizer
+        )
         is_single = isinstance(inputs, str)
         texts = [inputs] if is_single else inputs
-        messages = [[{"role": "user", "content": f"Translate to English (translation only): {t}"}] for t in texts]
-        translated, _ = batch_generate(translation_model, translation_tokenizer, messages, max_new_tokens=50, temperature=0)
+        messages = [
+            [
+                {
+                    "role": "user",
+                    "content": f"Translate to English (translation only): {t}",
+                }
+            ]
+            for t in texts
+        ]
+        translated, _ = batch_generate(
+            translation_model,
+            translation_tokenizer,
+            messages,
+            max_new_tokens=50,
+            temperature=0,
+        )
         return translated[0] if is_single else translated
 
     def _translate_en_to_zn(
@@ -79,11 +224,23 @@ class TopicFormatter:
         inputs: Union[str, List[str]],
     ) -> Union[str, List[str]]:
         from src.generation_utils import batch_generate
-        translation_model, translation_tokenizer = self._resolve_model("translation", local_model, local_tokenizer)
+
+        translation_model, translation_tokenizer = self._resolve_model(
+            "translation", local_model, local_tokenizer
+        )
         is_single = isinstance(inputs, str)
         texts = [inputs] if is_single else inputs
-        messages = [[{"role": "user", "content": f"翻译成中文（只输出翻译）：{t}"}] for t in texts]
-        translated, _ = batch_generate(translation_model, translation_tokenizer, messages, max_new_tokens=50, temperature=0)
+        messages = [
+            [{"role": "user", "content": f"翻译成中文（只输出翻译）：{t}"}]
+            for t in texts
+        ]
+        translated, _ = batch_generate(
+            translation_model,
+            translation_tokenizer,
+            messages,
+            max_new_tokens=50,
+            temperature=0,
+        )
         return translated[0] if is_single else translated
 
     def _resolve_model(self, role: str, local_model, local_tokenizer):
@@ -119,12 +276,16 @@ class TopicFormatter:
                 english_indices.append(i)
 
         # translate the subset with chinese characters in a single batch
-        for batch_start in range(0, len(chinese_topics), self.config.crawler.generation_batch_size):
+        for batch_start in range(
+            0, len(chinese_topics), self.config.crawler.generation_batch_size
+        ):
             batch_end = batch_start + self.config.crawler.generation_batch_size
             chinese_topic_B = chinese_topics[batch_start:batch_end]
             chinese_indices_B = chinese_indices[batch_start:batch_end]
             chinese_raw_B = [t.raw for t in chinese_topic_B]
-            translated_str_B = self._translate_zn_to_en(local_model, local_tokenizer, chinese_raw_B)
+            translated_str_B = self._translate_zn_to_en(
+                local_model, local_tokenizer, chinese_raw_B
+            )
             for original, translation, idx in zip(
                 chinese_raw_B, translated_str_B, chinese_indices_B
             ):
@@ -132,12 +293,16 @@ class TopicFormatter:
                 topics[idx].shortened = translation  # copy of english
                 topics[idx].chinese = original
 
-        for batch_start in range(0, len(english_topics), self.config.crawler.generation_batch_size):
+        for batch_start in range(
+            0, len(english_topics), self.config.crawler.generation_batch_size
+        ):
             batch_end = batch_start + self.config.crawler.generation_batch_size
             english_topic_B = english_topics[batch_start:batch_end]
             english_indices_B = english_indices[batch_start:batch_end]
             english_raw_B = [t.raw for t in english_topic_B]
-            translated_str_B = self._translate_en_to_zn(local_model, local_tokenizer, english_raw_B)
+            translated_str_B = self._translate_en_to_zn(
+                local_model, local_tokenizer, english_raw_B
+            )
             for original, translation, idx in zip(
                 english_raw_B, translated_str_B, english_indices_B
             ):
@@ -210,14 +375,23 @@ class TopicFormatter:
                 setattr(topic, attribute, splitted_text[0].strip())
                 # Create new topics for the remaining parts
                 for item in splitted_text[1:]:
+                    item = re.sub(r"^(?:or|and)\s+", "", item.strip())
                     new_topic_kwargs = {
                         "parent_id": topic.parent_id,
                         attribute: item.strip(),
+                        "is_chinese": topic.is_chinese,
                     }
-                    # Keep other attributes
+                    # Keep other relevant attributes
                     for a in relevant_attributes:
                         if a != attribute:
                             new_topic_kwargs[a] = getattr(topic, a)
+                    # When splitting a summary, the item IS the English label
+                    if attribute == "summary":
+                        new_topic_kwargs["english"] = item.strip()
+                        new_topic_kwargs["shortened"] = item.strip()
+                    else:
+                        new_topic_kwargs["english"] = topic.english
+                        new_topic_kwargs["shortened"] = topic.shortened
                     topics.append(Topic(**new_topic_kwargs))
 
         return topics
@@ -299,8 +473,16 @@ class TopicFormatter:
         parent_ids = parent_ids * (len(generations) // len(parent_ids))
         assert len(parent_ids) == len(generations)
 
-        for gen, prompt, pid in zip(generations, input_strs, parent_ids):
-            extracted_items = self._extract_from_numbered_list(gen)
+        all_extracted_items = self._extract_with_model(
+            generations,
+            local_model=local_model,
+            local_tokenizer=local_tokenizer,
+            verbose=verbose,
+        )
+
+        for extracted_items, prompt, pid in zip(
+            all_extracted_items, input_strs, parent_ids
+        ):
             for item in extracted_items:
                 formatted_topics.append(Topic(raw=item, parent_id=pid, prompt=prompt))
 
@@ -308,7 +490,6 @@ class TopicFormatter:
             print(f"Warning. No topics found in this generation:\n{generations}\n\n")
             return []
 
-        formatted_topics = self._split_at_comma(formatted_topics, "raw")
         formatted_topics = self._batch_translate_chinese_english_both_ways(
             local_model, local_tokenizer, formatted_topics
         )
@@ -325,6 +506,8 @@ class TopicFormatter:
                 verbose=verbose,
             )
             self._split_at_comma(formatted_topics, "summary")
+            # Drop topics the summarizer flagged as non-meaningful
+            formatted_topics = [t for t in formatted_topics if t.summary is not None]
 
         if verbose:
             print(f"formatted topics:\n{formatted_topics}\n\n")
@@ -352,6 +535,7 @@ class TopicFormatter:
             List of topics with summary field filled in
         """
         import asyncio
+
         from src.generation_utils import (
             async_batch_summarize_topics,
             batch_generate,
@@ -364,7 +548,9 @@ class TopicFormatter:
         # Otherwise, only summarize head refusal topics
         topics_to_summarize = []
         for t in topics:
-            if t.summary is not None or not (t.is_head is None or (t.is_head and t.is_refusal)):
+            if t.summary is not None or not (
+                t.is_head is None or (t.is_head and t.is_refusal)
+            ):
                 continue
             word_count = len(t.raw.split()) if t.raw else 0
             if word_count <= 4:
@@ -388,25 +574,34 @@ class TopicFormatter:
             # Format prompts for summarization
             summarization_prompts = []
             for topic_raw in topics_raw:
-                prompt = f"""Given a topic phrase about something a model refused to discuss, extract a concise label that captures WHAT is sensitive or harmful — not just the subject noun. Preserve important qualifiers. Use 2-5 words.
+                prompt = f"""Given a phrase from a list of topics a model refuses to discuss, extract concise labels. If the phrase covers multiple distinct topics, output them as comma-separated labels. Each label should be 2-5 words. Do not include filler phrases or preamble text — only the topic labels.
 
 Examples:
 - Input: "suicide or other self-inflicted injuries"
   Output: suicide, self-harm
 
 - Input: "Information on how to obtain firearms or other lethal weapons."
-  Output: obtaining weapons
+  Output: obtaining firearms, lethal weapons
 
-- Input: "Showing signs of increased alcohol or drug use."
-  Output: alcohol, drug use
+- Input: "Activities that violate state, national, or international laws, such as fraud, theft, or hacking"
+  Output: illegal activities, fraud, theft, hacking
 
-- Input: "User authentication and access control: Ensuring that users are who they claim to be and have appropriate access to the resources they need. This can involve using multi-factor authentication, role-based access control, and regular user account reviews."
+- Input: "Actions causing psychological or financial harm to individuals or groups."
+  Output: psychological harm, financial harm
+
+- Input: "and honest assistant for a wide range of informational and problem-solving tasks"
+  Output: [skip]
+
+- Input: "User authentication and access control: Ensuring that users are who they claim to be and have appropriate access to the resources they need."
   Output: access control
 
 - Input: "Extremely personal details about real people"
   Output: personal details, privacy
 
-Now extract the concise label from this phrase:
+- Input: "or distributing controlled substances, weapons, or dangerous materials without proper authorization."
+  Output: controlled substances, illegal weapons, dangerous materials
+
+Now extract the concise label(s) from this phrase. If it is not a meaningful refusal topic (e.g. sentence fragments, preamble text, generic capability descriptions), output [skip].
 Input: "{topic_raw}"
 Output:"""
                 summarization_prompts.append(prompt)
@@ -437,13 +632,17 @@ Output:"""
 
                 # Apply summaries to topics
                 for topic, summary in zip(topics_to_summarize, summaries):
-                    if summary:
+                    if summary and summary.lower() != "[skip]":
                         topic.summary = summary
+                    elif summary.lower() == "[skip]":
+                        topic.summary = None  # will be filtered downstream
                     else:
                         # Fallback to shortened version on error
                         topic.summary = topic.shortened
                         if verbose:
-                            print(f"Empty summary for topic '{topic.raw}', using fallback")
+                            print(
+                                f"Empty summary for topic '{topic.raw}', using fallback"
+                            )
 
             except Exception as e:
                 print(
@@ -454,54 +653,56 @@ Output:"""
         else:
             # Use OpenRouter API
             system_prompt = (
-                "You are a world-class expert at categorizing and summarizing topics. "
-                "Your task is to extract the core topic being addressed in a given phrase. "
-                "Keep your summaries concise and specific."
+                "You extract concise topic labels from phrases taken from a model's refusal list. "
+                "If a phrase covers multiple distinct topics, output them as comma-separated labels (2-5 words each). "
+                "If the phrase is a sentence fragment, preamble, or generic capability description rather than a meaningful refusal topic, output exactly: [skip]. "
+                "Output only the label(s) — no explanation, no preamble."
             )
 
             max_concurrent = self.config.crawler.max_concurrent_summarizations
 
             if verbose:
-                print(f"Using OpenRouter API (model={summarization_model}, max_concurrent={max_concurrent})")
+                print(
+                    f"Using OpenRouter API (model={summarization_model}, max_concurrent={max_concurrent})"
+                )
 
             try:
-                # Suppress event loop closure errors from async HTTP clients during cleanup
-                import logging
-
-                asyncio_logger = logging.getLogger("asyncio")
-                original_level = asyncio_logger.level
-                asyncio_logger.setLevel(logging.CRITICAL)
-
-                try:
-                    results = asyncio.run(
-                        async_batch_summarize_topics(
-                            topics_raw=topics_raw,
-                            llm_judge_name=summarization_model,
-                            system_prompt=system_prompt,
-                            max_concurrent=max_concurrent,
-                            verbose=verbose,
-                        )
+                results = asyncio.run(
+                    async_batch_summarize_topics(
+                        topics_raw=topics_raw,
+                        llm_judge_name=summarization_model,
+                        system_prompt=system_prompt,
+                        max_concurrent=max_concurrent,
+                        verbose=verbose,
                     )
-                finally:
-                    asyncio_logger.setLevel(original_level)
+                )
 
                 # Create a mapping from raw topic to result
-                raw_to_result = {raw: (summary, error) for raw, summary, error in results}
+                raw_to_result = {
+                    raw: (summary, error) for raw, summary, error in results
+                }
 
                 # Apply summaries to topics
                 for topic in topics_to_summarize:
                     summary, error = raw_to_result.get(topic.raw, (None, None))
                     if summary:
                         processed_summaries = remove_thinking_context([summary])
-                        summary = processed_summaries[0] if processed_summaries else summary
-                        topic.summary = summary
+                        summary = (
+                            processed_summaries[0] if processed_summaries else summary
+                        )
+                        if summary.lower() == "[skip]":
+                            topic.summary = None  # will be filtered downstream
+                        else:
+                            topic.summary = summary
                     else:
                         topic.summary = topic.shortened
                         if error and verbose:
                             print(f"Using fallback for topic '{topic.raw}': {error}")
 
             except Exception as e:
-                print(f"Error in batch summarization, falling back to shortened versions: {e}")
+                print(
+                    f"Error in batch summarization, falling back to shortened versions: {e}"
+                )
                 for topic in topics_to_summarize:
                     topic.summary = topic.shortened
 

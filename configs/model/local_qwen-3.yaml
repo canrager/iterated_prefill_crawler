@@ -1,0 +1,15 @@
+# Model selection ("local" or openrouter path)
+target_model: "local"
+translation_model: "google/gemini-3.1-flash-lite-preview"
+summarization_model: "google/gemini-3.1-flash-lite-preview"
+refusal_check_model: "google/gemini-3.1-flash-lite-preview"
+refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
+
+# Local model config (needed to fulfill OmegaConf typecheck)
+local_model: "Qwen/Qwen3-4B" # null to skip loading
+quantization_bits: null # null for no quantization
+device: "auto"
+cache_dir: "hf_models"
+vllm_tensor_parallel_size: 2
+vllm_gpu_memory_utilization: 0.8
+vllm_max_model_len: 4096

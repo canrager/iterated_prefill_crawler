@@ -1,15 +1,15 @@
 # Model selection ("local" or openrouter path)
-target_model: "anthropic/claude-3.5-haiku"
+target_model: "qwen/qwen3.5-397b-a17b"
 translation_model: "local"
 summarization_model: "local"
 refusal_check_model: "local"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 
 # Local model config (needed to fulfill OmegaConf typecheck)
-local_model: "allenai/Olmo-3-7B-Instruct"
+local_model: null # "allenai/Olmo-3-7B-Instruct" # null to skip loading
 quantization_bits: null # null for no quantization
-device: "cuda"
+device: "auto"
 cache_dir: "hf_models"
-vllm_tensor_parallel_size: 1
+vllm_tensor_parallel_size: 2
 vllm_gpu_memory_utilization: 0.8
-vllm_max_model_len: 1000 # We don't need much context since the model is just used for evaluation.
+vllm_max_model_len: 992 # We don't need much context since the model is just used for evaluation. Must be multiple of 16

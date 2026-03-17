@@ -92,9 +92,9 @@ def main(cfg: DictConfig) -> None:
     crawler.stats.visualize_cumulative_topic_count(plot_filename)
 
     # Cleanup
-    from vllm.distributed.parallel_state import destroy_model_parallel
-    destroy_model_parallel()
     if local_model is not None:
+        from vllm.distributed.parallel_state import destroy_model_parallel
+        destroy_model_parallel()
         del local_model
         import gc
         gc.collect()
