@@ -1,4 +1,6 @@
-from typing import List, Tuple
+import re
+from typing import List, Optional, Tuple
+
 from transformers import AutoTokenizer
 
 
@@ -43,6 +45,78 @@ def encode_for_generation(
     return all_input_ids, decoded_strs
 
 
+def get_thinking_skip_prefill(tokenizer: AutoTokenizer) -> Optional[str]:
+    """Return the prefill string that makes a reasoning model skip its thinking phase.
+
+    For local reasoning models the refusal-check generation is capped at a small
+    number of tokens (e.g. 25).  Without intervention those tokens are consumed
+    entirely by the ``<think>\\n…`` preamble, leaving nothing for the actual answer.
+
+    This function returns the minimal assistant-turn prefill that closes the
+    (possibly implicit) thinking block immediately so generation begins with
+    substantive content.  Returns ``None`` for non-reasoning models so they
+    receive no prefill at all.
+
+    Detection uses two complementary methods, either of which is sufficient:
+
+    **Method 1 — rendered generation prompt** (catches DeepSeek-R1 and similar):
+    Render ``apply_chat_template(…, add_generation_prompt=True)`` and check
+    whether the output ends with ``<think>`` (possibly followed by whitespace).
+    DeepSeek-R1-Distill ends its generation prompt with
+    ``<｜Assistant｜><think>\\n``, so the model's very first generated token is
+    content *inside* the thinking block.  Injecting ``</think>\\n`` closes it.
+
+    **Method 2 — template source scan** (catches Qwen3 and similar):
+    Look for ``<think>`` appearing as an *emitted* Jinja string literal in the
+    template source — i.e. inside a ``{{ … }}`` expression or after a ``+``
+    concatenation operator.  This correctly rejects Phi-4-reasoning, whose
+    template mentions ``<think>`` only as prose inside its hardcoded system-prompt
+    string (not as a token the template outputs), and also rejects plain models
+    (Llama-3, Mistral-Small, Tulu, …) whose templates contain no ``<think>`` at all.
+
+    Model behaviour summary
+    -----------------------
+    * **DeepSeek-R1-Distill**: caught by Method 1 → ``"</think>\\n"``
+    * **Qwen3**: caught by Method 2 → ``"</think>\\n"``
+    * **Phi-4-reasoning**: rejected by both methods → ``None``
+    * **Llama-3, Mistral-Small, Tulu**: rejected by both methods → ``None``
+    """
+    # Method 1: does the rendered generation prompt end with <think> (possibly + whitespace)?
+    # This handles models that auto-inject the opening tag (DeepSeek-R1, etc.)
+    try:
+        rendered: str = tokenizer.apply_chat_template(
+            [{"role": "user", "content": "x"}],
+            add_generation_prompt=True,
+            tokenize=False,
+        )
+        if rendered.rstrip(" \n").endswith("<think>"):
+            return "</think>\n"
+    except Exception:
+        pass
+
+    # Method 2: does the template source emit <think> as a Jinja output token?
+    # Match patterns like:  + '<think>   or  {{ '<think>   or  + "\n<think>
+    # This handles models where the model naturally opens the block but the
+    # template is aware of it (Qwen3 history rendering, etc.)
+    template: str = (
+        getattr(tokenizer, "chat_template", None)
+        or getattr(tokenizer, "default_chat_template", None)
+        or ""
+    )
+    if isinstance(template, list):
+        # Some tokenizers expose a list of named templates; use the default one.
+        for entry in template:
+            if isinstance(entry, dict) and entry.get("name") == "default":
+                template = entry.get("template", "")
+                break
+        else:
+            template = template[0].get("template", "") if template else ""
+    if re.search(r"""(?:{{|\+)\s*['"][^'"]*<think>""", str(template)):
+        return "</think>\n"
+
+    return None
+
+
 if __name__ == "__main__":
     import os
 
@@ -60,13 +134,23 @@ if __name__ == "__main__":
     user_msg = "Hello, what topics do you avoid?"
 
     print("\n=== Case 1: Plain user message ===")
-    ids, strs = encode_for_generation(tokenizer, [[{"role": "user", "content": user_msg}]])
+    ids, strs = encode_for_generation(
+        tokenizer, [[{"role": "user", "content": user_msg}]]
+    )
     print(strs[0])
 
     print("\n=== Case 2: With thinking_message ===")
     ids, strs = encode_for_generation(
         tokenizer,
-        [[{"role": "user", "content": user_msg}, {"role": "assistant", "content": "I know that."}]],
+        [
+            [
+                {"role": "user", "content": user_msg},
+                {"role": "assistant", "content": "I know that."},
+            ]
+        ],
     )
     print(strs[0])
 
+    print("\n=== Case 3: get_thinking_skip_prefill ===")
+    skip_prefill = get_thinking_skip_prefill(tokenizer)
+    print(f"thinking_skip_prefill={skip_prefill!r}")

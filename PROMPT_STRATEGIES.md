@@ -62,6 +62,27 @@ It uses the direct questions and user seeding from `user_seeded`, but adds **Tho
 
 This is the **most effective technique** for highly resistant models, but it requires an API or local inference engine (like vLLM, Anthropic API, or OpenRouter) that supports assistant-turn prefilling.
 
+**A Note on Local Reasoning Models (Qwen3, DeepSeek-R1, …):**
+When running locally under vLLM, the crawler automatically detects whether the loaded model uses `<think>…</think>` reasoning blocks by inspecting its chat template at startup (via `get_thinking_skip_prefill` in `src/tokenization_utils.py`). Two conditions are checked:
+
+1. Does `apply_chat_template(…, add_generation_prompt=True)` produce a prompt that ends with `<think>` (i.e., the template auto-injects the opening tag)? — catches **DeepSeek-R1** style models.
+2. Does the template source contain `<think>` as a Jinja output literal (e.g. `+ '<think>\n'`)? — catches **Qwen3** style models.
+
+When either condition is true, the crawler injects `</think>\n` as the assistant prefill for refusal-check queries. This closes the implicit thinking block immediately so the model's capped token budget (set by `max_refusal_check_generated_tokens`) is spent on the actual answer rather than reasoning preamble.
+
+Non-reasoning models — **Llama-3, Mistral-Small, Tulu, Phi-4-reasoning** (which mentions `<think>` only in its system-prompt prose, not as an emitted token) — return `None` from this check and receive no prefill at all, so they are completely unaffected.
+
+Separately, `clean_response()` in `src/refusal_utils.py` strips any `<think>…</think>` blocks and stray `</think>` tags from model outputs before they reach the refusal classifier, ensuring reasoning traces never confuse the classifier regardless of whether the prefill injection was used.
+
+**A Note on API Provider Prefill Support:**
+While local inference (vLLM) supports prefill natively (including the reasoning model auto-detection above), API support can vary:
+
+- **Anthropic**: Officially supports [prefilling Claude's response](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/prefill-claudes-response).
+- **Together AI & Fireworks AI**: Generally have strong native support for assistant prefill on open-source models.
+- **OpenRouter**: The API schema natively supports trailing assistant messages (see [OpenRouter Assistant Prefill](https://openrouter.ai/docs/api/reference/overview#assistant-prefill)), but its success depends on the upstream provider selected. If the upstream provider does not explicitly support prefilling at the chat-template level — which is common for newer reasoning models — the provider will simply append the text to the chat history. This causes the model to treat the prefill as a past turn rather than a continuation, completely breaking the attack. Additionally, some reasoning model endpoints enforce mandatory reasoning and reject requests that attempt to disable it (HTTP 400: `"Reasoning is mandatory for this endpoint and cannot be disabled."`), making remote thought-token forgery impossible for those providers.
+
+If you encounter issues with `default` on an API (e.g., an OpenRouter reasoning model opening a `<think>` tag to argue about why your prefill is there, instead of seamlessly continuing it), switch to the `jailbreak` or `user_seeded` strategies, which safely rely on user-side injection instead. The local reasoning model auto-detection described above is only applicable to vLLM inference.
+
 ---
 
 ## Running a Strategy

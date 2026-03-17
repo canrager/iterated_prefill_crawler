@@ -165,6 +165,19 @@ All messages in a batch share the same assistant content when assistant prefilli
 - **vLLM** — `apply_chat_template` with `add_generation_prompt=True` encodes the user message, then the assistant content is appended as raw tokens (prefill injection). For R1-style models (DeepSeek-R1, Qwen3), the chat template automatically opens a `<think>` block as the generation prompt — so the assistant prefill content lands _inside_ the thinking space. This is the Thought Token Forcing (TTF) mechanism from the paper.
 - **OpenRouter** — messages are sent as-is in OpenAI chat format; system messages are preserved natively, and assistant content becomes an assistant message in the API request. No chat template is applied, so the `<think>` wrapping does not happen automatically.
 
+#### Reasoning Model Auto-Detection (`get_thinking_skip_prefill`)
+
+For refusal-check generation, the token budget is intentionally small (`max_refusal_check_generated_tokens`, default 25). On reasoning models this budget would be entirely consumed by the `<think>\n…` preamble, leaving nothing for the actual answer the classifier needs to see.
+
+`get_thinking_skip_prefill(tokenizer)` in `src/tokenization_utils.py` automatically detects whether the loaded tokenizer belongs to a reasoning model and returns the appropriate prefill to skip the thinking phase — or `None` for non-reasoning models. Detection uses two complementary checks:
+
+1. **Rendered prompt check**: calls `apply_chat_template(…, add_generation_prompt=True)` and tests whether the output ends with `<think>`. This catches **DeepSeek-R1-Distill** and similar models whose template auto-injects the opening tag at generation time.
+2. **Template source scan**: searches the Jinja template source for `<think>` appearing as an emitted string literal (e.g. `+ '<think>\n'`). This catches **Qwen3** and similar models that expect the model to open the block itself but handle `</think>` in their history-rendering logic.
+
+When either check matches, the refusal-check batch is built with `{"role": "assistant", "content": "</think>\n"}` appended, which closes the implicit thinking block immediately. Non-reasoning models — **Llama-3, Mistral-Small, Tulu**, and **Phi-4-reasoning** (which mentions `<think>` only in its hardcoded system-prompt prose, not as an emitted token) — return `None` and receive no prefill at all.
+
+Additionally, `clean_response()` in `src/refusal_utils.py` strips complete `<think>…</think>` blocks and any stray `</think>` tags from all model outputs before they reach the refusal classifier. This ensures reasoning traces never confuse the classifier even in edge cases where the prefill injection was not applied.
+
 ### Prompt Strategies
 
 Four prompt configs are provided:
@@ -200,9 +213,8 @@ The `haiku` model config uses OpenRouter for the target model and local vLLM for
 The following models have been validated for the refusal provocation and other helper tasks. They are reasonably compliant and inexpensive.
 
 - `google/gemini-3.1-flash-lite-preview` (OpenRouter)
-- `allenai/olmo-3-7b-instruct`
+- `allenai/olmo-3-7b-instruct` or `allenai/olmo-3.1-32b-instruct`
 - `mistralai/Ministral-3-8B-Instruct-2512`
-- `openai/gpt-oss-20b`
 
 ## Output Format
 
