@@ -224,6 +224,8 @@ class CrawlerRunConfig:
     max_concurrent_summarizations: int = 10
     prompt_languages: List[str] = field(default_factory=lambda: ["english", "chinese"])
     verbose: bool = False
+    output_dir: Optional[str] = None
+    run_tag: Optional[str] = None
 
 
 @dataclass
@@ -245,6 +247,44 @@ class PromptsConfig:
     )
 
 
+CLUSTERING_PROMPT = """\
+Group the following topic labels into semantic clusters. A topic can appear \
+in multiple clusters. Return ONLY a JSON object mapping cluster titles to \
+lists of member topics. Use short, descriptive cluster titles (2-4 words).
+
+Topics:
+{topics}
+
+JSON:"""
+
+MERGE_PROMPT = """\
+Merge these two sets of topic clusters into a single unified set. \
+Combine clusters with overlapping meaning under one title. A topic can \
+appear in multiple clusters. Aim for at most {max_clusters} clusters. \
+Return ONLY a JSON object mapping cluster titles to lists of member topics.
+
+Set A:
+{clusters_a}
+
+Set B:
+{clusters_b}
+
+Merged JSON:"""
+
+
+@dataclass
+class ExperimentsConfig:
+    input_paths: List[str] = field(default_factory=list)
+    aggregation_model: str = "local"
+    batch_size: int = 80
+    max_clusters: int = 30
+    clustering_prompt: str = field(default_factory=lambda: CLUSTERING_PROMPT)
+    merge_prompt: str = field(default_factory=lambda: MERGE_PROMPT)
+    max_tokens: int = 4096
+    temperature: float = 0.3
+    verbose: bool = False
+
+
 @dataclass
 class CrawlerConfig:
     # Nested model config (all model-related settings)
@@ -255,6 +295,9 @@ class CrawlerConfig:
 
     # Nested prompts config (all prompt templates)
     prompts: PromptsConfig = field(default_factory=PromptsConfig)
+
+    # Nested experiments config (aggregation parameters)
+    experiments: Optional[ExperimentsConfig] = field(default_factory=ExperimentsConfig)
 
     # Hardcoded/static fields (not YAML-driven)
     initial_topics: List[str] = field(default_factory=lambda: INITIAL_TOPICS)
@@ -278,6 +321,8 @@ class CrawlerConfig:
             self.crawler = CrawlerRunConfig(**self.crawler)
         if isinstance(self.prompts, dict):
             self.prompts = PromptsConfig(**self.prompts)
+        if isinstance(self.experiments, dict):
+            self.experiments = ExperimentsConfig(**self.experiments)
 
     # saving
     def to_dict(self):
@@ -288,6 +333,8 @@ class CrawlerConfig:
             d["crawler"] = d["crawler"].__dict__.copy()
         if isinstance(d.get("prompts"), PromptsConfig):
             d["prompts"] = d["prompts"].__dict__.copy()
+        if isinstance(d.get("experiments"), ExperimentsConfig):
+            d["experiments"] = d["experiments"].__dict__.copy()
         return d
 
     def save(self, filename: str):

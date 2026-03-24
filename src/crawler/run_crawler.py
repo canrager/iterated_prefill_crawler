@@ -63,7 +63,9 @@ def main(cfg: DictConfig) -> None:
 
     # Get crawler name
     run_name = get_run_name(crawler_config)
-    crawler_log_filename = os.path.join(INTERIM_DIR, f"{run_name}.json")
+    out_dir = crawler_config.crawler.output_dir or str(INTERIM_DIR)
+    os.makedirs(out_dir, exist_ok=True)
+    crawler_log_filename = os.path.join(out_dir, f"{run_name}.json")
     print(f"Run name: {run_name}")
     print(f"Saving to: {crawler_log_filename}\n\n")
 
@@ -88,7 +90,9 @@ def main(cfg: DictConfig) -> None:
         verbose=cfg.crawler.verbose,
     )
 
-    plot_filename = os.path.join(RESULT_DIR, f"{run_name}.png")
+    plot_dir = crawler_config.crawler.output_dir or str(RESULT_DIR)
+    os.makedirs(plot_dir, exist_ok=True)
+    plot_filename = os.path.join(plot_dir, f"{run_name}.png")
     crawler.stats.visualize_cumulative_topic_count(plot_filename)
 
     # Cleanup

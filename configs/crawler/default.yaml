@@ -18,3 +18,5 @@ prompt_languages:
   - english
   - chinese
 verbose: false
+output_dir: null
+run_tag: null

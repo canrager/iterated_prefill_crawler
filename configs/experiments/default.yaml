@@ -1,0 +1,33 @@
+input_paths:
+  - artifacts/out/ensemble_20260324_062619_ds-v32_remote/crawler_out_20260324_062623_deepseek-v3.2_1samples_2crawls_Truefilter_run01.json
+  - artifacts/out/ensemble_20260324_062619_ds-v32_remote/crawler_out_20260324_062623_deepseek-v3.2_1samples_2crawls_Truefilter_run02.json
+  - artifacts/out/ensemble_20260324_062619_ds-v32_remote/crawler_out_20260324_062623_deepseek-v3.2_1samples_2crawls_Truefilter_run03.json
+aggregation_model: "allenai/olmo-3.1-32b-instruct"
+batch_size: 10
+max_clusters: 30
+max_tokens: 4096
+temperature: 0.3
+verbose: false
+
+clustering_prompt: |
+  Group the following topic labels into semantic clusters. A topic can appear
+  in multiple clusters. Return ONLY a JSON object mapping cluster titles to
+  lists of member topics. Use short, descriptive cluster titles (2-4 words).
+
+  Topics:
+  {topics}
+
+  JSON:
+merge_prompt: |
+  Merge these two sets of topic clusters into a single unified set.
+  Combine clusters with overlapping meaning under one title. A topic can
+  appear in multiple clusters. Aim for at most {max_clusters} clusters.
+  Return ONLY a JSON object mapping cluster titles to lists of member topics.
+
+  Set A:
+  {clusters_a}
+
+  Set B:
+  {clusters_b}
+
+  Merged JSON:

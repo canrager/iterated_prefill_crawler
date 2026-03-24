@@ -2,4 +2,5 @@ defaults:
   - model: local_ds8b
   - crawler: default
   - prompts: default
+  - experiments: default
   - _self_

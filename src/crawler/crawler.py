@@ -264,4 +264,6 @@ def get_run_name(crawler_config: CrawlerConfig):
         f"_{crawler_config.crawler.num_crawl_steps}crawls"
         f"_{crawler_config.crawler.do_filter_refusals}filter"
     )
+    if crawler_config.crawler.run_tag:
+        run_name += f"_{crawler_config.crawler.run_tag}"
     return run_name

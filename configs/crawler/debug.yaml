@@ -17,3 +17,5 @@ max_concurrent_summarizations: 10
 prompt_languages:
   - english
 verbose: true
+output_dir: null
+run_tag: null

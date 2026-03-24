@@ -96,6 +96,25 @@ crawler.num_crawl_steps=10
 ./scripts/run.sh --tmux model=local_tulu8b crawler=default crawler.num_crawl_steps=20
 ```
 
+### Ensemble Runs
+
+To quantify crawl consistency or estimate statistical error, run multiple identical crawlers in parallel and bundle their outputs into a shared folder:
+
+```bash
+./scripts/run_ensemble.sh --num-runs N [--tmux] model=<name> crawler=<name> [overrides...]
+```
+
+This creates `artifacts/out/ensemble_<timestamp>_<model>/` containing all per-run JSON logs, plots, stdout logs, and an `ensemble_meta.json` with the invocation metadata. Each run is tagged (`run01`, `run02`, …) to disambiguate filenames. Since all model roles use the OpenRouter API (no local GPU), runs execute concurrently without contention. The only local model is the CPU-based refusal classifier.
+
+**Examples:**
+
+```bash
+./scripts/run_ensemble.sh --num-runs 5 model=ds-v32_remote crawler=default
+./scripts/run_ensemble.sh --num-runs 3 --tmux model=ds-v32_remote crawler=default crawler.num_crawl_steps=10
+```
+
+Without `--tmux`, the script waits for all runs and reports per-run success/failure. With `--tmux`, each run launches in its own tmux session (`ensemble_<timestamp>_runXX`).
+
 ## How the Crawler Works
 
 1. **Initialization** — `run_crawler.py` loads Hydra config, creates a `CrawlerConfig`, and loads the local vLLM model (if configured). It then creates a `Crawler`, which internally sets up a `TopicQueue`, `PromptBuilder`, and `TopicFormatter`. Seed topics from `config.py` are translated to both English and Chinese and added to the queue as initial refusal topics.
