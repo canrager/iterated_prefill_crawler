@@ -1,5 +1,5 @@
 # Model selection ("local" or openrouter path)
-target_model: "deepseek/deepseek-v3.2"
+target_model: "meta-llama/llama-4-maverick"
 translation_model: "google/gemini-3.1-flash-lite-preview"
 summarization_model: "google/gemini-3.1-flash-lite-preview"
 refusal_check_model: "google/gemini-3.1-flash-lite-preview"

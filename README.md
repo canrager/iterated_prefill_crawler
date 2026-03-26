@@ -96,24 +96,43 @@ crawler.num_crawl_steps=10
 ./scripts/run.sh --tmux model=local_tulu8b crawler=default crawler.num_crawl_steps=20
 ```
 
-### Ensemble Runs
+### Parallel Runs
 
-To quantify crawl consistency or estimate statistical error, run multiple identical crawlers in parallel and bundle their outputs into a shared folder:
+`scripts/run_parallel.sh` supports two modes for launching concurrent crawls:
+
+**Ensemble mode** — run the same config N times (for statistical coverage):
 
 ```bash
-./scripts/run_ensemble.sh --num-runs N [--tmux] model=<name> crawler=<name> [overrides...]
+./scripts/run_parallel.sh --num-runs N [--tmux] model=<name> crawler=<name> [overrides...]
 ```
 
-This creates `artifacts/out/ensemble_<timestamp>_<model>/` containing all per-run JSON logs, plots, stdout logs, and an `ensemble_meta.json` with the invocation metadata. Each run is tagged (`run01`, `run02`, …) to disambiguate filenames. Since all model roles use the OpenRouter API (no local GPU), runs execute concurrently without contention. The only local model is the CPU-based refusal classifier.
+This creates `artifacts/out/ensemble_<timestamp>_<model>/` with per-run JSON logs tagged `run01`, `run02`, etc.
+
+**Multi-model mode** — run different model configs in parallel (for cross-model comparison):
+
+```bash
+./scripts/run_parallel.sh --models "a,b,c" [--tmux] crawler=<name> [overrides...]
+```
+
+This creates `artifacts/out/multi_<timestamp>/` with per-model JSON logs tagged by model config name. Do not pass `model=` in overrides — it is set per-run from the `--models` list.
 
 **Examples:**
 
 ```bash
-./scripts/run_ensemble.sh --num-runs 5 model=ds-v32_remote crawler=default
-./scripts/run_ensemble.sh --num-runs 3 --tmux model=ds-v32_remote crawler=default crawler.num_crawl_steps=10
+# Ensemble
+./scripts/run_parallel.sh --num-runs 5 model=ds-v32_remote crawler=default
+./scripts/run_parallel.sh --num-runs 3 --tmux model=ds-v32_remote crawler=default crawler.num_crawl_steps=10
+
+# Multi-model
+./scripts/run_parallel.sh --models "ds-r1_remote,sonnet-45_remote,grok-41_remote" crawler=default
+./scripts/run_parallel.sh --models "ds-r1_remote,sonnet-45_remote" --tmux crawler=default
 ```
 
-Without `--tmux`, the script waits for all runs and reports per-run success/failure. With `--tmux`, each run launches in its own tmux session (`ensemble_<timestamp>_runXX`).
+Without `--tmux`, the script waits for all runs and reports per-run success/failure. With `--tmux`, each run launches in its own tmux session. Kill running sessions with:
+
+```bash
+./scripts/run_parallel.sh --kill <timestamp_or_dir>
+```
 
 ## How the Crawler Works
 

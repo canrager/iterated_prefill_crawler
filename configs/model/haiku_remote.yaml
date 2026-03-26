@@ -1,8 +1,8 @@
 # Model selection ("local" or openrouter path)
 target_model: "anthropic/claude-3.5-haiku"
 translation_model: "google/gemini-3.1-flash-lite-preview"
-summarization_model: "allenai/olmo-3.1-32b-instruct"
-refusal_check_model: "allenai/olmo-3.1-32b-instruct"
+summarization_model: "google/gemini-3.1-flash-lite-preview"
+refusal_check_model: "google/gemini-3.1-flash-lite-preview"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 
 # Local model config — set to null for API-only (no GPU) runs.
