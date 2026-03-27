@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import Dict, List, Optional, Union
 import asyncio
 import os
 
@@ -11,15 +11,23 @@ async def async_query_openrouter(
     verbose: bool = False,
     max_tokens: int = 10000,
     temperature: float = 1.0,
+    client_kwargs: Optional[Dict] = None,
 ) -> str:
-    """Query any model via the OpenRouter API (OpenAI-compatible)."""
+    """Query any model via an OpenAI-compatible API.
+
+    By default routes to OpenRouter.  Pass *client_kwargs* (with ``api_key``
+    and ``base_url``) to target a different provider.
+    """
     from openai import AsyncOpenAI
 
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1",
-    )
+    if client_kwargs is not None:
+        client = AsyncOpenAI(**client_kwargs)
+    else:
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
 
     messages = []
     if system_prompt:
@@ -63,16 +71,19 @@ def query_llm_api(
     system_prompt: str = "",
     verbose: bool = False,
     max_tokens: int = 10000,
+    client_kwargs: Optional[Dict] = None,
 ) -> Union[str, List[str]]:
-    """Synchronous wrapper: query OpenRouter with one prompt or a batch.
+    """Synchronous wrapper: query an OpenAI-compatible API with one prompt or a batch.
 
     Args:
-        model_name: OpenRouter model ID, e.g. "openai/gpt-4o-mini"
+        model_name: Model ID, e.g. "openai/gpt-4o-mini"
         prompt: Single prompt string or list of prompts for concurrent processing
         assistant_prefill: Optional text to prefill the assistant turn
         system_prompt: Optional system prompt
         verbose: Print request/response details
         max_tokens: Maximum tokens to generate
+        client_kwargs: Optional dict with ``api_key`` and ``base_url`` for the
+            OpenAI client.  When *None* defaults to OpenRouter.
 
     Returns:
         Single response string if prompt is a string, list of responses otherwise
@@ -89,6 +100,7 @@ def query_llm_api(
                 system_prompt=system_prompt,
                 verbose=verbose,
                 max_tokens=max_tokens,
+                client_kwargs=client_kwargs,
             )
             for p in prompts
         ]

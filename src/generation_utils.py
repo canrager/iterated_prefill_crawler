@@ -24,6 +24,7 @@ from src.openrouter_utils import (  # re-exported for backward compatibility
     async_query_openrouter,
     query_llm_api,
 )
+from src.provider_config import get_provider_client_kwargs
 from src.tokenization_utils import encode_for_generation
 
 
@@ -97,7 +98,7 @@ async def _async_openrouter_single(
     max_new_tokens: int,
     temperature: float,
 ) -> str:
-    """Send a single chat conversation to OpenRouter and return the response text."""
+    """Send a single chat conversation to an OpenAI-compatible API and return the response text."""
     from openai import APIStatusError
 
     # Guard: OpenRouter returns HTTP 400 "Input must have at least 1 token" when
@@ -141,25 +142,29 @@ def _openrouter_batch_generate(
     max_new_tokens: int,
     temperature: float,
     verbose: bool = False,
+    default_provider: str = "openrouter",
+    provider_url_overrides: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[str], List[str]]:
-    """Send a batch of chat conversations to OpenRouter concurrently.
+    """Send a batch of chat conversations to an OpenAI-compatible API concurrently.
+
+    The *model_name* may include a ``provider:`` prefix (e.g.
+    ``openai:gpt-4o``).  When absent the *default_provider* is used.
 
     Returns:
         Tuple of (generated_texts, input_strs) where input_strs are reconstructed from messages.
     """
-    import os
-
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(
-        api_key=os.environ.get("OPENROUTER_API_KEY"),
-        base_url="https://openrouter.ai/api/v1",
+    resolved_model_id, client_kwargs = get_provider_client_kwargs(
+        model_name, default_provider, provider_url_overrides,
     )
+
+    client = AsyncOpenAI(**client_kwargs)
 
     async def _run():
         tasks = [
             _async_openrouter_single(
-                client, model_name, msg_list, max_new_tokens, temperature
+                client, resolved_model_id, msg_list, max_new_tokens, temperature
             )
             for msg_list in messages
         ]
@@ -187,23 +192,28 @@ def batch_generate(
     temperature: float = 0.6,
     verbose: bool = False,
     skip_special_tokens: bool = False,
+    default_provider: str = "openrouter",
+    provider_url_overrides: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[str], List[str]]:
     """Generate text from a list of message dicts.
 
-    Dispatches to OpenRouter (async) when model is a str, or vLLM when model is an LLM instance.
+    Dispatches to an OpenAI-compatible API when *model* is a ``str``, or to
+    vLLM when *model* is an ``LLM`` instance.
+
+    The model string may include a ``provider:`` prefix (e.g.
+    ``openai:gpt-4o``, ``ollama:llama3``).  When absent the
+    *default_provider* is used (defaults to ``"openrouter"``).
 
     Args:
-        model: vLLM LLM instance, or OpenRouter model ID string
+        model: vLLM LLM instance, or model ID string (with optional provider prefix)
         tokenizer: HuggingFace tokenizer (ignored when model is a str)
         messages: List of message lists, each in OpenAI chat format.
-                  Each inner list has at most two messages:
-                  - [{"role":"user","content":...}]
-                  - [{"role":"user","content":...}, {"role":"assistant","content":...}]
-                  The assistant content is used as prefill.
         max_new_tokens: Maximum new tokens to generate
         temperature: Sampling temperature (None → greedy)
         verbose: Print input/output pairs
         skip_special_tokens: Skip special tokens when decoding outputs
+        default_provider: Fallback provider when model string has no prefix
+        provider_url_overrides: Optional ``{provider: url}`` overrides
 
     Returns:
         Tuple of (generated_texts, input_strs)
@@ -215,6 +225,8 @@ def batch_generate(
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             verbose=verbose,
+            default_provider=default_provider,
+            provider_url_overrides=provider_url_overrides,
         )
 
     input_ids, input_strs = encode_for_generation(
@@ -247,6 +259,7 @@ async def async_summarize_single_topic(
     llm_judge_name: str,
     system_prompt: str,
     verbose: bool = False,
+    client_kwargs: Optional[Dict] = None,
 ) -> Tuple[str, Optional[str], Optional[str]]:
     """
     Async function to summarize a single topic.
@@ -282,6 +295,7 @@ Output:"""
             system_prompt=system_prompt,
             prompt=content_prompt,
             verbose=verbose,
+            client_kwargs=client_kwargs,
         )
         summary = summary.strip()
 
@@ -303,6 +317,7 @@ async def async_batch_summarize_topics(
     system_prompt: str,
     max_concurrent: int = 10,
     verbose: bool = False,
+    client_kwargs: Optional[Dict] = None,
 ) -> List[Tuple[str, Optional[str], Optional[str]]]:
     """
     Batch summarize multiple topics concurrently with rate limiting.
@@ -313,6 +328,7 @@ async def async_batch_summarize_topics(
         system_prompt: System prompt for the LLM
         max_concurrent: Maximum number of concurrent requests
         verbose: Whether to print debug information
+        client_kwargs: Optional dict with ``api_key`` and ``base_url``
 
     Returns:
         List of tuples: (topic_raw, summary, error_message)
@@ -323,7 +339,8 @@ async def async_batch_summarize_topics(
     async def rate_limited_summarize(topic_raw: str):
         async with semaphore:
             return await async_summarize_single_topic(
-                topic_raw, llm_judge_name, system_prompt, verbose
+                topic_raw, llm_judge_name, system_prompt, verbose,
+                client_kwargs=client_kwargs,
             )
 
     # Create tasks for all topics

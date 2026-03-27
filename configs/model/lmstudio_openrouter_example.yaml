@@ -1,0 +1,30 @@
+# LM Studio for topic generation, OpenRouter for evaluation
+#
+# Run a local model via LM Studio for topic crawling, use OpenRouter
+# for the auxiliary roles (translation, summarization, refusal checks).
+#
+# Prerequisites:
+#   - LM Studio running at localhost:1234 with a model loaded
+#   - OPENROUTER_API_KEY set in environment
+#
+# Usage:
+#   ./scripts/run.sh model=lmstudio_openrouter_example crawler=default
+
+default_provider: "openrouter"
+
+# Topic generation via LM Studio
+target_model: "lmstudio:deepseek-r1-distill-llama-8b"
+
+# Auxiliary roles via OpenRouter (default, no prefix needed)
+translation_model: "google/gemini-3.1-flash-lite-preview"
+summarization_model: "google/gemini-3.1-flash-lite-preview"
+refusal_check_model: "google/gemini-3.1-flash-lite-preview"
+refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
+
+# No local vLLM GPU needed (LM Studio manages its own inference)
+local_model: null
+device: "cpu"
+cache_dir: "hf_models"
+vllm_tensor_parallel_size: 1
+vllm_gpu_memory_utilization: 0.8
+vllm_max_model_len: 1000

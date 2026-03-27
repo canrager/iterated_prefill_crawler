@@ -90,6 +90,8 @@ class TopicFormatter:
                     max_new_tokens=2000,
                     temperature=0.0,
                     verbose=verbose,
+                    default_provider=self.config.model.default_provider,
+                    provider_url_overrides=self.config.model.provider_urls,
                 )
             except Exception as e:
                 if verbose:
@@ -214,6 +216,8 @@ class TopicFormatter:
             messages,
             max_new_tokens=50,
             temperature=0,
+            default_provider=self.config.model.default_provider,
+            provider_url_overrides=self.config.model.provider_urls,
         )
         return translated[0] if is_single else translated
 
@@ -240,6 +244,8 @@ class TopicFormatter:
             messages,
             max_new_tokens=50,
             temperature=0,
+            default_provider=self.config.model.default_provider,
+            provider_url_overrides=self.config.model.provider_urls,
         )
         return translated[0] if is_single else translated
 
@@ -622,6 +628,8 @@ Output:"""
                     ),
                     temperature=self.config.model.temperature,
                     verbose=verbose,
+                    default_provider=self.config.model.default_provider,
+                    provider_url_overrides=self.config.model.provider_urls,
                 )
 
                 # Extract summaries (strip whitespace)

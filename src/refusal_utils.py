@@ -29,6 +29,8 @@ def llm_judge_refusals(
     tokenizer,
     max_tokens=10,
     queries: Optional[List[str]] = None,
+    default_provider: str = "openrouter",
+    provider_url_overrides=None,
 ) -> List[bool]:
     if not texts:
         return []
@@ -45,7 +47,9 @@ def llm_judge_refusals(
             )
     messages = [[{"role": "user", "content": p}] for p in judge_prompts]
     answers, _ = batch_generate(
-        model, tokenizer, messages, max_new_tokens=max_tokens, temperature=0.0
+        model, tokenizer, messages, max_new_tokens=max_tokens, temperature=0.0,
+        default_provider=default_provider,
+        provider_url_overrides=provider_url_overrides,
     )
 
     results = []
@@ -123,6 +127,8 @@ def _translate_for_classifier(
     indices: List[int],
     translation_model,
     translation_tokenizer,
+    default_provider: str = "openrouter",
+    provider_url_overrides=None,
 ) -> List[str]:
     """Translate Chinese texts to English for the classifier. Non-Chinese texts pass through."""
     if translation_model is None:
@@ -143,6 +149,8 @@ def _translate_for_classifier(
         translate_messages,
         max_new_tokens=200,
         temperature=0.0,
+        default_provider=default_provider,
+        provider_url_overrides=provider_url_overrides,
     )
 
     result = list(texts)
@@ -163,6 +171,9 @@ def check_refusals_cascade(
 ) -> List[bool]:
     if not texts:
         return []
+
+    default_provider = config.model.default_provider
+    provider_url_overrides = config.model.provider_urls
 
     refusals = []
     texts_for_classifier = []
@@ -185,6 +196,8 @@ def check_refusals_cascade(
             indices_for_classifier,
             translation_model,
             translation_tokenizer,
+            default_provider=default_provider,
+            provider_url_overrides=provider_url_overrides,
         )
 
     texts_for_llm = []
@@ -214,6 +227,8 @@ def check_refusals_cascade(
         llm_results = llm_judge_refusals(
             texts_for_llm, refusal_model, refusal_tokenizer,
             queries=queries_for_llm,
+            default_provider=default_provider,
+            provider_url_overrides=provider_url_overrides,
         )
         for i, result in zip(indices_for_llm, llm_results):
             refusals[i] = result
@@ -242,6 +257,9 @@ def check_refusal(
     translation_model, translation_tokenizer = _resolve_model(
         config, "translation", local_model, local_tokenizer
     )
+
+    default_provider = config.model.default_provider
+    provider_url_overrides = config.model.provider_urls
 
     num_checks = config.crawler.num_refusal_checks_per_topic
     threshold = config.crawler.is_refusal_threshold
@@ -273,6 +291,8 @@ def check_refusal(
         ),
         temperature=1,
         verbose=verbose,
+        default_provider=default_provider,
+        provider_url_overrides=provider_url_overrides,
     )
 
     # Remove thinking context from queries if present
@@ -382,6 +402,8 @@ def check_refusal(
             answer_messages,
             max_new_tokens=config.crawler.max_refusal_check_generated_tokens,
             temperature=config.model.temperature,
+            default_provider=default_provider,
+            provider_url_overrides=provider_url_overrides,
         )
 
         # Step 4: Process answer refusals
