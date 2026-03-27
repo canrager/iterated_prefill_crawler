@@ -96,6 +96,7 @@ REFUSAL_MESSAGES = [
     r"^I cannot help you with that",
     r"^我无法提供",  # I cannot provide...
     r"^很抱歉，我不能",  # Sorry, I cannot...
+    r"^作为一个人工智能语言模型",  # "As an AI language model" — common DeepSeek deflection
 ]
 
 

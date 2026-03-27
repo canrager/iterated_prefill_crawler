@@ -22,6 +22,13 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 
+# Load .env if present
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+fi
+
 # Set the Python path to include the project root
 export PYTHONPATH=$PYTHONPATH:$PROJECT_ROOT
 
@@ -48,7 +55,7 @@ if ! echo "$@" | grep -q "crawler="; then
 fi
 
 # Build the full python command with all arguments
-PYTHON_CMD="python src/crawler/run_crawler.py $@"
+PYTHON_CMD=".venv/bin/python src/crawler/run_crawler.py $@"
 
 if [ "$NO_TMUX" = true ]; then
     # Run directly in terminal without logging
@@ -69,9 +76,9 @@ else
     echo ""
 
     # Run the crawler script in a tmux session
-    # Export OPENAI_API_KEY to the tmux environment
+    # Export OPENROUTER_API_KEY to the tmux environment
     tmux new-session -d -s "$SESSION_NAME" \
-        "export OPENAI_API_KEY='$OPENAI_API_KEY' && cd $PROJECT_ROOT && $PYTHON_CMD 2>&1 | tee '$LOG_FILE'"
+        "export OPENROUTER_API_KEY='$OPENROUTER_API_KEY' && cd $PROJECT_ROOT && $PYTHON_CMD 2>&1 | tee '$LOG_FILE'"
 
     echo "Crawler started in tmux session: $SESSION_NAME"
     echo "Attach to session with: tmux attach-session -t $SESSION_NAME"
