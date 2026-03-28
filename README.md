@@ -295,6 +295,8 @@ To point a provider at a non-default host (e.g. Ollama on a remote GPU box), use
 ```yaml
 provider_urls:
   ollama: "http://my-gpu-server:11434/v1"
+  # or override the port, e.g. with transformers serve
+  lmstudio: "http://localhost:8000/v1"
 ```
 
 #### Using Ollama / LM Studio / vLLM serve
@@ -304,31 +306,21 @@ Start your local server before running the crawler:
 ```bash
 # Ollama (default port 11434)
 ollama serve                              # default: http://localhost:11434
-ollama serve --port 8000                  # custom port
 
 # LM Studio (default port 1234)
 # Start from the LM Studio GUI, or via CLI:
 lms server start                          # default: http://localhost:1234
-lms server start --port 8000              # custom port
 
 # vLLM serve (OpenAI-compatible server)
 python -m vllm.entrypoints.openai.api_server \
     --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
-    --port 8000
+    --port 1234
 
 # transformers serve (Hugging Face inference server, experimental)
 transformers serve deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
-    --port 8000
+    --port 1234
 ```
 
-When using a non-default port, override the provider URL in your YAML config:
-
-```yaml
-provider_urls:
-  ollama: "http://localhost:8000/v1"
-  # or for a remote vLLM/transformers server:
-  lmstudio: "http://my-server:8000/v1"
-```
 
 Any OpenAI-compatible server works — just pick a provider prefix (`ollama:`, `lmstudio:`, etc.) and point its URL at your server.
 
