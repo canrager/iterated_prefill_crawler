@@ -17,6 +17,7 @@ class _SuppressEventLoopClosed(logging.Filter):
 logging.getLogger("asyncio").addFilter(_SuppressEventLoopClosed())
 
 from src.directory_config import INPUT_DIR
+from src.transcript_logger import log_model_call
 from src.openrouter_utils import (  # re-exported for backward compatibility
     async_query_llm_api,
     async_query_openrouter,
@@ -182,6 +183,16 @@ def _api_batch_generate(
 
     texts = asyncio.run(_run())
 
+    log_model_call(
+        call_type="batch_generate_api",
+        model=resolved_model_id,
+        inputs=messages,
+        outputs=texts,
+        temperature=temperature,
+        max_tokens=max_new_tokens,
+        batch_size=len(messages),
+    )
+
     # Reconstruct input_strs from messages (join all content fields)
     input_strs = [" ".join(m["content"] for m in msg_list) for msg_list in messages]
 
@@ -253,6 +264,16 @@ def batch_generate(
         temperature=temperature,
         skip_special_tokens=skip_special_tokens,
         verbose=False,
+    )
+
+    log_model_call(
+        call_type="batch_generate_vllm",
+        model=getattr(model, "model", "vllm_local"),
+        inputs=input_strs,
+        outputs=generated_texts,
+        temperature=temperature,
+        max_tokens=max_new_tokens,
+        batch_size=len(messages),
     )
 
     if verbose:

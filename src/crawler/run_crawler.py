@@ -69,6 +69,11 @@ def main(cfg: DictConfig) -> None:
 
     # Get crawler name
     run_name = get_run_name(crawler_config)
+
+    from src.transcript_logger import init_transcript_log
+    transcript_path = init_transcript_log(run_name)
+    print(f"Transcript log: {transcript_path}")
+
     out_dir = crawler_config.crawler.output_dir or str(INTERIM_DIR)
     os.makedirs(out_dir, exist_ok=True)
     crawler_log_filename = os.path.join(out_dir, f"{run_name}.json")

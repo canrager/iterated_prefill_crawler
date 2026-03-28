@@ -2,6 +2,8 @@ from typing import Dict, List, Optional, Union
 import asyncio
 import os
 
+from src.transcript_logger import log_model_call
+
 
 async def async_query_openrouter(
     model_name: str,
@@ -49,6 +51,14 @@ async def async_query_openrouter(
             temperature=temperature,
         )
         response = completion.choices[0].message.content or ""
+        log_model_call(
+            call_type="async_query_openrouter",
+            model=model_name,
+            inputs=messages,
+            outputs=response,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
         if verbose:
             print(f"API response ({model_name}):\n{response}")
         return response
