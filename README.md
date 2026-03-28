@@ -25,6 +25,7 @@ Set API keys for the providers you plan to use (only the ones referenced in your
 ```bash
 export OPENROUTER_API_KEY=your_key_here   # for OpenRouter models (default provider)
 export OPENAI_API_KEY=your_key_here       # for openai:-prefixed models
+export GEMINI_API_KEY=your_key_here       # for gemini:-prefixed models (Google AI Studio)
 # Ollama and LM Studio run locally and don't need API keys
 ```
 
@@ -243,13 +244,14 @@ The Crawler analyzes refusal behavior of a `target_model` and uses an LM to do a
 
 Each model role can be set to `"local"` (uses the vLLM-served `local_model`) or to a remote model string that routes through an OpenAI-compatible API. Model strings support a `provider:model_id` prefix to target specific providers:
 
-| Prefix        | Provider   | Default base URL                    | API key env var      |
-| ------------- | ---------- | ----------------------------------- | -------------------- |
-| `openrouter:` | OpenRouter | `https://openrouter.ai/api/v1`     | `OPENROUTER_API_KEY` |
-| `openai:`     | OpenAI     | `https://api.openai.com/v1`        | `OPENAI_API_KEY`     |
-| `ollama:`     | Ollama     | `http://localhost:11434/v1`         | *(none)*             |
-| `lmstudio:`   | LM Studio  | `http://localhost:1234/v1`          | *(none)*             |
-| *(no prefix)* | default    | depends on `model.default_provider` | *(varies)*           |
+| Prefix        | Provider   | Default base URL                                            | API key env var      |
+| ------------- | ---------- | ----------------------------------------------------------- | -------------------- |
+| `openrouter:` | OpenRouter | `https://openrouter.ai/api/v1`                              | `OPENROUTER_API_KEY` |
+| `openai:`     | OpenAI     | `https://api.openai.com/v1`                                 | `OPENAI_API_KEY`     |
+| `gemini:`     | Gemini     | `https://generativelanguage.googleapis.com/v1beta/openai/`  | `GEMINI_API_KEY`     |
+| `ollama:`     | Ollama     | `http://localhost:11434/v1`                                  | *(none)*             |
+| `lmstudio:`   | LM Studio  | `http://localhost:1234/v1`                                   | *(none)*             |
+| *(no prefix)* | default    | depends on `model.default_provider`                          | *(varies)*           |
 
 When no prefix is given, the model string is routed to `model.default_provider` (defaults to `"openrouter"`).
 

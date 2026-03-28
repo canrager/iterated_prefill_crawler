@@ -1,10 +1,8 @@
 """Tests for the multi-provider routing module."""
 
-import os
 import pytest
 
 from src.provider_config import (
-    BUILTIN_PROVIDERS,
     collect_required_api_keys,
     get_provider_client_kwargs,
     parse_model_string,
@@ -54,6 +52,11 @@ class TestParseModelString:
             "unknown:some-model",
         )
 
+    def test_gemini_prefix(self):
+        assert parse_model_string("gemini:gemini-2.0-flash") == (
+            "gemini", "gemini-2.0-flash"
+        )
+
     def test_case_insensitive_prefix(self):
         assert parse_model_string("OpenAI:gpt-4o") == ("openai", "gpt-4o")
 
@@ -83,6 +86,17 @@ class TestResolveProvider:
         base_url, api_key = resolve_provider("openai")
         assert base_url == "https://api.openai.com/v1"
         assert api_key == "sk-test"
+
+    def test_gemini_with_key(self, monkeypatch):
+        monkeypatch.setenv("GEMINI_API_KEY", "gem-test")
+        base_url, api_key = resolve_provider("gemini")
+        assert base_url == "https://generativelanguage.googleapis.com/v1beta/openai/"
+        assert api_key == "gem-test"
+
+    def test_gemini_needs_key(self, monkeypatch):
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+            resolve_provider("gemini")
 
     def test_ollama_no_key_needed(self, monkeypatch):
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
@@ -179,6 +193,12 @@ class TestCollectRequiredApiKeys:
         assert "openrouter" not in missing
         assert "ollama" not in missing
 
+    def test_gemini_missing(self, monkeypatch):
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        missing = collect_required_api_keys(["gemini:gemini-2.0-flash"])
+        assert "gemini" in missing
+        assert missing["gemini"] == "GEMINI_API_KEY"
+
     def test_all_keys_present(self, monkeypatch):
         monkeypatch.setenv("OPENROUTER_API_KEY", "ok")
         monkeypatch.setenv("OPENAI_API_KEY", "ok")
@@ -187,3 +207,91 @@ class TestCollectRequiredApiKeys:
             "openai:gpt-4o",
         ])
         assert missing == {}
+
+
+# ---------------------------------------------------------------------------
+# Integration: batch_generate resolves provider prefix correctly
+# ---------------------------------------------------------------------------
+
+try:
+    import openai  # noqa: F401
+    _has_openai = True
+except ImportError:
+    _has_openai = False
+
+
+@pytest.mark.skipif(not _has_openai, reason="openai package not installed")
+class TestBatchGenerateProviderRouting:
+    """Verify that batch_generate passes the resolved model ID and base URL
+    to the OpenAI client when given a provider-prefixed model string."""
+
+    @staticmethod
+    def _make_fake_client_class(captured):
+        """Build a FakeClient that records constructor kwargs and returns canned responses."""
+
+        class FakeChoice:
+            def __init__(self, text):
+                self.message = type("M", (), {"content": text})()
+
+        class FakeCompletions:
+            async def create(self, **kwargs):
+                captured["model"] = kwargs.get("model")
+                return type("R", (), {"choices": [FakeChoice(captured.get("reply", "ok"))]})()
+
+        class FakeClient:
+            def __init__(self, **kwargs):
+                captured["api_key"] = kwargs.get("api_key")
+                captured["base_url"] = kwargs.get("base_url")
+            chat = type("C", (), {"completions": FakeCompletions()})()
+
+        return FakeClient
+
+    def test_provider_prefix_resolves_for_api_call(self, monkeypatch):
+        """openai:gpt-4o should hit api.openai.com with model_id='gpt-4o'."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+        captured = {"reply": "hello"}
+        FakeClient = self._make_fake_client_class(captured)
+
+        import openai as openai_mod
+        monkeypatch.setattr(openai_mod, "AsyncOpenAI", FakeClient)
+
+        from src.generation_utils import _api_batch_generate
+
+        messages = [[{"role": "user", "content": "hi"}]]
+        texts, _ = _api_batch_generate(
+            model_name="openai:gpt-4o",
+            messages=messages,
+            max_new_tokens=10,
+            temperature=0.0,
+        )
+
+        assert captured["model"] == "gpt-4o"
+        assert captured["base_url"] == "https://api.openai.com/v1"
+        assert captured["api_key"] == "sk-test"
+        assert texts == ["hello"]
+
+    def test_gemini_prefix_resolves(self, monkeypatch):
+        """gemini:gemini-2.0-flash should hit Google's OpenAI-compat endpoint."""
+        monkeypatch.setenv("GEMINI_API_KEY", "gem-key")
+
+        captured = {"reply": "world"}
+        FakeClient = self._make_fake_client_class(captured)
+
+        import openai as openai_mod
+        monkeypatch.setattr(openai_mod, "AsyncOpenAI", FakeClient)
+
+        from src.generation_utils import _api_batch_generate
+
+        messages = [[{"role": "user", "content": "hi"}]]
+        texts, _ = _api_batch_generate(
+            model_name="gemini:gemini-2.0-flash",
+            messages=messages,
+            max_new_tokens=10,
+            temperature=0.0,
+        )
+
+        assert captured["model"] == "gemini-2.0-flash"
+        assert captured["base_url"] == "https://generativelanguage.googleapis.com/v1beta/openai/"
+        assert captured["api_key"] == "gem-key"
+        assert texts == ["world"]

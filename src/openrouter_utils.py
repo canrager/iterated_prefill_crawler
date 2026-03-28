@@ -76,14 +76,18 @@ def query_llm_api(
     """Synchronous wrapper: query an OpenAI-compatible API with one prompt or a batch.
 
     Args:
-        model_name: Model ID, e.g. "openai/gpt-4o-mini"
+        model_name: Model ID, e.g. ``"gpt-4o-mini"``.  When using the default
+            OpenRouter backend you may also pass OpenRouter-style IDs like
+            ``"openai/gpt-4o-mini"``.  Provider routing (``"openai:gpt-4o"``)
+            is handled upstream by ``batch_generate`` / ``get_provider_client_kwargs``.
         prompt: Single prompt string or list of prompts for concurrent processing
         assistant_prefill: Optional text to prefill the assistant turn
         system_prompt: Optional system prompt
         verbose: Print request/response details
         max_tokens: Maximum tokens to generate
         client_kwargs: Optional dict with ``api_key`` and ``base_url`` for the
-            OpenAI client.  When *None* defaults to OpenRouter.
+            OpenAI-compatible client.  When *None*, defaults to OpenRouter
+            (``OPENROUTER_API_KEY`` and ``https://openrouter.ai/api/v1``).
 
     Returns:
         Single response string if prompt is a string, list of responses otherwise

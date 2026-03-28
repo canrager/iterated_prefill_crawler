@@ -6,10 +6,11 @@ model is routed to the **default provider** (OpenRouter unless overridden in
 
 Supported providers and their default base URLs:
 
-    openrouter  → https://openrouter.ai/api/v1   (env: OPENROUTER_API_KEY)
-    openai      → https://api.openai.com/v1       (env: OPENAI_API_KEY)
-    ollama      → http://localhost:11434/v1        (env: —, no key needed)
-    lmstudio    → http://localhost:1234/v1         (env: —, no key needed)
+    openrouter  → https://openrouter.ai/api/v1                              (env: OPENROUTER_API_KEY)
+    openai      → https://api.openai.com/v1                                  (env: OPENAI_API_KEY)
+    gemini      → https://generativelanguage.googleapis.com/v1beta/openai/   (env: GEMINI_API_KEY)
+    ollama      → http://localhost:11434/v1                                   (env: —, no key needed)
+    lmstudio    → http://localhost:1234/v1                                    (env: —, no key needed)
 
 Base URLs can be overridden per-provider via ``ModelConfig.provider_urls``.
 """
@@ -42,6 +43,10 @@ BUILTIN_PROVIDERS: Dict[str, ProviderInfo] = {
         base_url="https://api.openai.com/v1",
         env_key="OPENAI_API_KEY",
     ),
+    "gemini": ProviderInfo(
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        env_key="GEMINI_API_KEY",
+    ),
     "ollama": ProviderInfo(
         base_url="http://localhost:11434/v1",
         env_key=None,
@@ -69,11 +74,12 @@ def parse_model_string(
 
     Examples::
 
-        "openai:gpt-4o"           → ("openai",      "gpt-4o")
-        "ollama:llama3"            → ("ollama",      "llama3")
-        "lmstudio:deepseek-r1"    → ("lmstudio",    "deepseek-r1")
-        "anthropic/claude-3.5-haiku"  → ("openrouter", "anthropic/claude-3.5-haiku")
-        "gpt-4o"                   → ("openrouter",  "gpt-4o")
+        "openai:gpt-4o"                   → ("openai",      "gpt-4o")
+        "gemini:gemini-2.0-flash"         → ("gemini",      "gemini-2.0-flash")
+        "ollama:llama3"                    → ("ollama",      "llama3")
+        "lmstudio:deepseek-r1"            → ("lmstudio",    "deepseek-r1")
+        "anthropic/claude-3.5-haiku"      → ("openrouter",  "anthropic/claude-3.5-haiku")
+        "gpt-4o"                           → ("openrouter",  "gpt-4o")
 
     The colon delimiter is only recognised when the left-hand side matches a
     known provider name so that model IDs containing colons (rare but possible)
@@ -133,7 +139,7 @@ def get_provider_client_kwargs(
     model_str: str,
     default_provider: str = DEFAULT_PROVIDER,
     provider_url_overrides: Optional[Dict[str, str]] = None,
-) -> Tuple[str, Dict]:
+) -> Tuple[str, Dict[str, str]]:
     """High-level helper: parse a model string and return the model ID plus
     keyword arguments suitable for ``openai.AsyncOpenAI(**kwargs)``.
 
