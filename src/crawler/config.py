@@ -203,6 +203,15 @@ class ModelConfig:
     )
     temperature: float = 0.6
 
+    # --- Multi-provider settings ---
+    # Default provider when model strings have no ``provider:`` prefix.
+    # Supported: "openrouter" (default), "openai", "ollama", "lmstudio", "gemini"
+    default_provider: str = "openrouter"
+    # Optional per-provider base-URL overrides, e.g.
+    #   provider_urls:
+    #     ollama: "http://my-gpu-box:11434/v1"
+    provider_urls: Optional[Dict[str, str]] = None
+
 
 @dataclass
 class CrawlerRunConfig:

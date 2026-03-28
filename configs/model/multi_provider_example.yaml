@@ -1,0 +1,32 @@
+# Multi-provider example: OpenRouter for topic generation, OpenAI for evaluation
+#
+# Model strings use "provider:model_id" syntax.  Supported providers:
+#   openrouter  (default) → https://openrouter.ai/api/v1   env: OPENROUTER_API_KEY
+#   openai                → https://api.openai.com/v1       env: OPENAI_API_KEY
+#   ollama                → http://localhost:11434/v1        (no key)
+#   lmstudio              → http://localhost:1234/v1         (no key)
+#
+# When no "provider:" prefix is given, the default_provider is used.
+#
+# Usage:
+#   ./scripts/run.sh model=multi_provider_example crawler=default
+
+# Default provider for unprefixed model strings
+default_provider: "openrouter"
+
+# Topic generation via OpenRouter (no prefix needed since it's the default)
+target_model: "anthropic/claude-3.5-haiku"
+
+# Auxiliary roles via OpenAI
+translation_model: "openai:gpt-4o-mini"
+summarization_model: "openai:gpt-4o-mini"
+refusal_check_model: "openai:gpt-4o-mini"
+refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
+
+# No local GPU needed
+local_model: null
+device: "cpu"
+cache_dir: "hf_models"
+vllm_tensor_parallel_size: 1
+vllm_gpu_memory_utilization: 0.8
+vllm_max_model_len: 1000

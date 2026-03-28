@@ -1,0 +1,34 @@
+# Ollama for topic generation, OpenAI for evaluation
+#
+# Run a local model via Ollama (or LM Studio) for cheap/fast topic crawling,
+# then use OpenAI for the higher-accuracy refusal evaluation judge.
+#
+# Prerequisites:
+#   - Ollama running at localhost:11434 with the model pulled
+#   - OPENAI_API_KEY set in environment
+#
+# Usage:
+#   ./scripts/run.sh model=ollama_openai_example crawler=default
+
+default_provider: "openrouter"
+
+# Topic generation via local Ollama
+target_model: "ollama:llama3"
+
+# Auxiliary roles via OpenAI
+translation_model: "openai:gpt-4o-mini"
+summarization_model: "openai:gpt-4o-mini"
+refusal_check_model: "openai:gpt-4o-mini"
+refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
+
+# No local vLLM GPU needed (Ollama manages its own inference)
+local_model: null
+device: "cpu"
+cache_dir: "hf_models"
+vllm_tensor_parallel_size: 1
+vllm_gpu_memory_utilization: 0.8
+vllm_max_model_len: 1000
+
+# Optional: override provider URLs (e.g. Ollama on a remote box)
+# provider_urls:
+#   ollama: "http://my-gpu-server:11434/v1"

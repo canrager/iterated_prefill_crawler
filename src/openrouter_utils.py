@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import Dict, List, Optional, Union
 import asyncio
 import os
 
@@ -11,15 +11,25 @@ async def async_query_openrouter(
     verbose: bool = False,
     max_tokens: int = 10000,
     temperature: float = 1.0,
+    client_kwargs: Optional[Dict] = None,
 ) -> str:
-    """Query any model via the OpenRouter API (OpenAI-compatible)."""
-    from openai import AsyncOpenAI
+    """Query any model via an OpenAI-compatible API.
 
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1",
-    )
+    By default routes to OpenRouter.  Pass *client_kwargs* (with ``api_key``
+    and ``base_url``) to target a different provider.
+    """
+    from openai import APIStatusError, AsyncOpenAI
+
+    # Let the SDK handle retries (429/5xx) with exponential backoff.
+    if client_kwargs is not None:
+        client = AsyncOpenAI(**client_kwargs, max_retries=4)
+    else:
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            max_retries=4,
+        )
 
     messages = []
     if system_prompt:
@@ -29,27 +39,27 @@ async def async_query_openrouter(
         messages.append({"role": "assistant", "content": assistant_prefill.strip()})
 
     if verbose:
-        print(f"OpenRouter request: model={model_name}, messages={messages}")
+        print(f"API request: model={model_name}, messages={messages}")
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            completion = await client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-            response = completion.choices[0].message.content
-            if verbose:
-                print(f"OpenRouter response:\n{response}")
-            return response
-        except Exception as e:
-            print(f"OpenRouter API error: {e}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(5)
-
-    return ""
+    try:
+        completion = await client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        response = completion.choices[0].message.content or ""
+        if verbose:
+            print(f"API response ({model_name}):\n{response}")
+        return response
+    except APIStatusError as e:
+        if e.status_code in (401, 403):
+            raise
+        print(f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}")
+        return ""
+    except Exception as e:
+        print(f"API error ({model_name}) [retries exhausted]: {e}")
+        return ""
 
 
 # Alias kept for backward compatibility
@@ -63,16 +73,23 @@ def query_llm_api(
     system_prompt: str = "",
     verbose: bool = False,
     max_tokens: int = 10000,
+    client_kwargs: Optional[Dict] = None,
 ) -> Union[str, List[str]]:
-    """Synchronous wrapper: query OpenRouter with one prompt or a batch.
+    """Synchronous wrapper: query an OpenAI-compatible API with one prompt or a batch.
 
     Args:
-        model_name: OpenRouter model ID, e.g. "openai/gpt-4o-mini"
+        model_name: Model ID, e.g. ``"gpt-4o-mini"``.  When using the default
+            OpenRouter backend you may also pass OpenRouter-style IDs like
+            ``"openai/gpt-4o-mini"``.  Provider routing (``"openai:gpt-4o"``)
+            is handled upstream by ``batch_generate`` / ``get_provider_client_kwargs``.
         prompt: Single prompt string or list of prompts for concurrent processing
         assistant_prefill: Optional text to prefill the assistant turn
         system_prompt: Optional system prompt
         verbose: Print request/response details
         max_tokens: Maximum tokens to generate
+        client_kwargs: Optional dict with ``api_key`` and ``base_url`` for the
+            OpenAI-compatible client.  When *None*, defaults to OpenRouter
+            (``OPENROUTER_API_KEY`` and ``https://openrouter.ai/api/v1``).
 
     Returns:
         Single response string if prompt is a string, list of responses otherwise
@@ -89,6 +106,7 @@ def query_llm_api(
                 system_prompt=system_prompt,
                 verbose=verbose,
                 max_tokens=max_tokens,
+                client_kwargs=client_kwargs,
             )
             for p in prompts
         ]

@@ -21,6 +21,7 @@ from src.crawler.crawler import Crawler, get_run_name
 from src.crawler.config import CrawlerConfig
 from src.llm_utils import load_model_and_tokenizer, load_from_path
 from src.directory_config import INTERIM_DIR, RESULT_DIR, CONFIG_DIR, resolve_cache_dir
+from src.provider_config import collect_required_api_keys
 
 
 @hydra.main(version_base=None, config_path=str(CONFIG_DIR), config_name="config")
@@ -32,15 +33,20 @@ def main(cfg: DictConfig) -> None:
 
     crawler_config = CrawlerConfig(**OmegaConf.to_container(cfg, resolve=True))
 
-    # Check API key early if any role uses a non-local (OpenRouter) model
-    non_local_roles = [
-        role for role in ("target", "translation", "summarization", "refusal_check")
+    # Check API keys early for every provider referenced by non-local roles
+    non_local_model_strings = [
+        getattr(crawler_config.model, f"{role}_model")
+        for role in ("target", "translation", "summarization", "refusal_check")
         if getattr(crawler_config.model, f"{role}_model") != "local"
     ]
-    if non_local_roles and not os.environ.get("OPENROUTER_API_KEY"):
+    missing_keys = collect_required_api_keys(
+        non_local_model_strings,
+        default_provider=crawler_config.model.default_provider,
+    )
+    if missing_keys:
+        details = ", ".join(f"{p} ({v})" for p, v in missing_keys.items())
         raise ValueError(
-            f"OPENROUTER_API_KEY environment variable is not set, but the following roles "
-            f"use non-local models: {non_local_roles}"
+            f"Missing API key(s) for providers used by non-local roles: {details}"
         )
 
     # Resolve cache_dir and create if needed

@@ -155,6 +155,8 @@ class Crawler:
                     max_new_tokens=self.config.crawler.max_generated_tokens,
                     temperature=self.config.model.temperature,
                     verbose=verbose,
+                    default_provider=self.config.model.default_provider,
+                    provider_url_overrides=self.config.model.provider_urls,
                 )
 
                 if verbose:
