@@ -20,10 +20,12 @@ To activate the virtual environment:
 source .venv/bin/activate
 ```
 
-Set your OpenRouter API key (required when using cloud model configs such as `haiku`):
+Set API keys for the providers you plan to use (only the ones referenced in your config):
 
 ```bash
-export OPENROUTER_API_KEY=your_key_here
+export OPENROUTER_API_KEY=your_key_here   # for OpenRouter models (default provider)
+export OPENAI_API_KEY=your_key_here       # for openai:-prefixed models
+# Ollama and LM Studio run locally and don't need API keys
 ```
 
 Start a demo crawl:
@@ -67,10 +69,14 @@ Both `model` and `crawler` are required. They select a YAML file from `configs/m
 
 **Available model configs** (`configs/model/`):
 
-- `haiku` — Claude Haiku via OpenRouter
+- `haiku` / `haiku_remote` — Claude Haiku via OpenRouter
 - `local_ds8b` — local DeepSeek 8B
 - `local_tulu8b` — local Tulu 8B
 - `local_meta8b` — local Meta 8B
+- `multi_provider_example` — OpenRouter target + OpenAI eval
+- `ollama_openai_example` — Ollama target + OpenAI eval
+- `lmstudio_openrouter_example` — LM Studio target + OpenRouter eval
+- See `configs/model/` for all 25 presets (including many `*_remote` variants)
 
 **Available crawler configs** (`configs/crawler/`):
 
@@ -235,7 +241,17 @@ Four prompt configs are provided:
 
 The Crawler analyzes refusal behavior of a `target_model` and uses an LM to do a bunch of online data sanitization, eg. translation, summarization. Current best practice is using a local vllm model for sanitization purposes, as costs can explode and ratelimits can kick in for openrouter models.
 
-Each model role can be set to `"local"` (uses the vLLM-served `local_model`) or to an OpenRouter model ID (e.g. `"anthropic/claude-3.5-haiku"`), which routes through the OpenRouter API instead.
+Each model role can be set to `"local"` (uses the vLLM-served `local_model`) or to a remote model string that routes through an OpenAI-compatible API. Model strings support a `provider:model_id` prefix to target specific providers:
+
+| Prefix        | Provider   | Default base URL                    | API key env var      |
+| ------------- | ---------- | ----------------------------------- | -------------------- |
+| `openrouter:` | OpenRouter | `https://openrouter.ai/api/v1`     | `OPENROUTER_API_KEY` |
+| `openai:`     | OpenAI     | `https://api.openai.com/v1`        | `OPENAI_API_KEY`     |
+| `ollama:`     | Ollama     | `http://localhost:11434/v1`         | *(none)*             |
+| `lmstudio:`   | LM Studio  | `http://localhost:1234/v1`          | *(none)*             |
+| *(no prefix)* | default    | depends on `model.default_provider` | *(varies)*           |
+
+When no prefix is given, the model string is routed to `model.default_provider` (defaults to `"openrouter"`).
 
 | Role          | Config field          | Purpose                                                                 |
 | ------------- | --------------------- | ----------------------------------------------------------------------- |
@@ -245,6 +261,76 @@ Each model role can be set to `"local"` (uses the vLLM-served `local_model`) or 
 | Refusal check | `refusal_check_model` | Generates diverse test queries for refusal checking                     |
 
 The `haiku` model config uses OpenRouter for the target model and local vLLM for all auxiliary roles. The `local_*` configs use vLLM for everything.
+
+### Multi-Provider Configs
+
+You can mix providers in a single YAML config. For example, use a local Ollama model for topic generation and OpenAI for evaluation:
+
+```yaml
+# configs/model/ollama_openai_example.yaml
+default_provider: "openrouter"
+target_model: "ollama:llama3"
+translation_model: "openai:gpt-4o-mini"
+summarization_model: "openai:gpt-4o-mini"
+refusal_check_model: "openai:gpt-4o-mini"
+local_model: null
+device: "cpu"
+```
+
+Or use LM Studio for topic generation and OpenRouter for auxiliary roles:
+
+```yaml
+target_model: "lmstudio:deepseek-r1-distill-llama-8b"
+translation_model: "google/gemini-3.1-flash-lite-preview"   # no prefix → openrouter
+summarization_model: "google/gemini-3.1-flash-lite-preview"
+refusal_check_model: "google/gemini-3.1-flash-lite-preview"
+```
+
+See `configs/model/multi_provider_example.yaml`, `configs/model/ollama_openai_example.yaml`, and `configs/model/lmstudio_openrouter_example.yaml` for complete examples.
+
+#### Overriding Provider URLs
+
+To point a provider at a non-default host (e.g. Ollama on a remote GPU box), use `provider_urls`:
+
+```yaml
+provider_urls:
+  ollama: "http://my-gpu-server:11434/v1"
+```
+
+#### Using Ollama / LM Studio / vLLM serve
+
+Start your local server before running the crawler:
+
+```bash
+# Ollama (default port 11434)
+ollama serve                              # default: http://localhost:11434
+ollama serve --port 8000                  # custom port
+
+# LM Studio (default port 1234)
+# Start from the LM Studio GUI, or via CLI:
+lms server start                          # default: http://localhost:1234
+lms server start --port 8000              # custom port
+
+# vLLM serve (OpenAI-compatible server)
+python -m vllm.entrypoints.openai.api_server \
+    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+    --port 8000
+
+# transformers serve (Hugging Face inference server, experimental)
+transformers serve deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+    --port 8000
+```
+
+When using a non-default port, override the provider URL in your YAML config:
+
+```yaml
+provider_urls:
+  ollama: "http://localhost:8000/v1"
+  # or for a remote vLLM/transformers server:
+  lmstudio: "http://my-server:8000/v1"
+```
+
+Any OpenAI-compatible server works — just pick a provider prefix (`ollama:`, `lmstudio:`, etc.) and point its URL at your server.
 
 ### Recommended Models
 

@@ -1,5 +1,5 @@
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import torch
 from transformers import pipeline
@@ -30,7 +30,7 @@ def llm_judge_refusals(
     max_tokens=10,
     queries: Optional[List[str]] = None,
     default_provider: str = "openrouter",
-    provider_url_overrides=None,
+    provider_url_overrides: Optional[Dict[str, str]] = None,
 ) -> List[bool]:
     if not texts:
         return []
@@ -128,7 +128,7 @@ def _translate_for_classifier(
     translation_model,
     translation_tokenizer,
     default_provider: str = "openrouter",
-    provider_url_overrides=None,
+    provider_url_overrides: Optional[Dict[str, str]] = None,
 ) -> List[str]:
     """Translate Chinese texts to English for the classifier. Non-Chinese texts pass through."""
     if translation_model is None:

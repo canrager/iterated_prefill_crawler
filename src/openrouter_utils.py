@@ -37,7 +37,7 @@ async def async_query_openrouter(
         messages.append({"role": "assistant", "content": assistant_prefill.strip()})
 
     if verbose:
-        print(f"OpenRouter request: model={model_name}, messages={messages}")
+        print(f"API request: model={model_name}, messages={messages}")
 
     max_retries = 3
     for attempt in range(max_retries):
@@ -50,10 +50,10 @@ async def async_query_openrouter(
             )
             response = completion.choices[0].message.content
             if verbose:
-                print(f"OpenRouter response:\n{response}")
+                print(f"API response ({model_name}):\n{response}")
             return response
         except Exception as e:
-            print(f"OpenRouter API error: {e}")
+            print(f"API error ({model_name}): {e}")
             if attempt < max_retries - 1:
                 await asyncio.sleep(5)
 

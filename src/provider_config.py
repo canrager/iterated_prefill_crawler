@@ -17,7 +17,7 @@ Base URLs can be overridden per-provider via ``ModelConfig.provider_urls``.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 
@@ -84,7 +84,7 @@ def parse_model_string(
         if prefix.lower() in BUILTIN_PROVIDERS:
             return prefix.lower(), rest
     # No recognised prefix → use default provider, full string is the model ID
-    return default_provider, model_str
+    return default_provider.lower(), model_str
 
 
 def resolve_provider(
@@ -96,6 +96,7 @@ def resolve_provider(
     Raises ``ValueError`` if the provider requires an API key but the
     corresponding environment variable is unset.
     """
+    provider_name = provider_name.lower()
     info = BUILTIN_PROVIDERS.get(provider_name)
     if info is None:
         raise ValueError(
@@ -103,12 +104,12 @@ def resolve_provider(
             f"Known providers: {list(BUILTIN_PROVIDERS)}"
         )
 
-    # Allow per-provider URL overrides from config
-    base_url = (
-        provider_url_overrides.get(provider_name, info.base_url)
-        if provider_url_overrides
-        else info.base_url
-    )
+    # Allow per-provider URL overrides from config (case-insensitive keys)
+    if provider_url_overrides:
+        normalized_overrides = {k.lower(): v for k, v in provider_url_overrides.items()}
+        base_url = normalized_overrides.get(provider_name, info.base_url)
+    else:
+        base_url = info.base_url
 
     api_key: Optional[str] = None
     if info.env_key:

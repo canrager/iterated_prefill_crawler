@@ -1,7 +1,5 @@
 import asyncio
 import logging
-import os
-import time
 from typing import Dict, List, Optional, Tuple, Union
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -91,7 +89,7 @@ def batch_generate_from_tokens_vllm(
 OPENROUTER_MODERATION_SENTINEL = "__OPENROUTER_MODERATION_REFUSED__"
 
 
-async def _async_openrouter_single(
+async def _async_api_single(
     client,
     model_name: str,
     messages: List[Dict],
@@ -101,13 +99,13 @@ async def _async_openrouter_single(
     """Send a single chat conversation to an OpenAI-compatible API and return the response text."""
     from openai import APIStatusError
 
-    # Guard: OpenRouter returns HTTP 400 "Input must have at least 1 token" when
-    # any message has empty content. This can happen when remove_thinking_context()
-    # returns "" for an incomplete <think> rollout that was truncated by
-    # max_new_tokens. Catch it here as a last line of defence and skip the call.
+    # Guard: some providers return HTTP 400 "Input must have at least 1 token"
+    # when any message has empty content. This can happen when
+    # remove_thinking_context() returns "" for an incomplete <think> rollout
+    # that was truncated by max_new_tokens.
     if any(not (m.get("content") or "").strip() for m in messages):
         print(
-            f"Skipping OpenRouter call: one or more messages have empty content (messages={messages})"
+            f"Skipping API call for {model_name}: one or more messages have empty content"
         )
         return ""
 
@@ -127,16 +125,16 @@ async def _async_openrouter_single(
                 else []
             )
             reason_str = ", ".join(reasons) if reasons else "unknown"
-            print(f"OpenRouter moderation refusal: {reason_str}")
+            print(f"API moderation refusal ({model_name}): {reason_str}")
             return f"{OPENROUTER_MODERATION_SENTINEL}: {reason_str}"
-        print(f"OpenRouter error: {e}")
+        print(f"API error ({model_name}): {e}")
         return ""
     except Exception as e:
-        print(f"OpenRouter error: {e}")
+        print(f"API error ({model_name}): {e}")
         return ""
 
 
-def _openrouter_batch_generate(
+def _api_batch_generate(
     model_name: str,
     messages: List[List[Dict]],
     max_new_tokens: int,
@@ -163,7 +161,7 @@ def _openrouter_batch_generate(
 
     async def _run():
         tasks = [
-            _async_openrouter_single(
+            _async_api_single(
                 client, resolved_model_id, msg_list, max_new_tokens, temperature
             )
             for msg_list in messages
@@ -219,7 +217,7 @@ def batch_generate(
         Tuple of (generated_texts, input_strs)
     """
     if isinstance(model, str):
-        return _openrouter_batch_generate(
+        return _api_batch_generate(
             model_name=model,
             messages=messages,
             max_new_tokens=max_new_tokens,

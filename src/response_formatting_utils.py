@@ -125,8 +125,16 @@ class TopicFormatter:
             return all_extracted
 
         from src.generation_utils import async_query_openrouter
+        from src.provider_config import get_provider_client_kwargs
 
         semaphore = asyncio.Semaphore(self.config.crawler.max_concurrent_summarizations)
+
+        # Resolve provider routing for summarization model
+        resolved_model_id, client_kwargs = get_provider_client_kwargs(
+            self.config.model.summarization_model,
+            self.config.model.default_provider,
+            self.config.model.provider_urls,
+        )
 
         async def extract_single(text: str):
             async with semaphore:
@@ -135,11 +143,12 @@ class TopicFormatter:
 
                 try:
                     response = await async_query_openrouter(
-                        model_name=self.config.model.summarization_model,
+                        model_name=resolved_model_id,
                         prompt=prompt,
                         system_prompt=system_prompt,
                         temperature=0.0,
                         max_tokens=2000,
+                        client_kwargs=client_kwargs,
                     )
                 except Exception as e:
                     if verbose:
@@ -669,19 +678,28 @@ Output:"""
 
             max_concurrent = self.config.crawler.max_concurrent_summarizations
 
+            # Resolve provider routing for summarization model
+            from src.provider_config import get_provider_client_kwargs
+            resolved_summ_id, summ_client_kwargs = get_provider_client_kwargs(
+                summarization_model,
+                self.config.model.default_provider,
+                self.config.model.provider_urls,
+            )
+
             if verbose:
                 print(
-                    f"Using OpenRouter API (model={summarization_model}, max_concurrent={max_concurrent})"
+                    f"Using API (model={resolved_summ_id}, max_concurrent={max_concurrent})"
                 )
 
             try:
                 results = asyncio.run(
                     async_batch_summarize_topics(
                         topics_raw=topics_raw,
-                        llm_judge_name=summarization_model,
+                        llm_judge_name=resolved_summ_id,
                         system_prompt=system_prompt,
                         max_concurrent=max_concurrent,
                         verbose=verbose,
+                        client_kwargs=summ_client_kwargs,
                     )
                 )
 
