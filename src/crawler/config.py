@@ -205,7 +205,7 @@ class ModelConfig:
 
     # --- Multi-provider settings ---
     # Default provider when model strings have no ``provider:`` prefix.
-    # Supported: "openrouter" (default), "openai", "ollama", "lmstudio"
+    # Supported: "openrouter" (default), "openai", "ollama", "lmstudio", "gemini"
     default_provider: str = "openrouter"
     # Optional per-provider base-URL overrides, e.g.
     #   provider_urls:
