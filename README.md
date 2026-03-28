@@ -77,7 +77,7 @@ Both `model` and `crawler` are required. They select a YAML file from `configs/m
 - `multi_provider_example` — OpenRouter target + OpenAI eval
 - `ollama_openai_example` — Ollama target + OpenAI eval
 - `lmstudio_openrouter_example` — LM Studio target + OpenRouter eval
-- See `configs/model/` for all 25 presets (including many `*_remote` variants)
+- See `configs/model/` for all presets (including many `*_remote` variants)
 
 **Available crawler configs** (`configs/crawler/`):
 
