@@ -130,14 +130,16 @@ async def _async_api_single(
             reason_str = ", ".join(reasons) if reasons else "unknown"
             print(f"API moderation refusal ({model_name}): {reason_str}")
             return f"{API_MODERATION_SENTINEL}: {reason_str}"
-        # Auth / permission errors are not retryable — crash immediately so
-        # the user notices the misconfiguration instead of getting a silent
-        # crawl full of empty strings.
-        if e.status_code in (401, 403):
+        # Auth / permission / not-found errors are not retryable — crash
+        # immediately so the user notices the misconfiguration instead of
+        # getting a silent crawl full of empty strings.
+        if e.status_code in (400, 401, 403, 404):
             raise
         # For other status errors (the openai SDK already retried 429/5xx),
         # log loudly — this means retries were exhausted.
-        print(f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}")
+        print(
+            f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
+        )
         return ""
     except Exception as e:
         # Network errors, timeouts, etc. — the SDK already retried these.
@@ -165,7 +167,9 @@ def _api_batch_generate(
     from openai import AsyncOpenAI
 
     resolved_model_id, client_kwargs = get_provider_client_kwargs(
-        model_name, default_provider, provider_url_overrides,
+        model_name,
+        default_provider,
+        provider_url_overrides,
     )
 
     # The SDK auto-retries 429/500/502/503/504 with exponential backoff.
@@ -370,7 +374,10 @@ async def async_batch_summarize_topics(
     async def rate_limited_summarize(topic_raw: str):
         async with semaphore:
             return await async_summarize_single_topic(
-                topic_raw, llm_judge_name, system_prompt, verbose,
+                topic_raw,
+                llm_judge_name,
+                system_prompt,
+                verbose,
                 client_kwargs=client_kwargs,
             )
 
