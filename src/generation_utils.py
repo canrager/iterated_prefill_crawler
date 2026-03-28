@@ -129,10 +129,18 @@ async def _async_api_single(
             reason_str = ", ".join(reasons) if reasons else "unknown"
             print(f"API moderation refusal ({model_name}): {reason_str}")
             return f"{API_MODERATION_SENTINEL}: {reason_str}"
-        print(f"API error ({model_name}): {e}")
+        # Auth / permission errors are not retryable — crash immediately so
+        # the user notices the misconfiguration instead of getting a silent
+        # crawl full of empty strings.
+        if e.status_code in (401, 403):
+            raise
+        # For other status errors (the openai SDK already retried 429/5xx),
+        # log loudly — this means retries were exhausted.
+        print(f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}")
         return ""
     except Exception as e:
-        print(f"API error ({model_name}): {e}")
+        # Network errors, timeouts, etc. — the SDK already retried these.
+        print(f"API error ({model_name}) [retries exhausted]: {e}")
         return ""
 
 
@@ -159,7 +167,9 @@ def _api_batch_generate(
         model_name, default_provider, provider_url_overrides,
     )
 
-    client = AsyncOpenAI(**client_kwargs)
+    # The SDK auto-retries 429/500/502/503/504 with exponential backoff.
+    # Default is 2 retries; bump to 4 for resilience against rate limits.
+    client = AsyncOpenAI(**client_kwargs, max_retries=4)
 
     async def _run():
         tasks = [

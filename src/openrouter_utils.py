@@ -18,15 +18,17 @@ async def async_query_openrouter(
     By default routes to OpenRouter.  Pass *client_kwargs* (with ``api_key``
     and ``base_url``) to target a different provider.
     """
-    from openai import AsyncOpenAI
+    from openai import APIStatusError, AsyncOpenAI
 
+    # Let the SDK handle retries (429/5xx) with exponential backoff.
     if client_kwargs is not None:
-        client = AsyncOpenAI(**client_kwargs)
+        client = AsyncOpenAI(**client_kwargs, max_retries=4)
     else:
         api_key = os.environ.get("OPENROUTER_API_KEY")
         client = AsyncOpenAI(
             api_key=api_key,
             base_url="https://openrouter.ai/api/v1",
+            max_retries=4,
         )
 
     messages = []
@@ -39,25 +41,25 @@ async def async_query_openrouter(
     if verbose:
         print(f"API request: model={model_name}, messages={messages}")
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            completion = await client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-            response = completion.choices[0].message.content or ""
-            if verbose:
-                print(f"API response ({model_name}):\n{response}")
-            return response
-        except Exception as e:
-            print(f"API error ({model_name}): {e}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(5)
-
-    return ""
+    try:
+        completion = await client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        response = completion.choices[0].message.content or ""
+        if verbose:
+            print(f"API response ({model_name}):\n{response}")
+        return response
+    except APIStatusError as e:
+        if e.status_code in (401, 403):
+            raise
+        print(f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}")
+        return ""
+    except Exception as e:
+        print(f"API error ({model_name}) [retries exhausted]: {e}")
+        return ""
 
 
 # Alias kept for backward compatibility
