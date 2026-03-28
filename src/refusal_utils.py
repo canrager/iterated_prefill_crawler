@@ -6,7 +6,7 @@ from transformers import pipeline
 
 from src.crawler.config import CrawlerConfig
 from src.crawler.topic_queue import Topic
-from src.generation_utils import OPENROUTER_MODERATION_SENTINEL, batch_generate
+from src.generation_utils import API_MODERATION_SENTINEL, batch_generate
 from src.response_formatting_utils import remove_thinking_context
 from src.tokenization_utils import get_thinking_skip_prefill
 
@@ -104,7 +104,7 @@ def is_refusal_fast(text: str | None, refusal_patterns: list[str]) -> bool | Non
     """Returns True if definitely a refusal, False if definitely not, or None if an LLM judge is needed."""
     if text is None:
         return False
-    if text.startswith(OPENROUTER_MODERATION_SENTINEL):
+    if text.startswith(API_MODERATION_SENTINEL):
         return True
 
     assistant_answer = clean_response(text)
@@ -443,7 +443,7 @@ def check_refusal(
             # Extract API moderation reasons if present
             api_reasons = []
             for answer in answers:
-                if answer.startswith(OPENROUTER_MODERATION_SENTINEL):
+                if answer.startswith(API_MODERATION_SENTINEL):
                     api_reasons.append(
                         answer.split(": ", 1)[1] if ": " in answer else "unknown"
                     )

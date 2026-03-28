@@ -25,7 +25,7 @@ from typing import Dict, Optional, Tuple
 # Default provider definitions
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(frozen=True)
 class ProviderInfo:
     """Immutable definition of a known LLM provider."""
     base_url: str
@@ -90,11 +90,12 @@ def parse_model_string(
 def resolve_provider(
     provider_name: str,
     provider_url_overrides: Optional[Dict[str, str]] = None,
-) -> Tuple[str, Optional[str]]:
+) -> Tuple[str, str]:
     """Return ``(base_url, api_key)`` for a given provider.
 
     Raises ``ValueError`` if the provider requires an API key but the
-    corresponding environment variable is unset.
+    corresponding environment variable is unset.  Local providers that
+    don't need a key get ``"not-needed"`` as the api_key value.
     """
     provider_name = provider_name.lower()
     info = BUILTIN_PROVIDERS.get(provider_name)
@@ -111,9 +112,9 @@ def resolve_provider(
     else:
         base_url = info.base_url
 
-    api_key: Optional[str] = None
+    api_key: str = ""
     if info.env_key:
-        api_key = os.environ.get(info.env_key)
+        api_key = os.environ.get(info.env_key, "")
     if info.requires_api_key and not api_key:
         raise ValueError(
             f"Provider '{provider_name}' requires an API key.  "
@@ -122,7 +123,7 @@ def resolve_provider(
 
     # Local providers (ollama, lmstudio) don't need a real key but the
     # OpenAI client constructor still wants *something*.
-    if api_key is None:
+    if not api_key:
         api_key = "not-needed"
 
     return base_url, api_key

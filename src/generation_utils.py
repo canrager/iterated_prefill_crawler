@@ -86,7 +86,9 @@ def batch_generate_from_tokens_vllm(
     return generated_texts
 
 
-OPENROUTER_MODERATION_SENTINEL = "__OPENROUTER_MODERATION_REFUSED__"
+API_MODERATION_SENTINEL = "__API_MODERATION_REFUSED__"
+# Backward-compatible alias
+OPENROUTER_MODERATION_SENTINEL = API_MODERATION_SENTINEL
 
 
 async def _async_api_single(
@@ -126,7 +128,7 @@ async def _async_api_single(
             )
             reason_str = ", ".join(reasons) if reasons else "unknown"
             print(f"API moderation refusal ({model_name}): {reason_str}")
-            return f"{OPENROUTER_MODERATION_SENTINEL}: {reason_str}"
+            return f"{API_MODERATION_SENTINEL}: {reason_str}"
         print(f"API error ({model_name}): {e}")
         return ""
     except Exception as e:
