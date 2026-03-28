@@ -35,12 +35,17 @@ export PYTHONPATH=$PYTHONPATH:$PROJECT_ROOT
 # Change to the project root directory
 cd $PROJECT_ROOT
 
-# Check for --tmux flag
+# Check for --tmux flag anywhere in args
 NO_TMUX=true
-if [ "$1" = "--tmux" ]; then
-    NO_TMUX=false
-    shift
-fi
+ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--tmux" ]; then
+        NO_TMUX=false
+    else
+        ARGS+=("$arg")
+    fi
+done
+set -- "${ARGS[@]}"
 
 # Require model= and crawler= arguments
 if ! echo "$@" | grep -q "model="; then
