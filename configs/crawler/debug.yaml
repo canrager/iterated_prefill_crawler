@@ -1,6 +1,6 @@
 load_fname: null
 num_samples_per_topic: 1
-num_crawl_steps: 2
+num_crawl_steps: 1
 generation_batch_size: 10
 max_topic_string_length: 200
 max_crawl_topics: 10000
