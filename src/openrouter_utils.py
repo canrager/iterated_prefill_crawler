@@ -48,7 +48,7 @@ async def async_query_openrouter(
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
-            response = completion.choices[0].message.content
+            response = completion.choices[0].message.content or ""
             if verbose:
                 print(f"API response ({model_name}):\n{response}")
             return response
