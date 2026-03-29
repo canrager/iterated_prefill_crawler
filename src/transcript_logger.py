@@ -21,10 +21,17 @@ _lock = threading.Lock()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def init_transcript_log(run_name: str) -> Path:
-    """Initialize the transcript log for a run. Call once at startup."""
+def init_transcript_log(run_name: str, output_dir: Optional[str] = None) -> Path:
+    """Initialize the transcript log for a run. Call once at startup.
+
+    If output_dir is given, the transcript is written there (alongside
+    crawler output).  Otherwise falls back to artifacts/transcripts/.
+    """
     global _log_path
-    transcript_dir = PROJECT_ROOT / "artifacts" / "transcripts"
+    if output_dir is not None:
+        transcript_dir = Path(output_dir)
+    else:
+        transcript_dir = PROJECT_ROOT / "artifacts" / "transcripts"
     transcript_dir.mkdir(parents=True, exist_ok=True)
     _log_path = transcript_dir / f"{run_name}.jsonl"
     return _log_path
