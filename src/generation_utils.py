@@ -119,7 +119,20 @@ async def _async_api_single(
             max_tokens=max_new_tokens,
             temperature=temperature,
         )
-        return completion.choices[0].message.content or ""
+
+        if not completion.choices:
+            print(f"API returned no choices ({model_name})")
+            return ""
+
+        choice = completion.choices[0]
+        if choice.message is None:
+            finish_reason = getattr(choice, "finish_reason", "unknown")
+            print(
+                f"API returned choice with no message ({model_name}). Finish reason: {finish_reason}"
+            )
+            return ""
+
+        return choice.message.content or ""
     except APIStatusError as e:
         if e.status_code == 403 and "moderation" in str(e.message).lower():
             reasons = (

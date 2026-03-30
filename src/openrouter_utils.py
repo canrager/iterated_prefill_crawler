@@ -50,7 +50,18 @@ async def async_query_openrouter(
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        response = completion.choices[0].message.content or ""
+        if not completion.choices:
+            print(f"API returned no choices ({model_name})")
+            return ""
+        choice = completion.choices[0]
+        if choice.message is None:
+            finish_reason = getattr(choice, "finish_reason", "unknown")
+            print(
+                f"API returned choice with no message ({model_name}). Finish reason: {finish_reason}"
+            )
+            return ""
+
+        response = choice.message.content or ""
         log_model_call(
             call_type="async_query_openrouter",
             model=model_name,

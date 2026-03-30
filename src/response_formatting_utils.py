@@ -223,11 +223,13 @@ class TopicFormatter:
             translation_model,
             translation_tokenizer,
             messages,
-            max_new_tokens=50,
+            max_new_tokens=500,
             temperature=0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
         )
+        # Fall back to original text if translation returned empty (e.g. Gemini safety filter)
+        translated = [t if t.strip() else src for t, src in zip(translated, texts)]
         return translated[0] if is_single else translated
 
     def _translate_en_to_zn(
@@ -251,11 +253,13 @@ class TopicFormatter:
             translation_model,
             translation_tokenizer,
             messages,
-            max_new_tokens=50,
+            max_new_tokens=500,
             temperature=0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
         )
+        # Fall back to original text if translation returned empty (e.g. Gemini safety filter)
+        translated = [t if t.strip() else src for t, src in zip(translated, texts)]
         return translated[0] if is_single else translated
 
     def _resolve_model(self, role: str, local_model, local_tokenizer):

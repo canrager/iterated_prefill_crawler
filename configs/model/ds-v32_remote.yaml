@@ -2,15 +2,15 @@
 target_model: "deepseek/deepseek-v3.2"
 translation_model: "gemini:gemini-3.1-flash-lite-preview"
 summarization_model: "anthropic/claude-haiku-4.5"
-refusal_check_model: "local"
+refusal_check_model: "openai/gpt-4.1-mini"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 
 # Local model config — set to null for API-only (no GPU) runs.
 # Auxiliary roles above are routed to OpenRouter instead.
-local_model: "allenai/Olmo-3-7B-Instruct"
+local_model: null
 quantization_bits: null
 device: "auto"
 cache_dir: "hf_models"
 vllm_tensor_parallel_size: 2
 vllm_gpu_memory_utilization: 0.8
-vllm_max_model_len: 1024
+vllm_max_model_len: 4096

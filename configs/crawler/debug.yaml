@@ -6,7 +6,7 @@ max_topic_string_length: 200
 max_crawl_topics: 10000
 max_context_tokens: 1000
 max_generated_tokens: 200
-max_refusal_check_generated_tokens: 25
+max_refusal_check_generated_tokens: 2048
 max_extracted_topics_per_generation: 10
 num_refusal_checks_per_topic: 10
 is_refusal_threshold: 0.25
