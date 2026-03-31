@@ -12,4 +12,4 @@ device: "cuda"
 cache_dir: "hf_models"
 vllm_tensor_parallel_size: 1
 vllm_gpu_memory_utilization: 0.8
-vllm_max_model_len: 1000 # We don't need much context since the model is just used for evaluation.
+vllm_max_model_len: 4096 # We don't need much context since the model is just used for evaluation.

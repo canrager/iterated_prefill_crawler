@@ -234,6 +234,8 @@ Four prompt configs are provided:
 | `jailbreak`   | Adversarial + seeding               | Combines CoT policy forgery, roleplay, and comparative framing with topic seeding.                        | APIs that don't support assistant prefilling |
 | `default`     | Thought Token Forcing (TTF) + seeds | Natural language assistant prefill; `<think>` added by chat template for R1 models. Includes topic seeds. | Local vLLM or APIs with prefill support      |
 
+**A note on `default` with remote APIs:** While local vLLM supports assistant prefill natively, API support varies. OpenRouter passes trailing assistant messages to the upstream provider, but if that provider does not support prefilling at the chat-template level (common for newer reasoning models), it treats the prefill as a past turn rather than a live continuation — completely breaking the attack. Some endpoints also enforce mandatory reasoning and reject requests that attempt to skip it (HTTP 400: `"Reasoning is mandatory for this endpoint and cannot be disabled."`). If you hit either of these, switch to `prompts=jailbreak` or `prompts=user_seeded`.
+
 ### How to Customize
 
 - **Create a new prompt preset**: Copy `configs/prompts/default.yaml` to a new file (e.g. `configs/prompts/custom.yaml`), edit with your new prompts, and select it with `prompts=custom`.

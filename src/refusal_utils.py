@@ -1,7 +1,6 @@
 import re
 from typing import Dict, List, Optional
 
-import torch
 from transformers import pipeline
 
 from src.crawler.config import CrawlerConfig
@@ -27,7 +26,7 @@ def llm_judge_refusals(
     texts: List[str],
     model,
     tokenizer,
-    max_tokens=10,
+    max_tokens=16,
     queries: Optional[List[str]] = None,
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
@@ -47,7 +46,11 @@ def llm_judge_refusals(
             )
     messages = [[{"role": "user", "content": p}] for p in judge_prompts]
     answers, _ = batch_generate(
-        model, tokenizer, messages, max_new_tokens=max_tokens, temperature=0.0,
+        model,
+        tokenizer,
+        messages,
+        max_new_tokens=max_tokens,
+        temperature=0.0,
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
     )
@@ -119,7 +122,7 @@ def is_refusal_fast(text: str | None, refusal_patterns: list[str]) -> bool | Non
 
 def _has_chinese(text: str) -> bool:
     """Check if text contains CJK characters."""
-    return any('\u4e00' <= c <= '\u9fff' for c in text)
+    return any("\u4e00" <= c <= "\u9fff" for c in text)
 
 
 def _translate_for_classifier(
@@ -147,7 +150,7 @@ def _translate_for_classifier(
         translation_model,
         translation_tokenizer,
         translate_messages,
-        max_new_tokens=200,
+        max_new_tokens=500,
         temperature=0.0,
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
@@ -208,9 +211,22 @@ def check_refusals_cascade(
         results = classifier(texts_for_classifier, truncation=True, max_length=512)
         for i, res, text in zip(indices_for_classifier, results, texts_for_classifier):
             is_rejection = res["label"].upper() in ["REJECTION", "LABEL_1"]
+
+            # If queries are provided, we MUST run the LLM judge for anything the classifier
+            # thinks is "NORMAL" (not a rejection) to catch topic substitution. The classifier
+            # only looks at the response text, so dodges look like perfectly normal safe text to it.
             if res["score"] >= config.crawler.refusal_classifier_threshold:
-                refusals[i] = is_rejection
+                if queries is not None and not is_rejection:
+                    # High confidence it's normal text, but we need the LLM judge to verify
+                    # it actually answers the user's query (catch topic substitution)
+                    texts_for_llm.append(text)
+                    indices_for_llm.append(i)
+                else:
+                    # Either it's a high confidence rejection, or it's high confidence normal
+                    # and we don't have a query to check against.
+                    refusals[i] = is_rejection
             else:
+                # Low confidence, send to LLM judge
                 texts_for_llm.append(text)
                 indices_for_llm.append(i)
     else:
@@ -220,12 +236,12 @@ def check_refusals_cascade(
     if texts_for_llm:
         # Pass original queries to the judge so it can detect topic substitution
         queries_for_llm = (
-            [queries[i] for i in indices_for_llm]
-            if queries is not None
-            else None
+            [queries[i] for i in indices_for_llm] if queries is not None else None
         )
         llm_results = llm_judge_refusals(
-            texts_for_llm, refusal_model, refusal_tokenizer,
+            texts_for_llm,
+            refusal_model,
+            refusal_tokenizer,
             queries=queries_for_llm,
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
@@ -319,8 +335,12 @@ def check_refusal(
             queries = [f"Tell me about {topic.shortened or topic.raw}"]
 
         refused_to_make_query = check_refusals_cascade(
-            queries, config, refusal_model, refusal_tokenizer,
-            translation_model, translation_tokenizer,
+            queries,
+            config,
+            refusal_model,
+            refusal_tokenizer,
+            translation_model,
+            translation_tokenizer,
         )
 
         make_query_majority_refusal = (
@@ -420,8 +440,12 @@ def check_refusal(
             # Check if model refused to answer
             answer_queries = topic_to_queries[topic_idx]
             refused_to_answer_query = check_refusals_cascade(
-                answers, config, refusal_model, refusal_tokenizer,
-                translation_model, translation_tokenizer,
+                answers,
+                config,
+                refusal_model,
+                refusal_tokenizer,
+                translation_model,
+                translation_tokenizer,
                 queries=answer_queries,
             )
 

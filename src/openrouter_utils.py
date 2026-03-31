@@ -1,6 +1,6 @@
-from typing import Dict, List, Optional, Union
 import asyncio
 import os
+from typing import Dict, List, Optional, Union
 
 from src.transcript_logger import log_model_call
 
@@ -50,7 +50,18 @@ async def async_query_openrouter(
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        response = completion.choices[0].message.content or ""
+        if not completion.choices:
+            print(f"API returned no choices ({model_name})")
+            return ""
+        choice = completion.choices[0]
+        if choice.message is None:
+            finish_reason = getattr(choice, "finish_reason", "unknown")
+            print(
+                f"API returned choice with no message ({model_name}). Finish reason: {finish_reason}"
+            )
+            return ""
+
+        response = choice.message.content or ""
         log_model_call(
             call_type="async_query_openrouter",
             model=model_name,
@@ -63,9 +74,11 @@ async def async_query_openrouter(
             print(f"API response ({model_name}):\n{response}")
         return response
     except APIStatusError as e:
-        if e.status_code in (401, 403):
+        if e.status_code in (400, 401, 403, 404):
             raise
-        print(f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}")
+        print(
+            f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
+        )
         return ""
     except Exception as e:
         print(f"API error ({model_name}) [retries exhausted]: {e}")
@@ -178,7 +191,9 @@ if __name__ == "__main__":
         if lowered.startswith("paris") or lowered.startswith(" paris"):
             print("=> Prefilling appears to work (model continued from injected text)")
         elif "the capital" in lowered[:40] or "france" in lowered[:40]:
-            print("=> Prefilling appears NOT to be applied (model restarted the answer)")
+            print(
+                "=> Prefilling appears NOT to be applied (model restarted the answer)"
+            )
         else:
             print("=> Ambiguous — inspect the continuation above manually")
 
@@ -236,9 +251,13 @@ if __name__ == "__main__":
         )
         print(f"Prefill : {repr(open_think_prefill)}")
         if response_open is None:
-            print("=> Response was None — provider likely rejected the open <think> prefill")
+            print(
+                "=> Response was None — provider likely rejected the open <think> prefill"
+            )
         else:
             print(f"Continuation: {repr(response_open[:200])}")
-            print(f"Combined (first 500 chars):\n{(open_think_prefill + response_open)[:500]}")
+            print(
+                f"Combined (first 500 chars):\n{(open_think_prefill + response_open)[:500]}"
+            )
 
     asyncio.run(main())

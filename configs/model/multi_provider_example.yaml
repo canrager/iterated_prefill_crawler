@@ -29,4 +29,4 @@ device: "cpu"
 cache_dir: "hf_models"
 vllm_tensor_parallel_size: 1
 vllm_gpu_memory_utilization: 0.8
-vllm_max_model_len: 1000
+vllm_max_model_len: 4096

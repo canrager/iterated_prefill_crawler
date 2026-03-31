@@ -223,11 +223,13 @@ class TopicFormatter:
             translation_model,
             translation_tokenizer,
             messages,
-            max_new_tokens=50,
+            max_new_tokens=500,
             temperature=0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
         )
+        # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
+        translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
         return translated[0] if is_single else translated
 
     def _translate_en_to_zn(
@@ -251,11 +253,13 @@ class TopicFormatter:
             translation_model,
             translation_tokenizer,
             messages,
-            max_new_tokens=50,
+            max_new_tokens=500,
             temperature=0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
         )
+        # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
+        translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
         return translated[0] if is_single else translated
 
     def _resolve_model(self, role: str, local_model, local_tokenizer):
@@ -338,40 +342,6 @@ class TopicFormatter:
             topic.shortened = item
         return topics
 
-    def _remove_words(self, topics: List[Topic]) -> List[Topic]:
-        """
-        Remove filtered words and duplicates from a list of texts.
-
-        Args:
-            texts: List of strings to process
-
-        Returns:
-            List of processed strings with filtered words removed
-        """
-        if not topics:
-            return []
-
-        for topic in topics:
-            if not topic.shortened:
-                continue
-
-            # duplicate removal
-            words = list(
-                dict.fromkeys(
-                    word
-                    for word in topic.shortened.split()
-                    if word not in set(self.config.regex_filter_global)
-                )
-            )
-
-            # Remove filtered words from start and end
-            while words and words[0] in set(self.config.regex_filter_start_end_only):
-                words.pop(0)
-            while words and words[-1] in set(self.config.regex_filter_start_end_only):
-                words.pop()
-
-            topic.shortened = " ".join(words)
-        return topics
 
     def _split_at_comma(
         self,
@@ -509,7 +479,6 @@ class TopicFormatter:
             local_model, local_tokenizer, formatted_topics
         )
         formatted_topics = self._regex_filter(formatted_topics)
-        formatted_topics = self._remove_words(formatted_topics)
 
         if self.config.crawler.do_filter_refusals:
             if verbose:
