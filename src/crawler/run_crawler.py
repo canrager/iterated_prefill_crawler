@@ -1,4 +1,7 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Set environment variable to force spawn method before any imports
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"

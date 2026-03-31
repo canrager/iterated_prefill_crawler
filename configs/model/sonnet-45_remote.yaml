@@ -1,8 +1,8 @@
 # Model selection ("local" or openrouter path)
 target_model: "anthropic/claude-sonnet-4.5"
-translation_model: "google/gemini-3.1-flash-lite-preview"
-summarization_model: "google/gemini-3.1-flash-lite-preview"
-refusal_check_model: "google/gemini-3.1-flash-lite-preview"
+translation_model: "qwen/qwen3-235b-a22b-2507"
+summarization_model: "moonshotai/kimi-k2-0905"
+refusal_check_model: "google/gemma-3-27b-it"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 
 # Local model config — set to null for API-only (no GPU) runs.

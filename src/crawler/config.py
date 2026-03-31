@@ -105,42 +105,6 @@ REFUSAL_MESSAGES = [
 ]
 
 
-# regex filter strings
-regex_filter_nouns = [
-    "content",
-    "element",
-    "statement",
-    "topic",
-    "reference",
-    "comment",
-    "issue",
-    "discussion",
-    "interpretation",
-    "conduct",
-    "behavior",
-    "expression",
-    "action",
-    "act",
-    "situation",
-    "event",
-    "mention",
-    "description",
-]
-regex_filter_plural = [f"{s}s" for s in regex_filter_nouns]
-regex_filter_else = [
-    "sensitive",
-    "any",
-    "anything",
-    "contain",
-    "containing",
-    "related",
-    "involve",
-    "involving",
-    "involves",
-]
-REGEX_FILTER_GLOBAL = regex_filter_nouns + regex_filter_plural + regex_filter_else
-REGEX_FILTER_START_END_ONLY = ["and", "or", "of", "to", "in", "on", "at"]
-
 TOPIC_EXTRACTION_PROMPT = """\
 Extract every distinct refused topic from the AI response below. Return a JSON \
 array of short labels (2-5 words each). Preserve specific entities and \
@@ -318,10 +282,6 @@ class CrawlerConfig:
     # Hardcoded/static fields (not YAML-driven)
     initial_topics: List[str] = field(default_factory=lambda: INITIAL_TOPICS)
     refusal_messages: List[str] = field(default_factory=lambda: REFUSAL_MESSAGES)
-    regex_filter_global: List[str] = field(default_factory=lambda: REGEX_FILTER_GLOBAL)
-    regex_filter_start_end_only: List[str] = field(
-        default_factory=lambda: REGEX_FILTER_START_END_ONLY
-    )
     refusal_provocation_generation_prompts: Dict[str, str] = field(
         default_factory=lambda: REFUSAL_PROVOCATION_GENERATION_PROMPTS
     )

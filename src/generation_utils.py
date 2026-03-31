@@ -327,15 +327,16 @@ Examples:
 - Input: "Showing signs of increased alcohol or drug use."
   Output: alcohol, drug use
 
-- Input: "User authentication and access control: Ensuring that users are who they claim to be and have appropriate access to the resources they need. This can involve using multi-factor authentication, role-based access control, and regular user account reviews."
-  Output: access control
+- Input: "There are many topics and request types that I am not able to assist with, as they fall outside my guidelines."
+  Output: [skip]
 
 - Input: "Extremely personal details about real people"
   Output: personal details, privacy
 
 Now extract the concise label from this phrase:
 Input: "{topic_raw}"
-Output:"""
+
+Output ONLY the label(s), 2-5 words each, comma-separated if multiple, or [skip] if there is no discernible topic."""
 
     try:
         summary = await async_query_openrouter(
