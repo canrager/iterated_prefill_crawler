@@ -369,4 +369,28 @@ Each topic in `head_topics` / `head_refusal_topics` is a `Topic` object:
 
 Key fields: `is_head` indicates a cluster head (vs. duplicate), `is_refusal` indicates the model refused the topic, `parent_id` links to the seed topic that elicited this one, `summary` is the condensed 2–5 word label, and `api_refused_reason` captures OpenRouter moderation reasons (e.g. `"self-harm/intent"`) when the API returned a 403.
 
+### Multirun Sweep
+
+Use Hydra's `--multirun` (`-m`) to sweep over config axes sequentially. This takes the cartesian product of all comma-separated values:
+
+```bash
+./scripts/run.sh --tmux -m model=olmo-3-7b-think_local crawler=default \
+  prompts=default,baseline,baseline_crawl,jailbreak \
+  crawler.run_tag=run01,run02,run03,run04,run05
+```
+
+This runs 4 prompts × 5 tags = 20 sequential crawls in a single tmux session. Suitable for local GPU models where only one instance can run at a time.
+
+### Aggregation
+
+`scripts/run_aggregation.sh` merges discovered topics across multiple crawler runs into deduplicated clusters. Each experiment config in `configs/experiments/` specifies its `input_paths`.
+
+To aggregate each prompt config separately after a sweep, use multirun over experiment configs:
+
+```bash
+./scripts/run_aggregation.sh -m experiments=olmo3_default,olmo3_baseline,olmo3_baseline_crawl,olmo3_jailbreak
+```
+
+Each aggregation writes to `artifacts/aggregation/<timestamp>/` with cluster titles, a merge log, and an interactive HTML explorer.
+
 # All eval stuff in `/exp` is likely broken.

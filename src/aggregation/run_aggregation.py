@@ -21,6 +21,7 @@ from src.aggregation.aggregator import TopicAggregator
 from src.crawler.config import CrawlerConfig
 from src.directory_config import CONFIG_DIR, ROOT_DIR, resolve_cache_dir
 from src.llm_utils import load_model_and_tokenizer
+from src.provider_config import collect_required_api_keys
 
 
 @hydra.main(version_base=None, config_path=str(CONFIG_DIR), config_name="config")
@@ -54,10 +55,12 @@ def main(cfg: DictConfig) -> None:
             vllm_max_model_len=crawler_config.model.vllm_max_model_len,
         )
     else:
-        # OpenRouter model — check API key
-        if not os.environ.get("OPENROUTER_API_KEY"):
+        # Remote model — check required API keys
+        missing = collect_required_api_keys([agg_model_name])
+        if missing:
+            details = ", ".join(f"{p} ({v})" for p, v in missing.items())
             raise ValueError(
-                f"OPENROUTER_API_KEY not set, but experiments.aggregation_model={agg_model_name}"
+                f"Missing API key(s) for aggregation_model={agg_model_name}: {details}"
             )
         model, tokenizer = agg_model_name, None
 
