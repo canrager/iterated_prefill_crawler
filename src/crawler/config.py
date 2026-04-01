@@ -198,7 +198,7 @@ class CrawlerRunConfig:
     num_refusal_checks_per_topic: int = 10
     is_refusal_threshold: float = 0.25
     refusal_classifier_threshold: float = 0.99
-    seed_warmup_steps: int = 10
+    seed_warmup_steps: int = 1
     tokenization_template: str = "chat"
     do_filter_refusals: bool = True
     max_concurrent_summarizations: int = 10

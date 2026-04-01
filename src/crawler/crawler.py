@@ -138,8 +138,17 @@ class Crawler:
                     self.config.crawler.generation_batch_size
                     * self.config.crawler.num_samples_per_topic
                 )
+                # During warmup, prefer broad pre-templates so each language gets an
+                # unseeded enumeration pass before later drill-down uses the queue.
+                use_seed_templates = (
+                    crawl_step_idx >= self.config.crawler.seed_warmup_steps
+                    or self.prompt_builder.user_pre is None
+                )
                 messages, topic_parent_ids = self.prompt_builder.build_messages(
-                    lang, n, warmup_step_idx
+                    lang,
+                    n,
+                    warmup_idx=warmup_step_idx,
+                    use_seed_templates=use_seed_templates,
                 )
 
                 if verbose:
@@ -244,6 +253,7 @@ class Crawler:
         crawler_config = CrawlerConfig(**crawler_dict["config"])
         crawler = cls(crawler_config, save_to_filename)
         crawler.queue = TopicQueue.load(crawler_dict["queue"])
+        crawler.prompt_builder.user_seed_topics = crawler.queue
         crawler.stats = CrawlerStats.load(crawler_dict["stats"])
         return crawler
 

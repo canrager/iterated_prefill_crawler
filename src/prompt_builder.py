@@ -68,6 +68,27 @@ class PromptBuilder:
         self.assistant_seed_topics = assistant_seed_topics
         self.languages = languages
 
+    def _should_use_user_seed_templates(self, use_seed_templates: bool) -> bool:
+        """Return whether seeded user prompts should be used.
+
+        When warmup disables seed usage, fall back to broad pre-templates if they
+        exist. If no pre-templates are available, keep using seed templates so the
+        builder remains functional.
+        """
+        if self.user_seed_template is None or self.user_seed_topics is None:
+            return False
+        if len(self.user_seed_topics.head_refusal_topics) == 0:
+            return False
+        return use_seed_templates or self.user_pre is None
+
+    def _should_use_assistant_seed_templates(self, use_seed_templates: bool) -> bool:
+        """Return whether seeded assistant prompts should be used."""
+        if self.assistant_seed_template is None or self.assistant_seed_topics is None:
+            return False
+        if len(self.assistant_seed_topics.head_refusal_topics) == 0:
+            return False
+        return use_seed_templates or self.assistant_pre is None
+
     def sample_single(self):
         """
         Generate a single prompt. Randomly sample from every component.
@@ -82,7 +103,7 @@ class PromptBuilder:
             user_pre_msg = random.choice(self.user_pre[lang])
             user_parts.append(user_pre_msg)
 
-        if self.user_seed_template:
+        if self._should_use_user_seed_templates(use_seed_templates=True):
             assert self.user_seed_topics is not None
             user_temp = random.choice(self.user_seed_template[lang])
             user_topic = random.choice(
@@ -99,7 +120,7 @@ class PromptBuilder:
             assistant_pre_msg = random.choice(self.assistant_pre[lang])
             assistant_parts.append(assistant_pre_msg)
 
-        if self.assistant_seed_template:
+        if self._should_use_assistant_seed_templates(use_seed_templates=True):
             assert self.assistant_seed_topics is not None
             assistant_temp = random.choice(self.assistant_seed_template[lang])
             assistant_topic = random.choice(
@@ -139,6 +160,7 @@ class PromptBuilder:
         lang: str,
         n: int,
         warmup_idx: int | None = None,
+        use_seed_templates: bool = True,
     ) -> Tuple[List[List[Dict[str, str]]], List[int]]:
         """
         Build n messages for a generation batch.
@@ -161,6 +183,8 @@ class PromptBuilder:
             lang: Language key ("english" or "chinese")
             n: Total number of messages to produce
             warmup_idx: If set, cycle through templates by index; otherwise random
+            use_seed_templates: Whether to sample seeded drill-down prompts. When
+                False, falls back to broad pre-templates if available.
 
         Returns:
             (messages, parent_ids)
@@ -194,7 +218,7 @@ class PromptBuilder:
             )
 
         # Build user messages and parent IDs
-        if self.user_seed_template is not None:
+        if self._should_use_user_seed_templates(use_seed_templates):
             assert self.user_seed_topics is not None
             # Seeded: sample n topics from the queue and format with seed template
             sampled_topics = [

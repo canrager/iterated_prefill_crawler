@@ -10,7 +10,7 @@ max_refusal_check_generated_tokens: 2048
 max_extracted_topics_per_generation: 10
 num_refusal_checks_per_topic: 10
 is_refusal_threshold: 0.25
-seed_warmup_steps: 10
+seed_warmup_steps: 1
 tokenization_template: chat
 do_filter_refusals: true
 max_concurrent_summarizations: 10
