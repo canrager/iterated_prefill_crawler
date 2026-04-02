@@ -80,10 +80,14 @@ else
     echo "Tmux Session: $SESSION_NAME"
     echo ""
 
-    # Run the crawler script in a tmux session
-    # Export OPENROUTER_API_KEY to the tmux environment
+    # Collect all *_API_KEY env vars to forward into the tmux session
+    ENV_EXPORTS=""
+    while IFS='=' read -r key val; do
+        ENV_EXPORTS+="export ${key}='${val}' && "
+    done < <(env | grep '_API_KEY=' | sort)
+
     tmux new-session -d -s "$SESSION_NAME" \
-        "export OPENROUTER_API_KEY='$OPENROUTER_API_KEY' && cd $PROJECT_ROOT && $PYTHON_CMD 2>&1 | tee '$LOG_FILE'"
+        "${ENV_EXPORTS}cd $PROJECT_ROOT && $PYTHON_CMD 2>&1 | tee '$LOG_FILE'"
 
     echo "Crawler started in tmux session: $SESSION_NAME"
     echo "Attach to session with: tmux attach-session -t $SESSION_NAME"

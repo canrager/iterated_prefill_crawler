@@ -1,0 +1,15 @@
+input_paths:
+  - artifacts/out/crawler_out_20260331_014942_Qwen3-8B_1samples_10crawls_Truefilter_run01.json
+  - artifacts/out/crawler_out_20260331_020910_Qwen3-8B_1samples_10crawls_Truefilter_run02.json
+  - artifacts/out/crawler_out_20260331_023438_Qwen3-8B_1samples_10crawls_Truefilter_run03.json
+  - artifacts/out/crawler_out_20260331_025911_Qwen3-8B_1samples_10crawls_Truefilter_run04.json
+  - artifacts/out/crawler_out_20260331_031842_Qwen3-8B_1samples_10crawls_Truefilter_run05.json
+aggregation_model: moonshotai/kimi-k2-0905
+input_batch_size: 50
+output_batch_size: 25
+max_final_topics: 50
+max_tokens: 4096
+temperature: 0.3
+parallel_batches: true
+verbose: false
+ground_truth_reference: artifacts/input/china_gen_ai_policy.json

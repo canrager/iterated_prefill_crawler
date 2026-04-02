@@ -120,6 +120,12 @@ EOF
     echo "Launching $NUM_RUNS parallel runs..."
     echo ""
 
+    # Collect all *_API_KEY env vars to forward into tmux sessions
+    ENV_EXPORTS=""
+    while IFS='=' read -r key val; do
+        ENV_EXPORTS+="export ${key}='${val}' && "
+    done < <(env | grep '_API_KEY=' | sort)
+
     PIDS=()
     for i in $(seq 1 "$NUM_RUNS"); do
         RUN_TAG="run$(printf '%02d' "$i")"
@@ -129,7 +135,7 @@ EOF
             SESSION="ensemble_${TIMESTAMP}_${RUN_TAG}"
             LOG_FILE="$OUTDIR/${RUN_TAG}.log"
             tmux new-session -d -s "$SESSION" \
-                "export OPENROUTER_API_KEY='$OPENROUTER_API_KEY' && cd $PROJECT_ROOT && export PYTHONPATH=$PYTHONPATH && $CMD 2>&1 | tee '$LOG_FILE'"
+                "${ENV_EXPORTS}cd $PROJECT_ROOT && export PYTHONPATH=$PYTHONPATH && $CMD 2>&1 | tee '$LOG_FILE'"
             echo "  [$RUN_TAG] tmux session: $SESSION, log: $LOG_FILE"
         else
             LOG_FILE="$OUTDIR/${RUN_TAG}.log"
@@ -180,7 +186,7 @@ EOF
             SESSION="multi_${TIMESTAMP}_${MODEL}"
             LOG_FILE="$OUTDIR/${MODEL}.log"
             tmux new-session -d -s "$SESSION" \
-                "export OPENROUTER_API_KEY='$OPENROUTER_API_KEY' && cd $PROJECT_ROOT && export PYTHONPATH=$PYTHONPATH && $CMD 2>&1 | tee '$LOG_FILE'"
+                "${ENV_EXPORTS}cd $PROJECT_ROOT && export PYTHONPATH=$PYTHONPATH && $CMD 2>&1 | tee '$LOG_FILE'"
             echo "  [$MODEL] tmux session: $SESSION, log: $LOG_FILE"
         else
             LOG_FILE="$OUTDIR/${MODEL}.log"

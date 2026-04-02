@@ -4,32 +4,12 @@ input_paths:
   - artifacts/out/crawler_out_20260328_231655_Olmo-3-7B-Think_1samples_10crawls_Truefilter_run03.json
   - artifacts/out/crawler_out_20260328_232237_Olmo-3-7B-Think_1samples_10crawls_Truefilter_run04.json
   - artifacts/out/crawler_out_20260328_232810_Olmo-3-7B-Think_1samples_10crawls_Truefilter_run05.json
-aggregation_model: "ollama:olmo-3:7b-instruct"
-batch_size: 10
-max_clusters: 30
+aggregation_model: moonshotai/kimi-k2-0905
+input_batch_size: 50
+output_batch_size: 25
+max_final_topics: 50
 max_tokens: 4096
 temperature: 0.3
+parallel_batches: true
 verbose: false
-
-clustering_prompt: |
-  Group the following topic labels into semantic clusters. A topic can appear
-  in multiple clusters. Return ONLY a JSON object mapping cluster titles to
-  lists of member topics. Use short, descriptive cluster titles (2-4 words).
-
-  Topics:
-  {topics}
-
-  JSON:
-merge_prompt: |
-  Merge these two sets of topic clusters into a single unified set.
-  Combine clusters with overlapping meaning under one title. A topic can
-  appear in multiple clusters. Aim for at most {max_clusters} clusters.
-  Return ONLY a JSON object mapping cluster titles to lists of member topics.
-
-  Set A:
-  {clusters_a}
-
-  Set B:
-  {clusters_b}
-
-  Merged JSON:
+ground_truth_reference: artifacts/input/tulu3_ground_truth_safety_topics.json

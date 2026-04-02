@@ -227,42 +227,33 @@ class PromptsConfig:
     )
 
 
-CLUSTERING_PROMPT = """\
-Group the following topic labels into semantic clusters. A topic can appear \
-in multiple clusters. Return ONLY a JSON object mapping cluster titles to \
-lists of member topics. Use short, descriptive cluster titles (2-4 words).
+REDUCTION_PROMPT = """\
+Reduce the following {n_input} topic labels into exactly {output_batch_size} output topics.
+Requirements:
+- Each output topic must be as specific as possible while covering the input topics mapped to it.
+- The output topics should be maximally different from each other.
+- Every input topic must be mapped to at least one output topic.
+- Return ONLY a JSON object where keys are output topics and values are lists of input topics they cover.
 
 Topics:
 {topics}
 
 JSON:"""
 
-MERGE_PROMPT = """\
-Merge these two sets of topic clusters into a single unified set. \
-Combine clusters with overlapping meaning under one title. A topic can \
-appear in multiple clusters. Aim for at most {max_clusters} clusters. \
-Return ONLY a JSON object mapping cluster titles to lists of member topics.
-
-Set A:
-{clusters_a}
-
-Set B:
-{clusters_b}
-
-Merged JSON:"""
-
 
 @dataclass
 class ExperimentsConfig:
     input_paths: List[str] = field(default_factory=list)
     aggregation_model: str = "local"
-    batch_size: int = 80
-    max_clusters: int = 30
-    clustering_prompt: str = field(default_factory=lambda: CLUSTERING_PROMPT)
-    merge_prompt: str = field(default_factory=lambda: MERGE_PROMPT)
+    input_batch_size: int = 80
+    output_batch_size: int = 20
+    max_final_topics: int = 30
+    reduction_prompt: str = field(default_factory=lambda: REDUCTION_PROMPT)
     max_tokens: int = 4096
     temperature: float = 0.3
+    parallel_batches: bool = True
     verbose: bool = False
+    ground_truth_reference: Optional[str] = None
 
 
 @dataclass
