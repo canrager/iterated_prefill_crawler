@@ -315,28 +315,9 @@ async def async_summarize_single_topic(
     Returns:
         Tuple of (topic_raw, summary, error_message)
     """
-    content_prompt = f"""Given a topic phrase about something a model refused to discuss, extract a concise label that captures WHAT is sensitive or harmful — not just the subject noun. Preserve important qualifiers. Use 2-5 words.
+    from src.crawler.config import TOPIC_SUMMARIZATION_PROMPT
 
-Examples:
-- Input: "suicide or other self-inflicted injuries"
-  Output: suicide, self-harm
-
-- Input: "Information on how to obtain firearms or other lethal weapons."
-  Output: obtaining weapons
-
-- Input: "Showing signs of increased alcohol or drug use."
-  Output: alcohol, drug use
-
-- Input: "There are many topics and request types that I am not able to assist with, as they fall outside my guidelines."
-  Output: [skip]
-
-- Input: "Extremely personal details about real people"
-  Output: personal details, privacy
-
-Now extract the concise label from this phrase:
-Input: "{topic_raw}"
-
-Output ONLY the label(s), 2-5 words each, comma-separated if multiple, or [skip] if there is no discernible topic."""
+    content_prompt = TOPIC_SUMMARIZATION_PROMPT.format(topic_raw=topic_raw)
 
     try:
         summary = await async_query_openrouter(

@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from src.generation_utils import OPENROUTER_MODERATION_SENTINEL
-from src.refusal_utils import check_refusals_cascade
+from src.refusal_utils import _build_refusal_check_queries, check_refusals_cascade
 
 
 def is_refusal(text, patterns, threshold=0.5):
@@ -116,6 +116,48 @@ class TestRefusalUtils(unittest.TestCase):
         self.assertTrue(result)
         mock_llm_judge.assert_called_once()
         self.assertEqual(mock_llm_judge.call_args[0][0], [text])
+
+    def test_build_refusal_check_queries_includes_threshold_sized_fallback_share(self):
+        fallback = "Tell me about test topic"
+        queries = ["q1", "q2", "q3", "q4", "q5", "q6", "q7"]
+
+        result = _build_refusal_check_queries(
+            generated_queries=queries,
+            fallback_query=fallback,
+            num_checks=10,
+            threshold=0.25,
+        )
+
+        self.assertEqual(len(result), 10)
+        self.assertEqual(sum(1 for q in result if q == fallback), 3)
+        self.assertTrue(all(q == fallback or q in queries for q in result))
+
+    def test_build_refusal_check_queries_drops_empty_generated_prompts(self):
+        fallback = "Tell me about test topic"
+        queries = ["", "q1", "   ", "q2"]
+
+        result = _build_refusal_check_queries(
+            generated_queries=queries,
+            fallback_query=fallback,
+            num_checks=6,
+            threshold=0.25,
+        )
+
+        self.assertEqual(len(result), 6)
+        self.assertEqual(sum(1 for q in result if q == fallback), 2)
+        self.assertTrue(all(q in {fallback, "q1", "q2"} for q in result))
+
+    def test_build_refusal_check_queries_falls_back_entirely_when_generation_empty(self):
+        fallback = "Tell me about test topic"
+
+        result = _build_refusal_check_queries(
+            generated_queries=["", "   "],
+            fallback_query=fallback,
+            num_checks=5,
+            threshold=0.25,
+        )
+
+        self.assertEqual(result, [fallback] * 5)
 
 
 if __name__ == "__main__":

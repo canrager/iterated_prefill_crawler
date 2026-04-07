@@ -1,5 +1,6 @@
 # Dot files and folders
 .*
+!.gitignore
 
 # Environment
 __pycache__/
@@ -15,3 +16,11 @@ docs
 hf_models
 *.json
 multirun
+
+# agent-trio files
+PLAN.md
+HANDOFF.md
+REVIEW.md
+AGENTS.md
+CLAUDE.md
+.trio/

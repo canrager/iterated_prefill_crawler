@@ -68,6 +68,31 @@ class PromptBuilder:
         self.assistant_seed_topics = assistant_seed_topics
         self.languages = languages
 
+    def _get_user_seed_candidates(self) -> List[Topic]:
+        """Return topics eligible to seed later crawl prompts.
+
+        We seed from all discovered head topics, not just head refusals. This
+        lets the crawler drill down into broad categories that may answer
+        safely at the coarse label (for example, a high-level political topic)
+        but still yield narrower refusal subtopics once expanded.
+
+        Fall back to ``head_refusal_topics`` for older/demo call sites that may
+        populate that list without filling ``head_topics``.
+        """
+        if self.user_seed_topics is None:
+            return []
+        if self.user_seed_topics.head_topics:
+            return self.user_seed_topics.head_topics
+        return self.user_seed_topics.head_refusal_topics
+
+    def _get_assistant_seed_candidates(self) -> List[Topic]:
+        """Return topics eligible for assistant-side seeding."""
+        if self.assistant_seed_topics is None:
+            return []
+        if self.assistant_seed_topics.head_topics:
+            return self.assistant_seed_topics.head_topics
+        return self.assistant_seed_topics.head_refusal_topics
+
     def _should_use_user_seed_templates(self, use_seed_templates: bool) -> bool:
         """Return whether seeded user prompts should be used.
 
@@ -77,7 +102,7 @@ class PromptBuilder:
         """
         if self.user_seed_template is None or self.user_seed_topics is None:
             return False
-        if len(self.user_seed_topics.head_refusal_topics) == 0:
+        if len(self._get_user_seed_candidates()) == 0:
             return False
         return use_seed_templates or self.user_pre is None
 
@@ -85,7 +110,7 @@ class PromptBuilder:
         """Return whether seeded assistant prompts should be used."""
         if self.assistant_seed_template is None or self.assistant_seed_topics is None:
             return False
-        if len(self.assistant_seed_topics.head_refusal_topics) == 0:
+        if len(self._get_assistant_seed_candidates()) == 0:
             return False
         return use_seed_templates or self.assistant_pre is None
 
@@ -106,9 +131,9 @@ class PromptBuilder:
         if self._should_use_user_seed_templates(use_seed_templates=True):
             assert self.user_seed_topics is not None
             user_temp = random.choice(self.user_seed_template[lang])
-            user_topic = random.choice(
-                self.user_seed_topics.head_refusal_topics
-            ).__getattribute__(lang)
+            user_topic = random.choice(self._get_user_seed_candidates()).__getattribute__(
+                lang
+            )
             user_mid_msg = _fill_template(user_temp, user_topic)
             user_parts.append(user_mid_msg)
 
@@ -124,7 +149,7 @@ class PromptBuilder:
             assert self.assistant_seed_topics is not None
             assistant_temp = random.choice(self.assistant_seed_template[lang])
             assistant_topic = random.choice(
-                self.assistant_seed_topics.head_refusal_topics
+                self._get_assistant_seed_candidates()
             ).__getattribute__(lang)
             assistant_mid_msg = assistant_temp.format(assistant_topic)
             assistant_parts.append(assistant_mid_msg)
@@ -222,7 +247,7 @@ class PromptBuilder:
             assert self.user_seed_topics is not None
             # Seeded: sample n topics from the queue and format with seed template
             sampled_topics = [
-                random.choice(self.user_seed_topics.head_refusal_topics)
+                random.choice(self._get_user_seed_candidates())
                 for _ in range(n)
             ]
             parent_ids = [t.id for t in sampled_topics]
