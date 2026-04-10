@@ -1,0 +1,10 @@
+input_paths: []
+aggregation_model: moonshotai/kimi-k2-0905
+input_batch_size: 50
+output_batch_size: 25
+max_final_topics: 50
+max_tokens: 4096
+temperature: 0.3
+parallel_batches: true
+verbose: false
+ground_truth_reference: null
