@@ -326,6 +326,7 @@ async def async_summarize_single_topic(
             prompt=content_prompt,
             verbose=verbose,
             client_kwargs=client_kwargs,
+            temperature=0.6,
         )
         summary = summary.strip()
 

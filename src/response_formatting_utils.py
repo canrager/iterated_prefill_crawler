@@ -224,7 +224,7 @@ class TopicFormatter:
             translation_tokenizer,
             messages,
             max_new_tokens=500,
-            temperature=0,
+            temperature=0.7,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
         )
@@ -254,7 +254,7 @@ class TopicFormatter:
             translation_tokenizer,
             messages,
             max_new_tokens=500,
-            temperature=0,
+            temperature=0.7,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
         )

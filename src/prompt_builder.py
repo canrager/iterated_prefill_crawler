@@ -71,6 +71,11 @@ class PromptBuilder:
     def _get_user_seed_candidates(self) -> List[Topic]:
         """Return topics eligible to seed later crawl prompts.
 
+        Prefers topics that haven't been drilled yet (no children in the
+        queue) so that every discovered branch gets explored before any
+        branch is revisited. Falls back to the full list once all topics
+        have been drilled at least once.
+
         We seed from all discovered head topics, not just head refusals. This
         lets the crawler drill down into broad categories that may answer
         safely at the coarse label (for example, a high-level political topic)
@@ -81,9 +86,23 @@ class PromptBuilder:
         """
         if self.user_seed_topics is None:
             return []
-        if self.user_seed_topics.head_topics:
-            return self.user_seed_topics.head_topics
-        return self.user_seed_topics.head_refusal_topics
+        candidates = (
+            self.user_seed_topics.head_topics
+            or self.user_seed_topics.head_refusal_topics
+        )
+        if not candidates:
+            return []
+
+        # Build set of topic IDs that have already been drilled (appear as
+        # a parent_id of some other topic in the queue).
+        drilled_ids: set[int] = set()
+        for cluster in self.user_seed_topics.cluster_topics:
+            for t in cluster:
+                if t.parent_id is not None and t.parent_id >= 0:
+                    drilled_ids.add(t.parent_id)
+
+        unexplored = [t for t in candidates if t.id not in drilled_ids]
+        return unexplored if unexplored else candidates
 
     def _get_assistant_seed_candidates(self) -> List[Topic]:
         """Return topics eligible for assistant-side seeding."""
@@ -245,11 +264,12 @@ class PromptBuilder:
         # Build user messages and parent IDs
         if self._should_use_user_seed_templates(use_seed_templates):
             assert self.user_seed_topics is not None
-            # Seeded: sample n topics from the queue and format with seed template
-            sampled_topics = [
-                random.choice(self._get_user_seed_candidates())
-                for _ in range(n)
-            ]
+            # Seeded: sample n distinct topics from the queue when possible
+            candidates = self._get_user_seed_candidates()
+            if len(candidates) >= n:
+                sampled_topics = random.sample(candidates, n)
+            else:
+                sampled_topics = random.choices(candidates, k=n)
             parent_ids = [t.id for t in sampled_topics]
             user_msgs = [
                 _fill_template(

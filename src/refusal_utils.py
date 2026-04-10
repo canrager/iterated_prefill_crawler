@@ -157,7 +157,7 @@ def _translate_for_classifier(
         translation_tokenizer,
         translate_messages,
         max_new_tokens=500,
-        temperature=0.0,
+        temperature=0.7,
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
     )
