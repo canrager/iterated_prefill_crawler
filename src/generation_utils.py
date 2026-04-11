@@ -106,7 +106,7 @@ async def _async_api_single(
     # when any message has empty content. This can happen when
     # remove_thinking_context() returns "" for an incomplete <think> rollout
     # that was truncated by max_new_tokens.
-    if any(not (m.get("content") or "").strip() for m in messages):
+    if any(not str(m.get("content") or "").strip() for m in messages):
         print(
             f"Skipping API call for {model_name}: one or more messages have empty content"
         )

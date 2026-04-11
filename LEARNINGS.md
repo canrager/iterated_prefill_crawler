@@ -72,3 +72,20 @@ DeepSeek occasionally hallucinates training data into a generation slot (textboo
 When an LLM prompt is changed to fix a contamination or extraction bug, the cheapest and most targeted validation is an integration test that feeds the exact bad inputs from the incident as fixtures and asserts the expected output. A full debug run is expensive and stochastic — the contaminating sample may not reproduce. Reserve debug runs for validating overall pipeline noise reduction, not individual prompt correctness.
 
 *Evidence: 2026-04-10 Kimi extraction prompt fix validated in `tests/test_topic_extraction_drift.py` with textbook + LeetCode fixtures before launching the verification debug run.*
+
+### Assistant prefill that works locally may break on remote APIs
+
+The ranking pipeline's `\boxed{` assistant prefill was designed for local vLLM (which continues from the prefill). On OpenRouter with gemini-flash-lite, the same prefill produced unparseable continuations (`Illegal drugs}` instead of `\boxed{B}`). When porting from local to remote, test the prefill behavior first; if it fails, drop it and rely on the model producing the full structured response unaided.
+
+*Evidence: 2026-04-11 word cloud ranking stage; prefill removed after gemini-flash-lite produced garbage continuations.*
+
+### Treat `/exp` as legacy — build new tooling alongside, not inside
+
+`/exp` code is outdated and broken. Rather than fixing it, build standalone scripts that reuse the library code in `src/` but are decoupled from the legacy evaluation harness. This avoids breaking things that already don't work and keeps the new code maintainable.
+
+*Evidence: 2026-04-11 word cloud pipeline; `exp/evaluate_crawler.py` changes reverted per review constraint, new `scripts/generate_wordcloud.py` built instead.*
+
+### Clustering granularity is upper-bounded by upstream topic extraction
+The deduplication prompt can only preserve the granularity of the topics provided to it. If the crawler's upstream topic extractor groups specific refusals into a broad topic like "taiwan issue", the clustering stage cannot magically separate them into more granular topics like "Taiwan presidential election". Any prompt instructing the clustering LLM to be granular will only preserve the maximum granularity available from the input data. To achieve true event-level granularity, the topic extraction prompt must also enforce event-level extraction.
+
+*Evidence: 2026-04-11 clustering prompt fix preserved taiwan issue and south china sea issue as distinct from unofficial narratives of political movements, grouping them under Territorial and Sovereignty Disputes rather than a massive Politics bucket. However, it could not extract finer details because the inputs were already coarse.*
