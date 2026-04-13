@@ -143,6 +143,8 @@ class PromptBuilder:
         user_parts = []
         assistant_parts = []
 
+        sampled_user_topic = None
+
         if self.user_pre:
             user_pre_msg = random.choice(self.user_pre[lang])
             user_parts.append(user_pre_msg)
@@ -150,14 +152,19 @@ class PromptBuilder:
         if self._should_use_user_seed_templates(use_seed_templates=True):
             assert self.user_seed_topics is not None
             user_temp = random.choice(self.user_seed_template[lang])
-            user_topic = random.choice(self._get_user_seed_candidates()).__getattribute__(
-                lang
-            )
+            sampled_user_topic = random.choice(self._get_user_seed_candidates())
+            user_topic = getattr(sampled_user_topic, lang)
             user_mid_msg = _fill_template(user_temp, user_topic)
             user_parts.append(user_mid_msg)
 
         if self.user_post:
-            user_post_msg = random.choice(self.user_post[lang])
+            user_post_template = random.choice(self.user_post[lang])
+            if sampled_user_topic is not None:
+                user_post_msg = _fill_template(
+                    user_post_template, getattr(sampled_user_topic, lang)
+                )
+            else:
+                user_post_msg = user_post_template
             user_parts.append(user_post_msg)
 
         if self.assistant_pre:
@@ -170,21 +177,23 @@ class PromptBuilder:
             assistant_topic = random.choice(
                 self._get_assistant_seed_candidates()
             ).__getattribute__(lang)
-            assistant_mid_msg = assistant_temp.format(assistant_topic)
+            assistant_mid_msg = _fill_template(assistant_temp, assistant_topic)
             assistant_parts.append(assistant_mid_msg)
 
         if self.assistant_post:
             assistant_parts.append(self.assistant_post)
 
         full_user_message = " ".join(user_parts)
-        full_assistant_message = " ".join(assistant_parts)
-
-        messages = [
-            [
-                {"role": "user", "content": full_user_message},
-                {"role": "assistant", "content": full_assistant_message},
+        if assistant_parts:
+            full_assistant_message = " ".join(assistant_parts)
+            messages = [
+                [
+                    {"role": "user", "content": full_user_message},
+                    {"role": "assistant", "content": full_assistant_message},
+                ]
             ]
-        ]
+        else:
+            messages = [[{"role": "user", "content": full_user_message}]]
 
         return messages
 
@@ -251,17 +260,8 @@ class PromptBuilder:
         else:
             assistant_content = None
 
-        # Determine user-side listing cue (only used in no-prefill mode)
-        user_post_suffix = None
-        if assistant_content is None and self.user_post is not None:
-            post_templates = self.user_post[lang]
-            user_post_suffix = (
-                post_templates[warmup_idx % len(post_templates)]
-                if warmup_idx is not None
-                else random.choice(post_templates)
-            )
-
         # Build user messages and parent IDs
+        sampled_topics: List[Topic] | None = None
         if self._should_use_user_seed_templates(use_seed_templates):
             assert self.user_seed_topics is not None
             # Seeded: sample n distinct topics from the queue when possible
@@ -273,7 +273,8 @@ class PromptBuilder:
             parent_ids = [t.id for t in sampled_topics]
             user_msgs = [
                 _fill_template(
-                    random.choice(self.user_seed_template[lang]), getattr(t, lang)
+                    random.choice(self.user_seed_template[lang]),
+                    getattr(t, lang) or t.raw,
                 )
                 for t in sampled_topics
             ]
@@ -283,12 +284,23 @@ class PromptBuilder:
             user_msgs = [random.choice(self.user_pre[lang]) for _ in range(n)]
             parent_ids = [-1] * n
 
-        if user_post_suffix:
-            user_msgs = [f"{msg} {user_post_suffix}" for msg in user_msgs]
-        elif self.user_post:
-            user_msgs = [
-                f"{msg} {random.choice(self.user_post[lang])}" for msg in user_msgs
-            ]
+        if self.user_post:
+            post_templates = self.user_post[lang]
+            if warmup_idx is not None:
+                sampled_post_templates = [post_templates[warmup_idx % len(post_templates)]] * n
+            else:
+                sampled_post_templates = [random.choice(post_templates) for _ in range(n)]
+
+            if sampled_topics is not None:
+                user_posts = [
+                    _fill_template(template, getattr(topic, lang) or topic.raw)
+                    for template, topic in zip(sampled_post_templates, sampled_topics)
+                ]
+                user_msgs = [f"{msg} {post}" for msg, post in zip(user_msgs, user_posts)]
+            # During warmup (no seed topics), skip post templates that contain
+            # {} placeholders — they can't be filled without a seed topic.
+            elif not any("{}" in t for t in sampled_post_templates):
+                user_msgs = [f"{msg} {post}" for msg, post in zip(user_msgs, sampled_post_templates)]
 
         # Assemble message dicts
         if assistant_content is not None:

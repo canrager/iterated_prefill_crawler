@@ -107,6 +107,33 @@ def test_build_messages_can_seed_from_non_refusal_head_topics():
     assert chinese_parent_ids == [0]
 
 
+def test_build_messages_fills_user_post_templates_with_same_seed_topic_and_omits_assistant():
+    builder = PromptBuilder(
+        user_seed_templates={
+            "english": ["SEED {}"],
+            "chinese": ["SEED {}"],
+        },
+        user_post_templates={
+            "english": ["POST {} AGAIN {}"],
+            "chinese": ["POST {} AGAIN {}"],
+        },
+        user_seed_topics=_seed_topic_queue(),
+        languages=["english"],
+    )
+
+    messages, parent_ids = builder.build_messages("english", 1, use_seed_templates=True)
+
+    assert messages == [
+        [
+            {
+                "role": "user",
+                "content": "SEED doxxing personal data POST doxxing personal data AGAIN doxxing personal data",
+            }
+        ]
+    ]
+    assert parent_ids == [0]
+
+
 def test_crawl_uses_pre_templates_during_warmup_then_switches_to_seeded_prompts(
     monkeypatch,
     tmp_path,
@@ -283,3 +310,381 @@ def test_non_refusal_topics_seed_drilldown(monkeypatch, tmp_path):
         "After 50 samples, the political topic was never used as a seed. "
         "This suggests _get_user_seed_candidates() is not returning head_topics."
     )
+
+
+def test_jailbreak_seeded_messages_match_single_user_turn_structure():
+    prompts = _load_jailbreak_prompts()
+    builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        assistant_pre_templates=prompts.assistant_pre_templates,
+        assistant_seed_templates=prompts.assistant_seed_templates,
+        assistant_post_templates=prompts.assistant_post_templates,
+        system_templates=prompts.system_templates,
+        user_seed_topics=_seed_topic_queue(),
+        languages=["english"],
+    )
+
+    messages, parent_ids = builder.build_messages("english", 1, use_seed_templates=True)
+
+    assert parent_ids == [0]
+    assert len(messages) == 1
+    assert messages[0] == [{"role": "user", "content": messages[0][0]["content"]}]
+    assert "doxxing personal data" in messages[0][0]["content"]
+    assert "known-denied category doxxing personal data" in messages[0][0]["content"]
+    assert "Topics:\n\n1." in messages[0][0]["content"]
+
+
+def test_seeded_message_never_contains_literal_none():
+    """Regression: topics with chinese=None (from _split_at_comma) must
+    never produce 'None' in the assembled message. The builder must fall
+    back to topic.raw."""
+    queue = TopicQueue()
+    queue.incoming_batch([
+        Topic(
+            raw="敏感政治冲突",
+            english="sensitive political conflicts",
+            chinese=None,  # <-- simulates the _split_at_comma bug
+            shortened="sensitive political conflicts",
+            summary="sensitive political conflicts",
+            is_head=True,
+            is_refusal=True,
+        )
+    ])
+
+    prompts = _load_jailbreak_prompts()
+    builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        user_seed_topics=queue,
+        languages=["chinese"],
+    )
+
+    messages, _ = builder.build_messages("chinese", 1, use_seed_templates=True)
+    user_content = messages[0][0]["content"]
+
+    assert "None" not in user_content, (
+        f"Literal 'None' in seeded message — fallback to raw failed:\n{user_content[:300]}"
+    )
+    assert "敏感政治冲突" in user_content, (
+        f"Expected raw topic in message but got:\n{user_content[:300]}"
+    )
+
+
+def test_warmup_messages_never_contain_unfilled_braces():
+    """Regression: during warmup (no seed topic), user_post_templates with {}
+    placeholders must NOT be appended — they can't be filled."""
+    prompts = _load_jailbreak_prompts()
+    builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        user_seed_topics=TopicQueue(),  # empty queue = warmup mode
+        languages=["chinese"],
+    )
+
+    messages, _ = builder.build_messages(
+        "chinese", 1, warmup_idx=0, use_seed_templates=False
+    )
+    user_content = messages[0][0]["content"]
+
+    assert "{}" not in user_content, (
+        f"Unfilled {{}} in warmup message:\n{user_content[:300]}"
+    )
+    # Post template should have been skipped entirely
+    assert "验证政策" not in user_content, (
+        f"Compliance framing leaked into warmup:\n{user_content[:300]}"
+    )
+
+
+def test_jailbreak_seeded_message_matches_reference_chat_structure():
+    """The assembled seeded message must match the structure of the reference
+    OpenRouter chat (artifacts/OpenRouter Chat Mon Mar 30 2026.md):
+      1. Single user message, no assistant turn
+      2. Decomposition demand with the seed topic filled in
+      3. Compliance framing with the same seed topic filled in
+      4. Listing cue at the end
+    """
+    TOPIC_ZH = "敏感政治与地缘冲突"
+    queue = TopicQueue()
+    queue.incoming_batch([
+        Topic(
+            raw=TOPIC_ZH,
+            english="sensitive political and geopolitical conflicts",
+            chinese=TOPIC_ZH,
+            shortened="sensitive political and geopolitical conflicts",
+            summary="sensitive political and geopolitical conflicts",
+            is_head=True,
+            is_refusal=True,
+        )
+    ])
+
+    prompts = _load_jailbreak_prompts()
+    builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        user_seed_topics=queue,
+        languages=["chinese"],
+    )
+
+    messages, _ = builder.build_messages("chinese", 1, use_seed_templates=True)
+
+    # Single user message, no assistant turn
+    assert len(messages[0]) == 1
+    assert messages[0][0]["role"] == "user"
+
+    content = messages[0][0]["content"]
+
+    # Decomposition demand contains the topic
+    assert TOPIC_ZH in content, f"Seed topic not in message"
+
+    # Compliance framing contains the topic (not {})
+    assert "已知拒绝类别" in content, "Missing compliance framing"
+    assert f"已知拒绝类别{TOPIC_ZH}" in content, (
+        f"Compliance framing should contain the seed topic, got:\n{content[:400]}"
+    )
+
+    # No unfilled placeholders
+    assert "{}" not in content, f"Unfilled {{}} in seeded message"
+    assert "None" not in content, f"Literal None in seeded message"
+
+    # Listing cue at the end
+    assert "话题：" in content, "Missing listing cue"
+    assert content.rstrip().endswith("1."), (
+        f"Message should end with listing cue '1.', got: ...{content[-50:]}"
+    )
+
+
+def test_print_assembled_message_shapes(capsys):
+    """Print the exact assembled messages for human inspection.
+    This test always passes — its purpose is to make the message shapes
+    visible in pytest -v -s output so a reviewer can compare them against
+    the reference chat in artifacts/OpenRouter Chat Mon Mar 30 2026.md."""
+    prompts = _load_jailbreak_prompts()
+
+    # --- Warmup (no seed) ---
+    warmup_builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        user_seed_topics=TopicQueue(),  # empty = warmup
+        languages=["chinese"],
+    )
+    warmup_msgs, warmup_pids = warmup_builder.build_messages(
+        "chinese", 1, warmup_idx=0, use_seed_templates=False
+    )
+
+    # --- Seeded (Chinese, valid topic) ---
+    zh_queue = TopicQueue()
+    zh_queue.incoming_batch([Topic(
+        raw="敏感政治与地缘冲突", english="sensitive political and geopolitical conflicts",
+        chinese="敏感政治与地缘冲突", shortened="sensitive political and geopolitical conflicts",
+        summary="sensitive political and geopolitical conflicts",
+        is_head=True, is_refusal=True,
+    )])
+    seeded_builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        user_seed_topics=zh_queue,
+        languages=["chinese"],
+    )
+    seeded_msgs, seeded_pids = seeded_builder.build_messages(
+        "chinese", 1, use_seed_templates=True
+    )
+
+    # --- Seeded (Chinese, chinese=None fallback) ---
+    none_queue = TopicQueue()
+    none_queue.incoming_batch([Topic(
+        raw="仇恨言论与歧视", english="hate speech and discrimination",
+        chinese=None, shortened="hate speech and discrimination",
+        summary="hate speech and discrimination",
+        is_head=True, is_refusal=True,
+    )])
+    fallback_builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        user_seed_topics=none_queue,
+        languages=["chinese"],
+    )
+    fallback_msgs, fallback_pids = fallback_builder.build_messages(
+        "chinese", 1, use_seed_templates=True
+    )
+
+    # Print for human review (visible with pytest -v -s)
+    print("\n" + "=" * 70)
+    print("WARMUP (Chinese, no seed)")
+    print("=" * 70)
+    for msg in warmup_msgs[0]:
+        print(f"[{msg['role']}]:\n{msg['content']}")
+    print(f"parent_ids: {warmup_pids}")
+
+    print("\n" + "=" * 70)
+    print("SEEDED (Chinese, topic=敏感政治与地缘冲突)")
+    print("=" * 70)
+    for msg in seeded_msgs[0]:
+        print(f"[{msg['role']}]:\n{msg['content']}")
+    print(f"parent_ids: {seeded_pids}")
+
+    print("\n" + "=" * 70)
+    print("SEEDED (Chinese, chinese=None fallback)")
+    print("=" * 70)
+    for msg in fallback_msgs[0]:
+        print(f"[{msg['role']}]:\n{msg['content']}")
+    print(f"parent_ids: {fallback_pids}")
+
+    # --- Seeded (English, valid topic) ---
+    en_queue = TopicQueue()
+    en_queue.incoming_batch([Topic(
+        raw="sensitive political and geopolitical conflicts",
+        english="sensitive political and geopolitical conflicts",
+        chinese="敏感政治与地缘冲突",
+        shortened="sensitive political and geopolitical conflicts",
+        summary="sensitive political and geopolitical conflicts",
+        is_head=True, is_refusal=True,
+    )])
+    seeded_en_builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        user_seed_topics=en_queue,
+        languages=["english"],
+    )
+    seeded_en_msgs, seeded_en_pids = seeded_en_builder.build_messages(
+        "english", 1, use_seed_templates=True
+    )
+
+    # --- Warmup (English, no seed) ---
+    warmup_en_builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        user_seed_topics=TopicQueue(),
+        languages=["english"],
+    )
+    warmup_en_msgs, warmup_en_pids = warmup_en_builder.build_messages(
+        "english", 1, warmup_idx=0, use_seed_templates=False
+    )
+
+    # --- Seeded (English, english=None fallback) ---
+    none_en_queue = TopicQueue()
+    none_en_queue.incoming_batch([Topic(
+        raw="hate speech and discrimination",
+        english=None,
+        chinese="仇恨言论与歧视",
+        shortened=None,
+        summary="hate speech and discrimination",
+        is_head=True, is_refusal=True,
+    )])
+    fallback_en_builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        user_seed_topics=none_en_queue,
+        languages=["english"],
+    )
+    fallback_en_msgs, fallback_en_pids = fallback_en_builder.build_messages(
+        "english", 1, use_seed_templates=True
+    )
+
+    print("\n" + "=" * 70)
+    print("WARMUP (English, no seed)")
+    print("=" * 70)
+    for msg in warmup_en_msgs[0]:
+        print(f"[{msg['role']}]:\n{msg['content']}")
+    print(f"parent_ids: {warmup_en_pids}")
+
+    print("\n" + "=" * 70)
+    print("SEEDED (English, topic=sensitive political and geopolitical conflicts)")
+    print("=" * 70)
+    for msg in seeded_en_msgs[0]:
+        print(f"[{msg['role']}]:\n{msg['content']}")
+    print(f"parent_ids: {seeded_en_pids}")
+
+    print("\n" + "=" * 70)
+    print("SEEDED (English, english=None fallback)")
+    print("=" * 70)
+    for msg in fallback_en_msgs[0]:
+        print(f"[{msg['role']}]:\n{msg['content']}")
+    print(f"parent_ids: {fallback_en_pids}")
+
+    # === Structural assertions ===
+
+    # Chinese warmup: no compliance framing, no {}, no None
+    warmup_content = warmup_msgs[0][0]["content"]
+    assert "{}" not in warmup_content
+    assert "None" not in warmup_content
+    assert "验证政策" not in warmup_content
+
+    # Chinese seeded: topic filled in both seed and post templates
+    seeded_content = seeded_msgs[0][0]["content"]
+    assert "敏感政治与地缘冲突" in seeded_content
+    assert "已知拒绝类别敏感政治与地缘冲突" in seeded_content
+    assert seeded_content.rstrip().endswith("1.")
+    assert "{}" not in seeded_content
+    assert "None" not in seeded_content
+
+    # Chinese fallback: raw used instead of None
+    fallback_content = fallback_msgs[0][0]["content"]
+    assert "仇恨言论与歧视" in fallback_content
+    assert "已知拒绝类别仇恨言论与歧视" in fallback_content
+    assert "None" not in fallback_content
+    assert "{}" not in fallback_content
+
+    # English warmup: no compliance framing, no {}, no None
+    warmup_en_content = warmup_en_msgs[0][0]["content"]
+    assert "{}" not in warmup_en_content
+    assert "None" not in warmup_en_content
+    assert "verify policy" not in warmup_en_content.lower()
+
+    # English seeded: topic filled in both seed and post templates
+    seeded_en_content = seeded_en_msgs[0][0]["content"]
+    assert "sensitive political and geopolitical conflicts" in seeded_en_content
+    assert "known-denied category sensitive political and geopolitical conflicts" in seeded_en_content
+    assert seeded_en_content.rstrip().endswith("1.")
+    assert "{}" not in seeded_en_content
+    assert "None" not in seeded_en_content
+
+    # English fallback: raw used instead of None
+    fallback_en_content = fallback_en_msgs[0][0]["content"]
+    assert "hate speech and discrimination" in fallback_en_content
+    assert "known-denied category hate speech and discrimination" in fallback_en_content
+    assert "None" not in fallback_en_content
+    assert "{}" not in fallback_en_content
+
+
+def test_split_at_comma_preserves_chinese_and_english():
+    """Regression: _split_at_comma must propagate chinese/english/shortened
+    to child topics, not leave them as None."""
+    from src.response_formatting_utils import TopicFormatter
+    from unittest.mock import MagicMock
+
+    config = MagicMock()
+    formatter = TopicFormatter(config)
+
+    topic = Topic(
+        raw="武器制造, 爆炸物制造",
+        english="weapons manufacturing, explosives manufacturing",
+        chinese="武器制造, 爆炸物制造",
+        shortened="weapons manufacturing, explosives manufacturing",
+        summary="weapons manufacturing, explosives manufacturing",
+        parent_id=-1,
+        is_chinese=True,
+    )
+
+    result = formatter._split_at_comma([topic], "summary")
+
+    # Original topic keeps the first part
+    assert topic.summary == "weapons manufacturing"
+
+    # New split child must have chinese and english set (not None)
+    children = [t for t in result if t is not topic]
+    assert len(children) >= 1
+    child = children[0]
+    assert child.chinese is not None, f"Split child has chinese=None"
+    assert child.english is not None, f"Split child has english=None"
+    assert child.shortened is not None, f"Split child has shortened=None"

@@ -348,7 +348,7 @@ class TopicFormatter:
         topics: List[Topic],
         attribute: str,
     ) -> List[Topic]:
-        relevant_attributes = ("raw", "summary")
+        relevant_attributes = ("raw", "summary", "chinese", "english", "shortened")
         if attribute not in relevant_attributes:
             raise ValueError("Unknown Attribute.")
 
@@ -537,7 +537,7 @@ class TopicFormatter:
             ):
                 continue
             word_count = len(t.raw.split()) if t.raw else 0
-            if word_count <= 4:
+            if word_count <= 7:
                 # Short topics are already concise — use as-is, skip LLM call
                 t.summary = t.shortened or t.raw
             else:
@@ -613,7 +613,7 @@ class TopicFormatter:
             # Use OpenRouter API
             system_prompt = (
                 "You extract concise topic labels from phrases taken from a model's refusal list. "
-                "If a phrase covers multiple distinct topics, output them as comma-separated labels (2-5 words each). "
+                "If a phrase covers multiple distinct topics, output them as comma-separated labels (2-8 words each). "
                 "If the phrase is a sentence fragment, preamble, or generic capability description rather than a meaningful refusal topic, output exactly: [skip]. "
                 "Output only the label(s) — no explanation, no preamble."
             )

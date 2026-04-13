@@ -246,14 +246,14 @@ The Crawler analyzes refusal behavior of a `target_model` and uses an LM to do a
 
 Each model role can be set to `"local"` (uses the vLLM-served `local_model`) or to a remote model string that routes through an OpenAI-compatible API. Model strings support a `provider:model_id` prefix to target specific providers:
 
-| Prefix        | Provider   | Default base URL                                            | API key env var      |
-| ------------- | ---------- | ----------------------------------------------------------- | -------------------- |
-| `openrouter:` | OpenRouter | `https://openrouter.ai/api/v1`                              | `OPENROUTER_API_KEY` |
-| `openai:`     | OpenAI     | `https://api.openai.com/v1`                                 | `OPENAI_API_KEY`     |
-| `gemini:`     | Gemini     | `https://generativelanguage.googleapis.com/v1beta/openai/`  | `GEMINI_API_KEY`     |
-| `ollama:`     | Ollama     | `http://localhost:11434/v1`                                  | *(none)*             |
-| `lmstudio:`   | LM Studio  | `http://localhost:1234/v1`                                   | *(none)*             |
-| *(no prefix)* | default    | depends on `model.default_provider`                          | *(varies)*           |
+| Prefix        | Provider   | Default base URL                                           | API key env var      |
+| ------------- | ---------- | ---------------------------------------------------------- | -------------------- |
+| `openrouter:` | OpenRouter | `https://openrouter.ai/api/v1`                             | `OPENROUTER_API_KEY` |
+| `openai:`     | OpenAI     | `https://api.openai.com/v1`                                | `OPENAI_API_KEY`     |
+| `gemini:`     | Gemini     | `https://generativelanguage.googleapis.com/v1beta/openai/` | `GEMINI_API_KEY`     |
+| `ollama:`     | Ollama     | `http://localhost:11434/v1`                                | _(none)_             |
+| `lmstudio:`   | LM Studio  | `http://localhost:1234/v1`                                 | _(none)_             |
+| _(no prefix)_ | default    | depends on `model.default_provider`                        | _(varies)_           |
 
 When no prefix is given, the model string is routed to `model.default_provider` (defaults to `"openrouter"`).
 
@@ -285,7 +285,7 @@ Or use LM Studio for topic generation and OpenRouter for auxiliary roles:
 
 ```yaml
 target_model: "lmstudio:deepseek-r1-distill-llama-8b"
-translation_model: "google/gemini-3.1-flash-lite-preview"   # no prefix → openrouter
+translation_model: "google/gemini-3.1-flash-lite-preview" # no prefix → openrouter
 summarization_model: "google/gemini-3.1-flash-lite-preview"
 refusal_check_model: "google/gemini-3.1-flash-lite-preview"
 ```
@@ -324,7 +324,6 @@ python -m vllm.entrypoints.openai.api_server \
 transformers serve deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
     --port 1234
 ```
-
 
 Any OpenAI-compatible server works — just pick a provider prefix (`ollama:`, `lmstudio:`, etc.) and point its URL at your server.
 
@@ -393,4 +392,38 @@ To aggregate each prompt config separately after a sweep, use multirun over expe
 
 Each aggregation writes to `artifacts/aggregation/<timestamp>/` with cluster titles, a merge log, and an interactive HTML explorer.
 
-# All eval stuff in `/exp` is likely broken.
+## Word Cloud Generation
+
+Generate a word cloud from any completed crawl run — no local GPU required. All three stages (clustering, ranking, rendering) use an LLM via OpenRouter:
+
+```bash
+python scripts/generate_wordcloud.py <crawl_json_path>
+```
+
+**Example:**
+
+```bash
+python scripts/generate_wordcloud.py artifacts/out/crawler_out_20260410_180314_deepseek-v3.2_5samples_2crawls_Truefilter.json
+```
+
+The script produces intermediate JSONs and a final PNG in `artifacts/result/`:
+
+| Stage | Output file |
+|-------|------------|
+| Cluster | `topics_clustered_<stem>.json` |
+| Rank | `topics_clustered_ranked_<stem>.json` |
+| Word cloud | `wordcloud_elo_<stem>.png` |
+
+Intermediate files are reused on re-run. Pass `--force-recompute` to recompute all stages.
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--judge-model` | `google/gemini-3.1-flash-lite-preview` | LLM for clustering and pairwise ranking |
+| `--num-comparisons` | 500 | Pairwise comparisons for Elo ranking |
+| `--batch-size` | 20 | API batch size for ranking calls |
+| `--ranking-method` | `elo` | Ranking method (`elo` or `wincount`) |
+| `--result-dir` | `artifacts/result` | Output directory |
+| `--force-recompute` | off | Recompute all stages |
+| `--verbose` | off | Print full API request/response details |
