@@ -1,5 +1,7 @@
 """Tests for the multi-provider routing module."""
 
+import asyncio
+
 import pytest
 
 from src.provider_config import (
@@ -295,3 +297,92 @@ class TestBatchGenerateProviderRouting:
         assert captured["base_url"] == "https://generativelanguage.googleapis.com/v1beta/openai/"
         assert captured["api_key"] == "gem-key"
         assert texts == ["world"]
+
+    def test_provider_concurrency_limit_serializes_requests(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_API_KEY", "ollama-key")
+
+        captured = {"current": 0, "peak": 0}
+
+        class FakeChoice:
+            def __init__(self, text):
+                self.message = type("M", (), {"content": text})()
+
+        class FakeCompletions:
+            async def create(self, **kwargs):
+                captured["current"] += 1
+                captured["peak"] = max(captured["peak"], captured["current"])
+                await asyncio.sleep(0.01)
+                captured["current"] -= 1
+                return type("R", (), {"choices": [FakeChoice("ok")]})()
+
+        class FakeClient:
+            def __init__(self, **kwargs):
+                captured["api_key"] = kwargs.get("api_key")
+                captured["base_url"] = kwargs.get("base_url")
+
+            chat = type("C", (), {"completions": FakeCompletions()})()
+
+        import openai as openai_mod
+
+        monkeypatch.setattr(openai_mod, "AsyncOpenAI", FakeClient)
+
+        from src.generation_utils import _api_batch_generate
+
+        messages = [[{"role": "user", "content": f"hi {i}"}] for i in range(3)]
+        texts, _ = _api_batch_generate(
+            model_name="ollama:deepseek-v3.2:cloud",
+            messages=messages,
+            max_new_tokens=10,
+            temperature=0.0,
+            provider_url_overrides={"ollama": "https://ollama.com/v1"},
+            provider_concurrency_limits={"ollama": 1},
+        )
+
+        assert captured["base_url"] == "https://ollama.com/v1"
+        assert captured["api_key"] == "ollama-key"
+        assert captured["peak"] == 1
+        assert texts == ["ok", "ok", "ok"]
+
+    def test_reasoning_only_length_warning(self, monkeypatch, capsys):
+        monkeypatch.setenv("OLLAMA_API_KEY", "ollama-key")
+
+        class FakeChoice:
+            def __init__(self):
+                self.message = type(
+                    "M",
+                    (),
+                    {
+                        "content": "",
+                        "reasoning": "Thinking...",
+                        "reasoning_content": None,
+                    },
+                )()
+                self.finish_reason = "length"
+
+        class FakeCompletions:
+            async def create(self, **kwargs):
+                return type("R", (), {"choices": [FakeChoice()]})()
+
+        class FakeClient:
+            def __init__(self, **kwargs):
+                pass
+
+            chat = type("C", (), {"completions": FakeCompletions()})()
+
+        import openai as openai_mod
+
+        monkeypatch.setattr(openai_mod, "AsyncOpenAI", FakeClient)
+
+        from src.generation_utils import _api_batch_generate
+
+        texts, _ = _api_batch_generate(
+            model_name="ollama:deepseek-v3.2:cloud",
+            messages=[[{"role": "user", "content": "hi"}]],
+            max_new_tokens=12,
+            temperature=0.0,
+            provider_url_overrides={"ollama": "https://ollama.com/v1"},
+        )
+
+        captured = capsys.readouterr()
+        assert "exhausted max_tokens in reasoning" in captured.out
+        assert texts == [""]

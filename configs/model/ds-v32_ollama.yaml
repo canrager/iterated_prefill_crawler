@@ -32,3 +32,8 @@ vllm_max_model_len: 4096
 # Point Ollama to cloud (remove this block for local Ollama)
 provider_urls:
   ollama: "https://ollama.com/v1"
+
+# Ollama Cloud appears to handle serialized user requests more reliably than
+# the crawler's default fully parallel API batches.
+provider_max_concurrency:
+  ollama: 1

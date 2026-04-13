@@ -92,6 +92,7 @@ class TopicFormatter:
                     verbose=verbose,
                     default_provider=self.config.model.default_provider,
                     provider_url_overrides=self.config.model.provider_urls,
+                    provider_concurrency_limits=self.config.model.provider_max_concurrency,
                 )
             except Exception as e:
                 if verbose:
@@ -227,6 +228,7 @@ class TopicFormatter:
             temperature=0.7,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
+            provider_concurrency_limits=self.config.model.provider_max_concurrency,
         )
         # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
         translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
@@ -257,6 +259,7 @@ class TopicFormatter:
             temperature=0.7,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
+            provider_concurrency_limits=self.config.model.provider_max_concurrency,
         )
         # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
         translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
@@ -581,6 +584,7 @@ class TopicFormatter:
                     verbose=verbose,
                     default_provider=self.config.model.default_provider,
                     provider_url_overrides=self.config.model.provider_urls,
+                    provider_concurrency_limits=self.config.model.provider_max_concurrency,
                 )
 
                 # Extract summaries (strip whitespace)

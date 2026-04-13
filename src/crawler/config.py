@@ -194,6 +194,10 @@ class ModelConfig:
     #   provider_urls:
     #     ollama: "http://my-gpu-box:11434/v1"
     provider_urls: Optional[Dict[str, str]] = None
+    # Optional per-provider cap on concurrent remote API requests, e.g.
+    #   provider_max_concurrency:
+    #     ollama: 1
+    provider_max_concurrency: Optional[Dict[str, int]] = None
 
 
 @dataclass

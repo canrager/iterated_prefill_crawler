@@ -56,3 +56,39 @@ Rewrite, merge, and prune continuously. Source control tracks the history.
 - **For parallel runs, use `run_parallel.py` and `run.sh`.** `run_parallel.sh` is untrusted — it has produced only empty umbrella directories. For single-model launches, `run.sh` is canonical. (DeepSeek exits silently in the three-model parallel launch.)
 
 - **Build new tooling alongside `/exp`, not inside it.** `/exp` is legacy and broken. New scripts should reuse `src/` library code but stay decoupled from the old evaluation harness. (Word cloud pipeline was built as `scripts/generate_wordcloud.py` after `/exp` changes were reverted.)
+
+### Topic extractor must gate on "is this a topic list" first
+
+DeepSeek occasionally hallucinates training data into a generation slot (textbook copyright pages, LeetCode solutions) instead of a topic list. The extractor (Kimi) will dutifully label that content as "topics" unless explicitly told to return `[]` for non-topic inputs. The fix is in `TOPIC_EXTRACTION_PROMPT`: the first instruction is now the gate check, not the extraction instruction. Integration tests in `tests/test_topic_extraction_drift.py` use the exact contaminating fixtures as regression guards.
+
+_Evidence: 2026-04-09 neutral debug matrix; book118 copyright page and integer-reversal LeetCode problem produced ~10 false-positive refusal topics that passed the refusal cascade via Gemma probe misfire._
+
+### Validate prompt fixes with integration tests using real bad fixtures, not debug runs
+
+When an LLM prompt is changed to fix a contamination or extraction bug, the cheapest and most targeted validation is an integration test that feeds the exact bad inputs from the incident as fixtures and asserts the expected output. A full debug run is expensive and stochastic — the contaminating sample may not reproduce. Reserve debug runs for validating overall pipeline noise reduction, not individual prompt correctness.
+
+_Evidence: 2026-04-10 Kimi extraction prompt fix validated in `tests/test_topic_extraction_drift.py` with textbook + LeetCode fixtures before launching the verification debug run._
+
+### Assistant prefill that works locally may break on remote APIs
+
+The ranking pipeline's `\boxed{` assistant prefill was designed for local vLLM (which continues from the prefill). On OpenRouter with gemini-flash-lite, the same prefill produced unparseable continuations (`Illegal drugs}` instead of `\boxed{B}`). When porting from local to remote, test the prefill behavior first; if it fails, drop it and rely on the model producing the full structured response unaided.
+
+_Evidence: 2026-04-11 word cloud ranking stage; prefill removed after gemini-flash-lite produced garbage continuations._
+
+### Reasoning tokens do consume the generation budget on remote APIs
+
+For reasoning-first remote models, an empty `message.content` is not enough evidence that the provider or model failed. The model may have spent the full generation budget inside `reasoning` and hit `finish_reason=length` before emitting any user-visible answer. When probing or validating a new provider, first test with a comfortably large token budget; only diagnose auth/model-name/batching issues after ruling out reasoning-budget exhaustion.
+
+_Evidence: 2026-04-13 live Ollama Cloud probe against `deepseek-v3.2:cloud` returned empty `content`, non-empty `reasoning`, and `finish_reason="length"` at `max_tokens=12`; the same prompt returned `OK` at `max_tokens=128`._
+
+### Treat `/exp` as legacy — build new tooling alongside, not inside
+
+`/exp` code is outdated and broken. Rather than fixing it, build standalone scripts that reuse the library code in `src/` but are decoupled from the legacy evaluation harness. This avoids breaking things that already don't work and keeps the new code maintainable.
+
+_Evidence: 2026-04-11 word cloud pipeline; `exp/evaluate_crawler.py` changes reverted per review constraint, new `scripts/generate_wordcloud.py` built instead._
+
+### Clustering granularity is upper-bounded by upstream topic extraction
+
+The deduplication prompt can only preserve the granularity of the topics provided to it. If the crawler's upstream topic extractor groups specific refusals into a broad topic like "taiwan issue", the clustering stage cannot magically separate them into more granular topics like "Taiwan presidential election". Any prompt instructing the clustering LLM to be granular will only preserve the maximum granularity available from the input data. To achieve true event-level granularity, the topic extraction prompt must also enforce event-level extraction.
+
+_Evidence: 2026-04-11 clustering prompt fix preserved taiwan issue and south china sea issue as distinct from unofficial narratives of political movements, grouping them under Territorial and Sovereignty Disputes rather than a massive Politics bucket. However, it could not extract finer details because the inputs were already coarse._

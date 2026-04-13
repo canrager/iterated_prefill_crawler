@@ -166,6 +166,7 @@ class Crawler:
                     verbose=verbose,
                     default_provider=self.config.model.default_provider,
                     provider_url_overrides=self.config.model.provider_urls,
+                    provider_concurrency_limits=self.config.model.provider_max_concurrency,
                 )
 
                 if verbose:

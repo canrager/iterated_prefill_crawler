@@ -32,6 +32,7 @@ def llm_judge_refusals(
     queries: Optional[List[str]] = None,
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
+    provider_concurrency_limits: Optional[Dict[str, int]] = None,
 ) -> List[bool]:
     if not texts:
         return []
@@ -59,6 +60,7 @@ def llm_judge_refusals(
         temperature=0.0,
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
+        provider_concurrency_limits=provider_concurrency_limits,
     )
 
     results = []
@@ -138,6 +140,7 @@ def _translate_for_classifier(
     translation_tokenizer,
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
+    provider_concurrency_limits: Optional[Dict[str, int]] = None,
 ) -> List[str]:
     """Translate Chinese texts to English for the classifier. Non-Chinese texts pass through."""
     if translation_model is None:
@@ -160,6 +163,7 @@ def _translate_for_classifier(
         temperature=0.7,
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
+        provider_concurrency_limits=provider_concurrency_limits,
     )
 
     result = list(texts)
@@ -183,6 +187,7 @@ def check_refusals_cascade(
 
     default_provider = config.model.default_provider
     provider_url_overrides = config.model.provider_urls
+    provider_concurrency_limits = config.model.provider_max_concurrency
 
     refusals = []
     texts_for_classifier = []
@@ -207,6 +212,7 @@ def check_refusals_cascade(
             translation_tokenizer,
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
+            provider_concurrency_limits=provider_concurrency_limits,
         )
 
     texts_for_llm = []
@@ -251,6 +257,7 @@ def check_refusals_cascade(
             queries=queries_for_llm,
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
+            provider_concurrency_limits=provider_concurrency_limits,
         )
         for i, result in zip(indices_for_llm, llm_results):
             refusals[i] = result
@@ -323,6 +330,7 @@ def check_refusal(
 
     default_provider = config.model.default_provider
     provider_url_overrides = config.model.provider_urls
+    provider_concurrency_limits = config.model.provider_max_concurrency
 
     num_checks = config.crawler.num_refusal_checks_per_topic
     threshold = config.crawler.is_refusal_threshold
@@ -356,6 +364,7 @@ def check_refusal(
         verbose=verbose,
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
+        provider_concurrency_limits=provider_concurrency_limits,
     )
 
     # Remove thinking context from queries if present
@@ -450,6 +459,7 @@ def check_refusal(
             temperature=config.model.temperature,
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
+            provider_concurrency_limits=provider_concurrency_limits,
         )
 
         # Step 4: Process answer refusals

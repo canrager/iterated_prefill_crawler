@@ -23,7 +23,7 @@ from src.openrouter_utils import (  # re-exported for backward compatibility
     async_query_openrouter,
     query_llm_api,
 )
-from src.provider_config import get_provider_client_kwargs
+from src.provider_config import get_provider_client_kwargs, parse_model_string
 from src.tokenization_utils import encode_for_generation
 
 
@@ -132,7 +132,28 @@ async def _async_api_single(
             )
             return ""
 
-        return choice.message.content or ""
+        content = choice.message.content or ""
+        reasoning = (
+            getattr(choice.message, "reasoning", None)
+            or getattr(choice.message, "reasoning_content", None)
+            or ""
+        )
+        finish_reason = getattr(choice, "finish_reason", "unknown")
+
+        if not content and reasoning:
+            if finish_reason == "length":
+                print(
+                    "API response exhausted max_tokens in reasoning before any visible "
+                    f"answer content ({model_name}). Increase max_new_tokens or disable "
+                    "reasoning for this provider if supported."
+                )
+            else:
+                print(
+                    f"API returned reasoning but no visible answer content ({model_name}). "
+                    f"Finish reason: {finish_reason}"
+                )
+
+        return content
     except APIStatusError as e:
         if e.status_code == 403 and "moderation" in str(e.message).lower():
             reasons = (
@@ -168,6 +189,7 @@ def _api_batch_generate(
     verbose: bool = False,
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
+    provider_concurrency_limits: Optional[Dict[str, int]] = None,
 ) -> Tuple[List[str], List[str]]:
     """Send a batch of chat conversations to an OpenAI-compatible API concurrently.
 
@@ -179,6 +201,7 @@ def _api_batch_generate(
     """
     from openai import AsyncOpenAI
 
+    provider_name, _ = parse_model_string(model_name, default_provider)
     resolved_model_id, client_kwargs = get_provider_client_kwargs(
         model_name,
         default_provider,
@@ -189,13 +212,33 @@ def _api_batch_generate(
     # Default is 2 retries; bump to 4 for resilience against rate limits.
     client = AsyncOpenAI(**client_kwargs, max_retries=4)
 
+    max_concurrency: Optional[int] = None
+    if provider_concurrency_limits:
+        normalized_limits = {
+            str(provider).lower(): int(limit)
+            for provider, limit in provider_concurrency_limits.items()
+            if limit is not None
+        }
+        configured_limit = normalized_limits.get(provider_name.lower())
+        if configured_limit and configured_limit > 0:
+            max_concurrency = configured_limit
+
     async def _run():
-        tasks = [
-            _async_api_single(
+        async def _single(msg_list: List[Dict]) -> str:
+            return await _async_api_single(
                 client, resolved_model_id, msg_list, max_new_tokens, temperature
             )
-            for msg_list in messages
-        ]
+
+        if max_concurrency is None:
+            tasks = [_single(msg_list) for msg_list in messages]
+        else:
+            semaphore = asyncio.Semaphore(max_concurrency)
+
+            async def _single_limited(msg_list: List[Dict]) -> str:
+                async with semaphore:
+                    return await _single(msg_list)
+
+            tasks = [_single_limited(msg_list) for msg_list in messages]
         return list(await asyncio.gather(*tasks))
 
     texts = asyncio.run(_run())
@@ -232,6 +275,7 @@ def batch_generate(
     skip_special_tokens: bool = False,
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
+    provider_concurrency_limits: Optional[Dict[str, int]] = None,
 ) -> Tuple[List[str], List[str]]:
     """Generate text from a list of message dicts.
 
@@ -265,6 +309,7 @@ def batch_generate(
             verbose=verbose,
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
+            provider_concurrency_limits=provider_concurrency_limits,
         )
 
     input_ids, input_strs = encode_for_generation(
