@@ -142,7 +142,6 @@ def test_crawl_uses_pre_templates_during_warmup_then_switches_to_seeded_prompts(
     config.initial_topics = []
     config.crawler.num_crawl_steps = 2
     config.crawler.generation_batch_size = 1
-    config.crawler.num_samples_per_topic = 1
     config.crawler.seed_warmup_steps = 1
 
     crawler = Crawler(
@@ -200,7 +199,6 @@ def test_non_refusal_topics_seed_drilldown(monkeypatch, tmp_path):
     config.initial_topics = []
     config.crawler.num_crawl_steps = 2
     config.crawler.generation_batch_size = 1
-    config.crawler.num_samples_per_topic = 1
     config.crawler.seed_warmup_steps = 1
     config.crawler.prompt_languages = ["english"]
     config.prompts = jailbreak_prompts

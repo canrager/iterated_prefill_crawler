@@ -18,7 +18,6 @@ DEVICE = "cuda:0"
 def crawler():
     """Create a basic crawler instance for testing"""
     config = CrawlerConfig(
-        num_samples_per_topic=1,
         num_crawl_steps=5,
         generation_batch_size=2,  # Small batch size for translation testing
     )
@@ -111,7 +110,6 @@ def test_get_message_segments_and_seed_topics():
         config = CrawlerConfig(
             prefill_mode=prefill_mode,
             generation_batch_size=2,
-            num_samples_per_topic=1,
             model_path=model_path,
             do_filter_refusals=False,  # Don't filter refusals for this test
         )

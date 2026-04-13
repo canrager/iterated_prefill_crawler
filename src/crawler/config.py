@@ -203,7 +203,6 @@ class ModelConfig:
 @dataclass
 class CrawlerRunConfig:
     load_fname: Optional[str] = None
-    num_samples_per_topic: int = 1
     num_crawl_steps: int = 100
     generation_batch_size: int = 2
     max_topic_string_length: int = 100

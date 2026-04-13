@@ -1,7 +1,6 @@
 load_fname: null
-num_samples_per_topic: 5
 num_crawl_steps: 2
-generation_batch_size: 1
+generation_batch_size: 5
 max_topic_string_length: 200
 max_crawl_topics: 1000
 max_context_tokens: 1000

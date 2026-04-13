@@ -11,7 +11,7 @@ Rewrite, merge, and prune continuously. Source control tracks the history.
 
 - **Prefer undiscovered branches before revisiting known ones.** Random-with-replacement seed selection causes frequent topics to compound while rare branches starve. Use exhaustion-aware seeding and `random.sample` for distinct seeds per step. (Harm topics were compounding while CCP political topics were found once but never drilled into.)
 
-- **Raise `num_samples_per_topic` before raising token budget.** When warmup finds the right topics but the seeded step drifts, the failure is sampling variance, not token starvation. (Going from 1→5 samples/topic turned a drifting DeepSeek rehearsal into successful Taiwan/Tibet/Xinjiang targeting.)
+- **Raise `generation_batch_size` before raising token budget.** When warmup finds the right topics but the seeded step drifts, the failure is sampling variance, not token starvation. More seeds per step = more branches explored. (Now set to 50 for both debug and default.)
 
 - **Expect CCP-aligned models to underreport on the neutral path.** DeepSeek/Qwen ~71% refusal rate vs 97%+ for GPT/Haiku is a real finding, not a pipeline bug. Without forgery-style elicitation these models won't volunteer their political restrictions. Don't treat the rate gap as a failure.
 

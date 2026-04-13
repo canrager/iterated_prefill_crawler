@@ -134,10 +134,7 @@ class Crawler:
                 else:
                     warmup_step_idx = None
 
-                n = (
-                    self.config.crawler.generation_batch_size
-                    * self.config.crawler.num_samples_per_topic
-                )
+                n = self.config.crawler.generation_batch_size
                 # During warmup, prefer broad pre-templates so each language gets an
                 # unseeded enumeration pass before later drill-down uses the queue.
                 use_seed_templates = (
@@ -273,7 +270,7 @@ def get_run_name(crawler_config: CrawlerConfig):
         "crawler_out"
         f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         f"_{model_name}"
-        f"_{crawler_config.crawler.num_samples_per_topic}samples"
+        f"_{crawler_config.crawler.generation_batch_size}batch"
         f"_{crawler_config.crawler.num_crawl_steps}crawls"
         f"_{crawler_config.crawler.do_filter_refusals}filter"
     )
