@@ -1,0 +1,31 @@
+# DeepSeek V3.2 on RunPod Serverless (vLLM)
+#
+# Requires in .env:
+#   RUNPOD_API_KEY=your_api_key
+#   RUNPOD_ENDPOINT_ID=your_endpoint_id
+#
+# The target model runs on your RunPod vLLM endpoint (OpenAI-compatible).
+# Auxiliary roles stay on OpenRouter.
+#
+# Usage:
+#   ./scripts/run.sh model=ds-v32_runpod crawler=debug prompts=jailbreak
+
+default_provider: "openrouter"
+
+# Target via RunPod vLLM
+target_model: "runpod:deepseek-ai/DeepSeek-V3.2"
+
+# Auxiliary roles via OpenRouter
+translation_model: "qwen/qwen3-235b-a22b-2507"
+summarization_model: "moonshotai/kimi-k2-0905"
+refusal_check_model: "google/gemma-4-26b-a4b-it"
+refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
+
+# No local vLLM needed
+local_model: null
+device: "auto"
+cache_dir: "hf_models"
+quantization_bits: null
+vllm_tensor_parallel_size: 2
+vllm_gpu_memory_utilization: 0.8
+vllm_max_model_len: 4096
