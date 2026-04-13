@@ -33,7 +33,6 @@ vllm_max_model_len: 4096
 provider_urls:
   ollama: "https://ollama.com/v1"
 
-# Ollama Cloud appears to handle serialized user requests more reliably than
-# the crawler's default fully parallel API batches.
+# Ollama Cloud queues rather than 429s, but throughput plateaus above ~5.
 provider_max_concurrency:
-  ollama: 1
+  ollama: 5

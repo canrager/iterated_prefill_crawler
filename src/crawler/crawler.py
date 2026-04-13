@@ -141,6 +141,11 @@ class Crawler:
                     crawl_step_idx >= self.config.crawler.seed_warmup_steps
                     or self.prompt_builder.user_pre is None
                 )
+                # Warmup: cap at template count — no value in repeating
+                # the same pre-templates; diversity comes from the templates
+                # themselves, not copies.
+                if warmup_step_idx is not None and self.prompt_builder.user_pre and lang in self.prompt_builder.user_pre:
+                    n = len(self.prompt_builder.user_pre[lang])
                 messages, topic_parent_ids = self.prompt_builder.build_messages(
                     lang,
                     n,

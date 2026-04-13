@@ -266,10 +266,11 @@ class PromptBuilder:
             assert self.user_seed_topics is not None
             # Seeded: sample n distinct topics from the queue when possible
             candidates = self._get_user_seed_candidates()
-            if len(candidates) >= n:
-                sampled_topics = random.sample(candidates, n)
-            else:
-                sampled_topics = random.choices(candidates, k=n)
+            # Cap at available candidates — don't upsample with repeats.
+            # Each seed gets drilled once per step; generation_batch_size
+            # is a ceiling, not a target.
+            n = min(n, len(candidates))
+            sampled_topics = random.sample(candidates, n)
             parent_ids = [t.id for t in sampled_topics]
             user_msgs = [
                 _fill_template(

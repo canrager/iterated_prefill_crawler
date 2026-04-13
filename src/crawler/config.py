@@ -207,7 +207,6 @@ class CrawlerRunConfig:
     generation_batch_size: int = 2
     max_topic_string_length: int = 100
     max_crawl_topics: int = 1_000_000
-    max_context_tokens: int = 1000
     max_generated_tokens: int = 8000
     max_refusal_check_generated_tokens: int = 2048
     max_extracted_topics_per_generation: int = 10
@@ -215,7 +214,6 @@ class CrawlerRunConfig:
     is_refusal_threshold: float = 0.25
     refusal_classifier_threshold: float = 0.99
     seed_warmup_steps: int = 1
-    tokenization_template: str = "chat"
     do_filter_refusals: bool = True
     max_concurrent_summarizations: int = 10
     prompt_languages: List[str] = field(default_factory=lambda: ["english", "chinese"])

@@ -655,6 +655,82 @@ def test_print_assembled_message_shapes(capsys):
     assert "{}" not in fallback_en_content
 
 
+def test_warmup_batch_size_equals_template_count(monkeypatch, tmp_path):
+    """Warmup should send exactly len(pre_templates[lang]) prompts,
+    not generation_batch_size.  Repetition of the same template wastes
+    API calls without adding diversity."""
+    prompts = _load_jailbreak_prompts()
+    config = CrawlerConfig()
+    config.initial_topics = []
+    config.crawler.num_crawl_steps = 1  # warmup only
+    config.crawler.generation_batch_size = 50
+    config.crawler.seed_warmup_steps = 1
+    config.crawler.prompt_languages = ["chinese"]
+    config.prompts = prompts
+
+    crawler = Crawler(
+        crawler_config=config,
+        save_filename=str(tmp_path / "crawler.json"),
+    )
+
+    build_calls = []
+
+    def fake_build_messages(lang, n, warmup_idx=None, use_seed_templates=True):
+        build_calls.append({"lang": lang, "n": n, "warmup_idx": warmup_idx})
+        return [[{"role": "user", "content": "dummy"}]] * n, [-1] * n
+
+    monkeypatch.setattr(crawler.prompt_builder, "build_messages", fake_build_messages)
+    monkeypatch.setattr(
+        "src.crawler.crawler.batch_generate",
+        lambda *args, **kwargs: (["gen"] * kwargs.get("n", 1), ["inp"] * kwargs.get("n", 1)),
+    )
+    monkeypatch.setattr(
+        crawler.formatter, "extract_and_format", lambda **kwargs: [],
+    )
+
+    crawler.crawl(local_model=None, local_tokenizer=None, verbose=False)
+
+    assert len(build_calls) == 1  # 1 step, 1 language
+    zh_pre_count = len(prompts.user_pre_templates["chinese"])
+    assert build_calls[0]["n"] == zh_pre_count, (
+        f"Warmup should send {zh_pre_count} prompts (one per template), "
+        f"not {build_calls[0]['n']}"
+    )
+
+
+def test_seeded_step_does_not_upsample_beyond_candidates():
+    """When generation_batch_size > len(candidates), the builder should
+    return len(candidates) messages — not upsample with repeats."""
+    queue = TopicQueue()
+    topics = [
+        Topic(
+            raw=f"topic {i}", english=f"topic {i}", chinese=f"话题{i}",
+            summary=f"topic {i}", is_head=True, is_refusal=True,
+        )
+        for i in range(5)
+    ]
+    queue.incoming_batch(topics)
+
+    builder = PromptBuilder(
+        user_seed_templates={"english": ["SEED {}"], "chinese": ["SEED {}"]},
+        user_seed_topics=queue,
+        languages=["english"],
+    )
+
+    messages, parent_ids = builder.build_messages(
+        "english", 50, use_seed_templates=True
+    )
+
+    assert len(messages) == 5, (
+        f"With 5 candidates and B=50, should get 5 messages, got {len(messages)}"
+    )
+    assert len(parent_ids) == 5
+    # All parent_ids should be distinct (no repeated topics)
+    assert len(set(parent_ids)) == 5, (
+        f"All 5 seeds should be distinct, got parent_ids={parent_ids}"
+    )
+
+
 def test_split_at_comma_preserves_chinese_and_english():
     """Regression: _split_at_comma must propagate chinese/english/shortened
     to child topics, not leave them as None."""
