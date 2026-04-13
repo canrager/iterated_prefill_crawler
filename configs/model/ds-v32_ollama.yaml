@@ -12,7 +12,7 @@
 default_provider: "openrouter"
 
 # Target via Ollama (cloud or local depending on provider_urls)
-target_model: "ollama:deepseek-v3.2"
+target_model: "ollama:deepseek-v3.2:cloud"
 
 # Auxiliary roles via OpenRouter
 translation_model: "qwen/qwen3-235b-a22b-2507"
