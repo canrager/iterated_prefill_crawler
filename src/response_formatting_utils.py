@@ -148,7 +148,7 @@ class TopicFormatter:
                         prompt=prompt,
                         system_prompt=system_prompt,
                         temperature=0.0,
-                        max_tokens=2000,
+                        max_tokens=8000,
                         client_kwargs=client_kwargs,
                     )
                 except Exception as e:

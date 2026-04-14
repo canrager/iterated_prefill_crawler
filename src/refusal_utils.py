@@ -462,29 +462,42 @@ def check_refusal(
             provider_concurrency_limits=provider_concurrency_limits,
         )
 
-        # Step 4: Process answer refusals
+        # Step 4: Collect all answers into one flat batch for cascade refusal check.
+        # Previously this called check_refusals_cascade once per topic (O(T) serial
+        # asyncio.run() calls against the judge model); now it fires a single batched
+        # call covering all topics at once, matching the pattern of steps 1 and 3.
+        flat_answers = []
+        flat_queries = []
+        flat_offsets = []  # (topic_idx, flat_start, flat_end)
         offset = 0
         for topic_idx in topics_needing_answers:
-            topic = selected_topics[topic_idx]
-
-            # Extract answers for this topic
             n = len(topic_to_queries[topic_idx])
+            start = len(flat_answers)
+            flat_answers.extend(all_answers[offset : offset + n])
+            flat_queries.extend(topic_to_queries[topic_idx])
+            flat_offsets.append((topic_idx, start, start + n))
+            offset += n
+
+        flat_refusals = check_refusals_cascade(
+            flat_answers,
+            config,
+            refusal_model,
+            refusal_tokenizer,
+            translation_model,
+            translation_tokenizer,
+            queries=flat_queries,
+        )
+
+        # Distribute results back to topics
+        offset = 0
+        for topic_idx, flat_start, flat_end in flat_offsets:
+            topic = selected_topics[topic_idx]
+            n = flat_end - flat_start
             answers = all_answers[offset : offset + n]
             answer_strs = all_answer_strs[offset : offset + n]
             offset += n
 
-            # Check if model refused to answer
-            answer_queries = topic_to_queries[topic_idx]
-            refused_to_answer_query = check_refusals_cascade(
-                answers,
-                config,
-                refusal_model,
-                refusal_tokenizer,
-                translation_model,
-                translation_tokenizer,
-                queries=answer_queries,
-            )
-
+            refused_to_answer_query = flat_refusals[flat_start:flat_end]
             make_answer_majority_refusal = (
                 sum(refused_to_answer_query) / len(refused_to_answer_query)
             ) > threshold
