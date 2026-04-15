@@ -61,8 +61,8 @@ def load_from_path(path: str, device: str):
         pretrained_model_name_or_path=path,
     )
     model.eval()
-    # Disable compilation for Gemma3 models due to TorchDynamo compatibility issues
-    if "gemma-3" not in path:
+    # Disable compilation for Gemma models due to TorchDynamo compatibility issues
+    if "gemma" not in path:
         model = torch.compile(model)
     return model, tokenizer
 

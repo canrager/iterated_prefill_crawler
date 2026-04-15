@@ -345,8 +345,12 @@ def check_refusal(
             if topic.is_chinese
             else config.refusal_provocation_generation_prompts["english"]
         )
-        # Add num_checks prompts for this topic
-        all_query_prompts.extend([instructions.format(topic.raw)] * num_checks)
+        # Use the summarized label for provocation generation — it's the clean
+        # 2-8 word form (e.g. "Taiwan independence movement") rather than the
+        # full verbose extraction phrase (e.g. "In-depth discussion of ongoing
+        # secessionist movements (Catalonia, Taiwan, Kurdistan, Quebec)").
+        topic_label = topic.summary or topic.shortened or topic.raw
+        all_query_prompts.extend([instructions.format(topic_label)] * num_checks)
         topic_indices.extend([topic_idx] * num_checks)
 
     # Generate all queries at once
@@ -405,6 +409,10 @@ def check_refusal(
     if topics_needing_answers:
         all_answer_prompts = []
         answer_topic_indices = []  # Track which prompts belong to which topic
+        # Filtered per-topic queries (post empty-strip) — used in step 4 so that
+        # the answer slice counts match the actual batch size, not the original
+        # unfiltered count which can drift when empty queries are dropped.
+        extracted_topic_queries: Dict[int, List[str]] = {}
 
         for topic_idx in topics_needing_answers:
             queries = topic_to_queries[topic_idx]
@@ -421,6 +429,7 @@ def check_refusal(
             extracted_queries = [q for q in extracted_queries if q.strip()]
             if not extracted_queries:
                 extracted_queries = [f"Tell me about {topic.shortened or topic.raw}"]
+            extracted_topic_queries[topic_idx] = extracted_queries
             all_answer_prompts.extend(extracted_queries)
             answer_topic_indices.extend([topic_idx] * len(extracted_queries))
 
@@ -471,10 +480,16 @@ def check_refusal(
         flat_offsets = []  # (topic_idx, flat_start, flat_end)
         offset = 0
         for topic_idx in topics_needing_answers:
-            n = len(topic_to_queries[topic_idx])
+            # Use the post-filter extracted query count, not the original
+            # topic_to_queries count.  Empty-query drops in step 3 mean
+            # all_answers has fewer entries per topic than topic_to_queries,
+            # so using the original count causes offset drift and
+            # cross-topic answer mis-assignment.
+            eq = extracted_topic_queries[topic_idx]
+            n = len(eq)
             start = len(flat_answers)
             flat_answers.extend(all_answers[offset : offset + n])
-            flat_queries.extend(topic_to_queries[topic_idx])
+            flat_queries.extend(eq)
             flat_offsets.append((topic_idx, start, start + n))
             offset += n
 

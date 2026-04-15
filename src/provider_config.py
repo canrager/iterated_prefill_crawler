@@ -58,10 +58,6 @@ BUILTIN_PROVIDERS: Dict[str, ProviderInfo] = {
         env_key="LMSTUDIO_API_KEY",
         requires_api_key=False,
     ),
-    "runpod": ProviderInfo(
-        base_url="https://api.runpod.ai/v2/{endpoint_id}/openai/v1",
-        env_key="RUNPOD_API_KEY",
-    ),
 }
 
 DEFAULT_PROVIDER = "openrouter"
@@ -123,16 +119,6 @@ def resolve_provider(
         base_url = normalized_overrides.get(provider_name, info.base_url)
     else:
         base_url = info.base_url
-
-    # Expand {endpoint_id} placeholder (used by RunPod)
-    if "{endpoint_id}" in base_url:
-        endpoint_id = os.environ.get("RUNPOD_ENDPOINT_ID", "")
-        if not endpoint_id:
-            raise ValueError(
-                "RunPod base URL contains {endpoint_id} but RUNPOD_ENDPOINT_ID "
-                "is not set. Add it to your .env file."
-            )
-        base_url = base_url.replace("{endpoint_id}", endpoint_id)
 
     api_key: str = ""
     if info.env_key:

@@ -98,6 +98,7 @@ async def _async_api_single(
     messages: List[Dict],
     max_new_tokens: int,
     temperature: float,
+    timeout: float = 120.0,
 ) -> str:
     """Send a single chat conversation to an OpenAI-compatible API and return the response text."""
     from openai import APIStatusError
@@ -113,11 +114,14 @@ async def _async_api_single(
         return ""
 
     try:
-        completion = await client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            max_tokens=max_new_tokens,
-            temperature=temperature,
+        completion = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=max_new_tokens,
+                temperature=temperature,
+            ),
+            timeout=timeout,
         )
 
         if not completion.choices:
@@ -175,6 +179,9 @@ async def _async_api_single(
             f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
         )
         return ""
+    except asyncio.TimeoutError:
+        print(f"API timeout ({model_name}) [>{timeout:.0f}s, no response]: returning empty")
+        return ""
     except Exception as e:
         # Network errors, timeouts, etc. — the SDK already retried these.
         print(f"API error ({model_name}) [retries exhausted]: {e}")
@@ -209,8 +216,16 @@ def _api_batch_generate(
     )
 
     # The SDK auto-retries 429/500/502/503/504 with exponential backoff.
-    # Default is 2 retries; bump to 4 for resilience against rate limits.
-    client = AsyncOpenAI(**client_kwargs, max_retries=4)
+    # 8 retries: backoff caps at ~60s, total wait up to ~2 min per request.
+    # This is enough to ride out a full OpenRouter rate-limit window when
+    # firing large concurrent batches (e.g. 300+ judge calls at once).
+    client = AsyncOpenAI(**client_kwargs, max_retries=8)
+
+    # Default concurrency caps per provider to avoid flooding rate limits.
+    # These can be overridden via provider_max_concurrency in the model config.
+    _DEFAULT_CONCURRENCY: Dict[str, int] = {
+        "openrouter": 50,
+    }
 
     max_concurrency: Optional[int] = None
     if provider_concurrency_limits:
@@ -222,6 +237,10 @@ def _api_batch_generate(
         configured_limit = normalized_limits.get(provider_name.lower())
         if configured_limit and configured_limit > 0:
             max_concurrency = configured_limit
+
+    # Fall back to default cap if no explicit override
+    if max_concurrency is None:
+        max_concurrency = _DEFAULT_CONCURRENCY.get(provider_name.lower())
 
     async def _run():
         async def _single(msg_list: List[Dict]) -> str:

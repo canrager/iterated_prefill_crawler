@@ -24,13 +24,13 @@ async def async_query_openrouter(
 
     # Let the SDK handle retries (429/5xx) with exponential backoff.
     if client_kwargs is not None:
-        client = AsyncOpenAI(**client_kwargs, max_retries=4)
+        client = AsyncOpenAI(**client_kwargs, max_retries=8)
     else:
         api_key = os.environ.get("OPENROUTER_API_KEY")
         client = AsyncOpenAI(
             api_key=api_key,
             base_url="https://openrouter.ai/api/v1",
-            max_retries=4,
+            max_retries=8,
         )
 
     messages = []
@@ -44,11 +44,14 @@ async def async_query_openrouter(
         print(f"API request: model={model_name}, messages={messages}")
 
     try:
-        completion = await client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
+        completion = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            ),
+            timeout=120.0,
         )
         if not completion.choices:
             print(f"API returned no choices ({model_name})")
@@ -79,6 +82,9 @@ async def async_query_openrouter(
         print(
             f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
         )
+        return ""
+    except asyncio.TimeoutError:
+        print(f"API timeout ({model_name}) [>120s, no response]: returning empty")
         return ""
     except Exception as e:
         print(f"API error ({model_name}) [retries exhausted]: {e}")
