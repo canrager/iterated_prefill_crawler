@@ -21,6 +21,8 @@ class Topic:
     prompt: str = None
     summary: str = None
     api_refused_reason: str = None
+    cluster_member_count: int = 0
+    refusal_check_inconclusive: bool = False
 
     def to_dict(self):
         return {
@@ -39,17 +41,21 @@ class Topic:
             "refusal_check_responses": self.refusal_check_responses,
             "prompt": self.prompt,
             "summary": self.summary,
+            "cluster_member_count": self.cluster_member_count,
+            "refusal_check_inconclusive": self.refusal_check_inconclusive,
             "api_refused_reason": self.api_refused_reason,
         }
 
 
 class TopicQueue:
     def __init__(self,
-                 head_refusal_topics: List[Topic] = []
+                 head_refusal_topics: List[Topic] = None,
                  ):
         # Track clusters
         self.head_topics: List[Topic] = []
-        self.head_refusal_topics: List[Topic] = head_refusal_topics
+        self.head_refusal_topics: List[Topic] = (
+            list(head_refusal_topics) if head_refusal_topics else []
+        )
         self.cluster_topics: List[List[Topic]] = []
 
         # Stats
@@ -81,25 +87,58 @@ class TopicQueue:
         return topic
 
     def append_to_cluster(self, topic: Topic) -> Topic:
-        """Add a topic to an existing cluster."""
-        self.cluster_topics[topic.cluster_idx].append(topic)
-        self.num_topics_per_cluster[topic.cluster_idx] += 1
+        """Add a topic to an existing cluster.
+
+        Raises ValueError loudly if cluster_idx is out of range or negative,
+        rather than silently wrong-clustering (negative Python wrap) or raising
+        an opaque IndexError.
+        """
+        cidx = topic.cluster_idx
+        if cidx is None or cidx < 0 or cidx >= len(self.cluster_topics):
+            raise ValueError(
+                f"append_to_cluster: invalid cluster_idx={cidx!r} "
+                f"(have {len(self.cluster_topics)} clusters). "
+                f"Topic raw={topic.raw!r}. "
+                "This indicates an unresolved cluster_idx from grouping_pipeline."
+            )
+        self.cluster_topics[cidx].append(topic)
+        self.num_topics_per_cluster[cidx] += 1
         self.num_total_topics += 1
         return topic
 
     def incoming_batch(self, topics: List[Topic]) -> List[Topic]:
-        """Process a batch of topics to be added to the queue with deduplication."""
+        """Process a batch of topics to be added to the queue with deduplication.
+
+        Two-pass to stay order-independent: heads first (they create the cluster
+        slot in cluster_topics), then non-heads (which require their cluster slot
+        to exist). Without this, if the grouping pipeline returns a non-head
+        member earlier in the list than its cluster's head, append_to_cluster
+        hits IndexError on a not-yet-allocated cluster_idx.
+        """
         if topics == []:
             print("No topics passed.")
             return []
 
         for topic in topics:
-            topic.id = self.num_total_topics
             if topic.is_head:
+                topic.id = self.num_total_topics
                 self.add_new_cluster_head(topic)
-            else:
+
+        for topic in topics:
+            if not topic.is_head:
+                topic.id = self.num_total_topics
                 self.append_to_cluster(topic)
         return topics
+
+    def refresh_refusal_membership(self):
+        """Rebuild head_refusal_topics from head_topics.is_refusal.
+
+        Needed when heads are added with is_refusal=None and later mutated
+        in place by the refusal checker — otherwise head_refusal_topics
+        stays stale from the add-time snapshot.
+        """
+        self.head_refusal_topics = [t for t in self.head_topics if t.is_refusal]
+        self.num_head_refusal_topics = len(self.head_refusal_topics)
 
     # Saving, loading and logging
     def to_dict(self):

@@ -44,6 +44,7 @@ from src.evaluation.analysis_utils import (
     get_deduplication_prompt,
     llm_query_with_dict_output,
 )
+from src.provider_config import get_provider_client_kwargs
 from src.evaluation.ranking import EloRanking, WinCountRanking
 from src.evaluation.wordcloud_utils import generate_wordcloud_from_ranking
 from src.directory_config import RESULT_DIR
@@ -256,11 +257,16 @@ def rank_topics(
 
         # Do NOT use assistant prefill here — gemini-flash and similar
         # models produce cleaner \boxed{a/b} responses without it.
+        # Resolve provider prefix before calling query_llm_api
+        resolved_judge, judge_client_kwargs = get_provider_client_kwargs(
+            judge_model, "openrouter", {},
+        )
         responses = query_llm_api(
-            model_name=judge_model,
+            model_name=resolved_judge,
             prompt=prompts,
             max_tokens=50,
             verbose=verbose,
+            client_kwargs=judge_client_kwargs,
         )
 
         for (t1, t2), resp in zip(batch_pairs, responses):

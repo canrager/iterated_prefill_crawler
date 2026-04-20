@@ -33,6 +33,7 @@ def llm_judge_refusals(
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
     provider_concurrency_limits: Optional[Dict[str, int]] = None,
+    prefer_nitro: bool = False,
 ) -> List[bool]:
     if not texts:
         return []
@@ -61,6 +62,7 @@ def llm_judge_refusals(
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
         provider_concurrency_limits=provider_concurrency_limits,
+        prefer_nitro=prefer_nitro,
     )
 
     results = []
@@ -141,6 +143,7 @@ def _translate_for_classifier(
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
     provider_concurrency_limits: Optional[Dict[str, int]] = None,
+    prefer_nitro: bool = False,
 ) -> List[str]:
     """Translate Chinese texts to English for the classifier. Non-Chinese texts pass through."""
     if translation_model is None:
@@ -164,6 +167,7 @@ def _translate_for_classifier(
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
         provider_concurrency_limits=provider_concurrency_limits,
+        prefer_nitro=prefer_nitro,
     )
 
     result = list(texts)
@@ -188,6 +192,7 @@ def check_refusals_cascade(
     default_provider = config.model.default_provider
     provider_url_overrides = config.model.provider_urls
     provider_concurrency_limits = config.model.provider_max_concurrency
+    prefer_nitro = config.model.prefer_nitro
 
     refusals = []
     texts_for_classifier = []
@@ -195,6 +200,11 @@ def check_refusals_cascade(
 
     # Stage 1: fast regex (runs on raw text, including Chinese patterns)
     for i, text in enumerate(texts):
+        # Empty responses (timeouts, API errors) carry no signal — skip cascade.
+        # The progressive voter excludes empties from num/denom via resp.strip().
+        if not text or not text.strip():
+            refusals.append(False)
+            continue
         fast_result = is_refusal_fast(text, config.refusal_messages)
         if fast_result is not None:
             refusals.append(fast_result)
@@ -213,6 +223,7 @@ def check_refusals_cascade(
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
             provider_concurrency_limits=provider_concurrency_limits,
+            prefer_nitro=prefer_nitro,
         )
 
     texts_for_llm = []
@@ -258,6 +269,7 @@ def check_refusals_cascade(
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
             provider_concurrency_limits=provider_concurrency_limits,
+            prefer_nitro=prefer_nitro,
         )
         for i, result in zip(indices_for_llm, llm_results):
             refusals[i] = result
@@ -331,6 +343,7 @@ def check_refusal(
     default_provider = config.model.default_provider
     provider_url_overrides = config.model.provider_urls
     provider_concurrency_limits = config.model.provider_max_concurrency
+    prefer_nitro = config.model.prefer_nitro
 
     num_checks = config.crawler.num_refusal_checks_per_topic
     threshold = config.crawler.is_refusal_threshold
@@ -350,7 +363,9 @@ def check_refusal(
         # full verbose extraction phrase (e.g. "In-depth discussion of ongoing
         # secessionist movements (Catalonia, Taiwan, Kurdistan, Quebec)").
         topic_label = topic.summary or topic.shortened or topic.raw
-        all_query_prompts.extend([instructions.format(topic_label)] * num_checks)
+        all_query_prompts.extend(
+            [instructions.format(n=num_checks, topic=topic_label)] * num_checks
+        )
         topic_indices.extend([topic_idx] * num_checks)
 
     # Generate all queries at once
@@ -369,6 +384,7 @@ def check_refusal(
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
         provider_concurrency_limits=provider_concurrency_limits,
+        prefer_nitro=prefer_nitro,
     )
 
     # Remove thinking context from queries if present
@@ -469,6 +485,7 @@ def check_refusal(
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
             provider_concurrency_limits=provider_concurrency_limits,
+            prefer_nitro=prefer_nitro,
         )
 
         # Step 4: Collect all answers into one flat batch for cascade refusal check.

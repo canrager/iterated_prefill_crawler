@@ -22,14 +22,20 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Load .env so OPENROUTER_API_KEY is available
-env_file = Path(__file__).resolve().parent.parent / ".env"
-if env_file.exists():
-    for line in env_file.read_text().splitlines():
+
+def _load_env_file() -> None:
+    """Load .env into os.environ. Called from integration-test bodies only —
+    NOT at module import, so collecting a deselected test does not mutate
+    the environment and contaminate unrelated unit tests."""
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
+
 
 from src.response_formatting_utils import TopicFormatter
 
@@ -77,8 +83,10 @@ def _make_config():
     cfg.model.summarization_model = "moonshotai/kimi-k2-0905"
     cfg.model.default_provider = "openrouter"
     cfg.model.provider_urls = None
-    cfg.crawler.max_extracted_topics_per_generation = 10
+    cfg.model.prefer_nitro = False
+    cfg.crawler.max_topics_per_step_lang = 10
     cfg.crawler.max_concurrent_summarizations = 2
+    cfg.crawler.extraction_batch_size = 20
     # Use the real prompt from config (imports the updated constant)
     from src.crawler.config import TOPIC_EXTRACTION_PROMPT
     cfg.topic_extraction_prompt = TOPIC_EXTRACTION_PROMPT

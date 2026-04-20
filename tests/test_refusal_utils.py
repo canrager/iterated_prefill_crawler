@@ -1,8 +1,51 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+import src.refusal_utils as refusal_utils
 from src.generation_utils import OPENROUTER_MODERATION_SENTINEL
 from src.refusal_utils import _build_refusal_check_queries, check_refusals_cascade
+
+
+_REFUSAL_HINTS = (
+    "cannot", "can't", "cant", "won't", "wont", "unable", "i will not",
+    "refuse", "decline", "not able", "apologize",
+    "不能", "无法", "拒绝",
+)
+# Compliance markers that override a refusal hint when both appear — matches
+# the real distilroberta rejection classifier's handling of sandwich/echo cases.
+_COMPLIANCE_MARKERS = (
+    "here are the", "here is the", "here's the", "the answer is",
+    "here is a fictional", "here are detailed", "here are the detailed",
+    "you asked me",  # echoed user prompt — not an actual refusal
+)
+
+
+@pytest.fixture(autouse=True)
+def stub_classifier(monkeypatch):
+    """Replace the HuggingFace classifier with a deterministic offline stub.
+    Keeps tests offline (no HF download). Heuristic mirrors the real
+    distilroberta rejection classifier: REJECTION when a refusal hint
+    appears unless a compliance marker also appears (sandwich, echo, or
+    apology-then-comply)."""
+    def _fake_classifier(model_name):
+        def _call(texts, truncation=True, max_length=512):
+            if isinstance(texts, str):
+                texts = [texts]
+            results = []
+            for t in texts:
+                lowered = t.lower()
+                has_refusal = any(h in lowered for h in _REFUSAL_HINTS)
+                has_compliance = any(m in lowered for m in _COMPLIANCE_MARKERS)
+                is_rej = has_refusal and not has_compliance
+                results.append({
+                    "label": "REJECTION" if is_rej else "LABEL_0",
+                    "score": 0.99,
+                })
+            return results
+        return _call
+    monkeypatch.setattr(refusal_utils, "get_classifier", _fake_classifier)
 
 
 def is_refusal(text, patterns, threshold=0.5):

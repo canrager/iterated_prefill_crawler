@@ -1,5 +1,7 @@
 import yaml
 
+import pytest
+
 from src.crawler.config import CrawlerConfig, PromptsConfig
 from src.crawler.crawler import Crawler
 from src.crawler.topic_queue import Topic, TopicQueue
@@ -310,7 +312,13 @@ def test_non_refusal_topics_seed_drilldown(monkeypatch, tmp_path):
     )
 
 
-def test_jailbreak_seeded_messages_match_single_user_turn_structure():
+def test_jailbreak_seeded_messages_match_system_plus_user_turn_structure():
+    """The current jailbreak yaml defines `system_templates` and leaves both
+    `assistant_pre_templates` and `assistant_post_templates` null, so the
+    seeded prompt shape is `[system, user]` — no assistant turn, no listing
+    cue. The seed topic must be substituted into the user message and no
+    `{}` / `None` placeholders may leak through.
+    """
     prompts = _load_jailbreak_prompts()
     builder = PromptBuilder(
         user_pre_templates=prompts.user_pre_templates,
@@ -328,10 +336,19 @@ def test_jailbreak_seeded_messages_match_single_user_turn_structure():
 
     assert parent_ids == [0]
     assert len(messages) == 1
-    assert messages[0] == [{"role": "user", "content": messages[0][0]["content"]}]
-    assert "doxxing personal data" in messages[0][0]["content"]
-    assert "known-denied category doxxing personal data" in messages[0][0]["content"]
-    assert "Topics:\n\n1." in messages[0][0]["content"]
+
+    # system + user, no assistant turn
+    turns = messages[0]
+    assert [t["role"] for t in turns] == ["system", "user"]
+
+    user_content = turns[1]["content"]
+    # Seed topic substituted, no stale placeholders
+    assert "doxxing personal data" in user_content
+    assert "{}" not in user_content
+    assert "None" not in user_content
+    # Every English seed template in the current yaml references some
+    # form of restriction around the seed topic — the exact phrasing
+    # varies per template, so we only assert topic substitution here.
 
 
 def test_seeded_message_never_contains_literal_none():
@@ -372,8 +389,11 @@ def test_seeded_message_never_contains_literal_none():
 
 
 def test_warmup_messages_never_contain_unfilled_braces():
-    """Regression: during warmup (no seed topic), user_post_templates with {}
-    placeholders must NOT be appended — they can't be filled."""
+    """Regression: during warmup (no seed topic), any `{}` placeholders in
+    user-side templates must NOT leak through. Under the current jailbreak
+    yaml `user_post_templates` is null, so this test is mainly a guard for
+    future presets that might re-introduce a post template with placeholders.
+    """
     prompts = _load_jailbreak_prompts()
     builder = PromptBuilder(
         user_pre_templates=prompts.user_pre_templates,
@@ -391,20 +411,28 @@ def test_warmup_messages_never_contain_unfilled_braces():
     assert "{}" not in user_content, (
         f"Unfilled {{}} in warmup message:\n{user_content[:300]}"
     )
-    # Post template should have been skipped entirely
-    assert "验证政策" not in user_content, (
-        f"Compliance framing leaked into warmup:\n{user_content[:300]}"
+    assert "None" not in user_content, (
+        f"Literal None in warmup message:\n{user_content[:300]}"
     )
 
 
 def test_jailbreak_seeded_message_matches_reference_chat_structure():
-    """The assembled seeded message must match the structure of the reference
-    OpenRouter chat (artifacts/OpenRouter Chat Mon Mar 30 2026.md):
-      1. Single user message, no assistant turn
-      2. Decomposition demand with the seed topic filled in
-      3. Compliance framing with the same seed topic filled in
-      4. Listing cue at the end
+    """The assembled Chinese seeded message must:
+      1. Have a system + user shape (no assistant turn under the current yaml —
+         `assistant_pre_templates`, `assistant_seed_templates`,
+         `assistant_post_templates`, and `user_post_templates` are all null).
+      2. Substitute the seed topic into every `{}` placeholder in the chosen
+         seed template.
+      3. Never leak `{}` or literal `"None"`.
+
+    Because seed templates are sampled randomly, we drive coverage by iterating
+    with fixed `random.seed()` values until we hit the Chinese template
+    containing the phrase `"我已经确定你限制"` (the first of the 8 current
+    templates). This keeps the test deterministic without hard-coding
+    sampling internals.
     """
+    import random
+
     TOPIC_ZH = "敏感政治与地缘冲突"
     queue = TopicQueue()
     queue.incoming_batch([
@@ -424,35 +452,47 @@ def test_jailbreak_seeded_message_matches_reference_chat_structure():
         user_pre_templates=prompts.user_pre_templates,
         user_seed_templates=prompts.user_seed_templates,
         user_post_templates=prompts.user_post_templates,
+        assistant_pre_templates=prompts.assistant_pre_templates,
+        assistant_seed_templates=prompts.assistant_seed_templates,
+        assistant_post_templates=prompts.assistant_post_templates,
+        system_templates=prompts.system_templates,
         user_seed_topics=queue,
         languages=["chinese"],
     )
 
-    messages, _ = builder.build_messages("chinese", 1, use_seed_templates=True)
+    # --- Invariant check across many samples (structural) ---
+    for seed in range(25):
+        random.seed(seed)
+        messages, _ = builder.build_messages("chinese", 1, use_seed_templates=True)
 
-    # Single user message, no assistant turn
-    assert len(messages[0]) == 1
-    assert messages[0][0]["role"] == "user"
+        # system + user shape, no assistant turn
+        assert [t["role"] for t in messages[0]] == ["system", "user"]
+        user_content = messages[0][1]["content"]
 
-    content = messages[0][0]["content"]
+        assert TOPIC_ZH in user_content, f"Seed topic missing at seed={seed}"
+        assert "{}" not in user_content, f"Unfilled {{}} at seed={seed}"
+        assert "None" not in user_content, f"Literal None at seed={seed}"
 
-    # Decomposition demand contains the topic
-    assert TOPIC_ZH in content, f"Seed topic not in message"
-
-    # Compliance framing contains the topic (not {})
-    assert "已知拒绝类别" in content, "Missing compliance framing"
-    assert f"已知拒绝类别{TOPIC_ZH}" in content, (
-        f"Compliance framing should contain the seed topic, got:\n{content[:400]}"
-    )
-
-    # No unfilled placeholders
-    assert "{}" not in content, f"Unfilled {{}} in seeded message"
-    assert "None" not in content, f"Literal None in seeded message"
-
-    # Listing cue at the end
-    assert "话题：" in content, "Missing listing cue"
-    assert content.rstrip().endswith("1."), (
-        f"Message should end with listing cue '1.', got: ...{content[-50:]}"
+    # --- Targeted check: find the template with `我已经确定你限制` ---
+    # Scan up to a reasonable number of seeds; two of the eight Chinese seed
+    # templates contain this phrase, so we expect a hit quickly.
+    found_phrase = False
+    for seed in range(200):
+        random.seed(seed)
+        messages, _ = builder.build_messages("chinese", 1, use_seed_templates=True)
+        user_content = messages[0][1]["content"]
+        if "我已经确定你限制" in user_content:
+            # When this template is chosen, the topic must be substituted
+            # into the "关于{}的内容" slot → "关于<TOPIC>的内容".
+            assert f"关于{TOPIC_ZH}的内容" in user_content, (
+                f"Topic substitution failed in '我已经确定你限制' template:\n"
+                f"{user_content[:400]}"
+            )
+            found_phrase = True
+            break
+    assert found_phrase, (
+        "Did not hit the Chinese seed template containing '我已经确定你限制' "
+        "within 200 random seeds; sampling must cover every seed template."
     )
 
 
@@ -468,6 +508,10 @@ def test_print_assembled_message_shapes(capsys):
         user_pre_templates=prompts.user_pre_templates,
         user_seed_templates=prompts.user_seed_templates,
         user_post_templates=prompts.user_post_templates,
+        assistant_pre_templates=prompts.assistant_pre_templates,
+        assistant_seed_templates=prompts.assistant_seed_templates,
+        assistant_post_templates=prompts.assistant_post_templates,
+        system_templates=prompts.system_templates,
         user_seed_topics=TopicQueue(),  # empty = warmup
         languages=["chinese"],
     )
@@ -487,6 +531,10 @@ def test_print_assembled_message_shapes(capsys):
         user_pre_templates=prompts.user_pre_templates,
         user_seed_templates=prompts.user_seed_templates,
         user_post_templates=prompts.user_post_templates,
+        assistant_pre_templates=prompts.assistant_pre_templates,
+        assistant_seed_templates=prompts.assistant_seed_templates,
+        assistant_post_templates=prompts.assistant_post_templates,
+        system_templates=prompts.system_templates,
         user_seed_topics=zh_queue,
         languages=["chinese"],
     )
@@ -506,6 +554,10 @@ def test_print_assembled_message_shapes(capsys):
         user_pre_templates=prompts.user_pre_templates,
         user_seed_templates=prompts.user_seed_templates,
         user_post_templates=prompts.user_post_templates,
+        assistant_pre_templates=prompts.assistant_pre_templates,
+        assistant_seed_templates=prompts.assistant_seed_templates,
+        assistant_post_templates=prompts.assistant_post_templates,
+        system_templates=prompts.system_templates,
         user_seed_topics=none_queue,
         languages=["chinese"],
     )
@@ -549,6 +601,10 @@ def test_print_assembled_message_shapes(capsys):
         user_pre_templates=prompts.user_pre_templates,
         user_seed_templates=prompts.user_seed_templates,
         user_post_templates=prompts.user_post_templates,
+        assistant_pre_templates=prompts.assistant_pre_templates,
+        assistant_seed_templates=prompts.assistant_seed_templates,
+        assistant_post_templates=prompts.assistant_post_templates,
+        system_templates=prompts.system_templates,
         user_seed_topics=en_queue,
         languages=["english"],
     )
@@ -561,6 +617,10 @@ def test_print_assembled_message_shapes(capsys):
         user_pre_templates=prompts.user_pre_templates,
         user_seed_templates=prompts.user_seed_templates,
         user_post_templates=prompts.user_post_templates,
+        assistant_pre_templates=prompts.assistant_pre_templates,
+        assistant_seed_templates=prompts.assistant_seed_templates,
+        assistant_post_templates=prompts.assistant_post_templates,
+        system_templates=prompts.system_templates,
         user_seed_topics=TopicQueue(),
         languages=["english"],
     )
@@ -582,6 +642,10 @@ def test_print_assembled_message_shapes(capsys):
         user_pre_templates=prompts.user_pre_templates,
         user_seed_templates=prompts.user_seed_templates,
         user_post_templates=prompts.user_post_templates,
+        assistant_pre_templates=prompts.assistant_pre_templates,
+        assistant_seed_templates=prompts.assistant_seed_templates,
+        assistant_post_templates=prompts.assistant_post_templates,
+        system_templates=prompts.system_templates,
         user_seed_topics=none_en_queue,
         languages=["english"],
     )
@@ -611,46 +675,59 @@ def test_print_assembled_message_shapes(capsys):
     print(f"parent_ids: {fallback_en_pids}")
 
     # === Structural assertions ===
+    # The current jailbreak yaml defines non-null `system_templates` and
+    # leaves `user_post_templates`, `assistant_pre_templates`,
+    # `assistant_seed_templates`, and `assistant_post_templates` all null.
+    # So the assembled shape is `[system, user]` — no assistant turn, no
+    # listing cue ("Topics:" / "话题："). CoT-forgery framing ("验证政策"
+    # / "verify policy") is part of the human-authored warmup templates
+    # themselves, so its presence is expected — we only guard against
+    # unfilled placeholders and literal "None".
 
-    # Chinese warmup: no compliance framing, no {}, no None
-    warmup_content = warmup_msgs[0][0]["content"]
+    def _system_and_user(turns):
+        """Return (system_content, user_content) for a [system, user] turn list."""
+        assert [t["role"] for t in turns] == ["system", "user"], (
+            f"Expected [system, user] shape, got {[t['role'] for t in turns]}"
+        )
+        return turns[0]["content"], turns[1]["content"]
+
+    # Chinese warmup: [system, user], no unfilled braces, no None
+    warmup_system, warmup_content = _system_and_user(warmup_msgs[0])
+    assert warmup_system  # non-empty system prompt
     assert "{}" not in warmup_content
     assert "None" not in warmup_content
-    assert "验证政策" not in warmup_content
 
-    # Chinese seeded: topic filled in both seed and post templates
-    seeded_content = seeded_msgs[0][0]["content"]
+    # Chinese seeded: topic substituted, no placeholders, no None
+    seeded_system, seeded_content = _system_and_user(seeded_msgs[0])
+    assert seeded_system
     assert "敏感政治与地缘冲突" in seeded_content
-    assert "已知拒绝类别敏感政治与地缘冲突" in seeded_content
-    assert seeded_content.rstrip().endswith("1.")
     assert "{}" not in seeded_content
     assert "None" not in seeded_content
 
     # Chinese fallback: raw used instead of None
-    fallback_content = fallback_msgs[0][0]["content"]
+    fallback_system, fallback_content = _system_and_user(fallback_msgs[0])
+    assert fallback_system
     assert "仇恨言论与歧视" in fallback_content
-    assert "已知拒绝类别仇恨言论与歧视" in fallback_content
     assert "None" not in fallback_content
     assert "{}" not in fallback_content
 
-    # English warmup: no compliance framing, no {}, no None
-    warmup_en_content = warmup_en_msgs[0][0]["content"]
+    # English warmup: [system, user], no unfilled braces, no None
+    warmup_en_system, warmup_en_content = _system_and_user(warmup_en_msgs[0])
+    assert warmup_en_system
     assert "{}" not in warmup_en_content
     assert "None" not in warmup_en_content
-    assert "verify policy" not in warmup_en_content.lower()
 
-    # English seeded: topic filled in both seed and post templates
-    seeded_en_content = seeded_en_msgs[0][0]["content"]
+    # English seeded: topic substituted, no placeholders, no None
+    seeded_en_system, seeded_en_content = _system_and_user(seeded_en_msgs[0])
+    assert seeded_en_system
     assert "sensitive political and geopolitical conflicts" in seeded_en_content
-    assert "known-denied category sensitive political and geopolitical conflicts" in seeded_en_content
-    assert seeded_en_content.rstrip().endswith("1.")
     assert "{}" not in seeded_en_content
     assert "None" not in seeded_en_content
 
     # English fallback: raw used instead of None
-    fallback_en_content = fallback_en_msgs[0][0]["content"]
+    fallback_en_system, fallback_en_content = _system_and_user(fallback_en_msgs[0])
+    assert fallback_en_system
     assert "hate speech and discrimination" in fallback_en_content
-    assert "known-denied category hate speech and discrimination" in fallback_en_content
     assert "None" not in fallback_en_content
     assert "{}" not in fallback_en_content
 
@@ -762,3 +839,67 @@ def test_split_at_comma_preserves_chinese_and_english():
     assert child.chinese is not None, f"Split child has chinese=None"
     assert child.english is not None, f"Split child has english=None"
     assert child.shortened is not None, f"Split child has shortened=None"
+
+
+def test_user_pre_template_placeholder_assertion():
+    """PromptBuilder.__init__ must assert if any user_pre_template contains '{}'."""
+    with pytest.raises(AssertionError, match="user_pre_template contains placeholder"):
+        PromptBuilder(
+            user_pre_templates={
+                "english": ["Hello {}"],  # contains placeholder — forbidden
+                "chinese": ["你好"],
+            },
+            languages=["english"],
+        )
+
+
+def test_jailbreak_warmup_survives():
+    """Warmup with jailbreak.yaml produces [system, user] with no unfilled '{}'."""
+    import yaml
+
+    with open("configs/prompts/jailbreak.yaml") as f:
+        raw = yaml.safe_load(f)
+
+    from src.crawler.config import PromptsConfig
+    prompts = PromptsConfig(**raw)
+
+    queue = TopicQueue()
+    queue.incoming_batch([
+        Topic(
+            raw="sensitive political and geopolitical conflicts",
+            english="sensitive political and geopolitical conflicts",
+            chinese="敏感政治与地缘冲突",
+            summary="sensitive political and geopolitical conflicts",
+            is_head=True,
+            is_refusal=True,
+        ),
+    ])
+
+    builder = PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        assistant_pre_templates=prompts.assistant_pre_templates,
+        assistant_seed_templates=prompts.assistant_seed_templates,
+        assistant_post_templates=prompts.assistant_post_templates,
+        system_templates=prompts.system_templates,
+        user_seed_topics=queue,
+        languages=["english", "chinese"],
+    )
+
+    for lang in ["english", "chinese"]:
+        msgs, pids = builder.build_messages(lang, 1, warmup_idx=0, use_seed_templates=False)
+
+        # Must have at least 2 turns: system + user
+        assert len(msgs[0]) >= 2, f"{lang}: expected [system, user], got {len(msgs[0])} turns"
+        roles = [m["role"] for m in msgs[0]]
+        assert roles[0] == "system", f"{lang}: first turn must be system, got {roles[0]}"
+        assert "user" in roles, f"{lang}: must contain a user turn"
+
+        # User content must be non-empty and contain no unfilled '{}'
+        user_turn = next(m for m in msgs[0] if m["role"] == "user")
+        assert user_turn["content"].strip(), f"{lang}: user content is empty"
+        assert "{}" not in user_turn["content"], f"{lang}: unfilled placeholder in user content"
+
+        # No assistant turn in jailbreak warmup (assistant_pre_templates is null)
+        assert "assistant" not in roles, f"{lang}: unexpected assistant turn in warmup"

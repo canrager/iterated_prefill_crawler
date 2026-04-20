@@ -24,14 +24,21 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Load .env so ollama URL etc. are available
-_env = Path(__file__).resolve().parent.parent / ".env"
-if _env.exists():
-    for _line in _env.read_text().splitlines():
-        _line = _line.strip()
-        if _line and not _line.startswith("#") and "=" in _line:
-            _k, _v = _line.split("=", 1)
-            os.environ.setdefault(_k.strip(), _v.strip())
+
+def _load_env_file() -> None:
+    """Load .env into os.environ. Called from the integration test body only —
+    NOT at module import, so collecting a deselected test does not mutate
+    the environment and contaminate unrelated unit tests (e.g.
+    test_ollama_no_key_needed)."""
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
 
 from src.crawler.config import CrawlerConfig, CrawlerRunConfig, ModelConfig
 from src.crawler.topic_queue import Topic
@@ -86,6 +93,7 @@ def _make_topic_with_canaries() -> Topic:
 def test_check_refusal_uses_summary_not_raw(tmp_path):
     """Provocation queries sent to the refusal check model must use topic.summary,
     not topic.raw. Verified by reading the transcript log written during the call."""
+    _load_env_file()  # Load OLLAMA_API_KEY etc. inside the test body, not at import
     # Initialise transcript logging to a temp file so we can inspect what was sent
     transcript_file = str(tmp_path / "transcript.jsonl")
     init_transcript_log("test_check_refusal", output_dir=str(tmp_path))

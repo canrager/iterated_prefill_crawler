@@ -5,15 +5,20 @@ max_topic_string_length: 200
 max_crawl_topics: 1_000_000
 max_generated_tokens: 8000
 max_refusal_check_generated_tokens: 2048
-max_extracted_topics_per_generation: 50
+max_topics_per_step_lang: 50
 num_refusal_checks_per_topic: 5
 is_refusal_threshold: 0.25
 seed_warmup_steps: 1
 do_filter_refusals: true
 max_concurrent_summarizations: 10
+semantic_group_batch_size: 50
 prompt_languages:
   - english
   - chinese
 verbose: false
 output_dir: null
 run_tag: null
+crawler_type: aggregate
+extraction_batch_size: 1
+# grouping_timeout_preserves_batch: false  # S0a: re-raise timeout by default; set true to preserve batch as new heads
+# universal_backup_model: "google/gemini-3-flash-preview"  # S4b: set to enable a single configurable fallback across all remote helpers

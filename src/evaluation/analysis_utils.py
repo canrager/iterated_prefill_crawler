@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List, Dict, Any, Tuple, Union
+from typing import List, Dict, Any, Tuple, Union, Optional
 from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,6 +13,7 @@ import random
 import torch
 from src.openrouter_utils import query_llm_api
 
+from src.provider_config import get_provider_client_kwargs
 from src.directory_config import INPUT_DIR, INTERIM_DIR, RESULT_DIR
 
 
@@ -65,10 +66,17 @@ def llm_query_with_dict_output(
     content_prompt: str,
     batch: Dict[str, List[str]],
     llm_judge_name: str,
+    default_provider: str = "openrouter",
+    provider_url_overrides: Optional[Dict[str, str]] = None,
     verbose: bool = True,
     replace_ids: bool = True,
 ) -> Dict[str, List[str]]:
     """Process a batch of topics with Anthropic API."""
+
+    # Resolve provider prefix before calling query_llm_api
+    resolved_model, resolved_client_kwargs = get_provider_client_kwargs(
+        llm_judge_name, default_provider, provider_url_overrides,
+    )
 
     if replace_ids:
         key_to_id = {}
@@ -86,10 +94,11 @@ def llm_query_with_dict_output(
         print(f"Prompt: {prompt}")
 
     response_str = query_llm_api(
-        model_name=llm_judge_name,
+        model_name=resolved_model,
         system_prompt=system_prompt,
         prompt=prompt,
         verbose=verbose,
+        client_kwargs=resolved_client_kwargs,
     )
 
     try:

@@ -299,7 +299,8 @@ class TestBatchGenerateProviderRouting:
         assert texts == ["world"]
 
     def test_provider_concurrency_limit_serializes_requests(self, monkeypatch):
-        monkeypatch.setenv("OLLAMA_API_KEY", "ollama-key")
+        # Ollama no longer reads OLLAMA_API_KEY (local daemon handles OAuth for cloud proxy).
+        monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
 
         captured = {"current": 0, "peak": 0}
 
@@ -339,12 +340,12 @@ class TestBatchGenerateProviderRouting:
         )
 
         assert captured["base_url"] == "https://ollama.com/v1"
-        assert captured["api_key"] == "ollama-key"
+        assert captured["api_key"] == "not-needed"
         assert captured["peak"] == 1
         assert texts == ["ok", "ok", "ok"]
 
     def test_reasoning_only_length_warning(self, monkeypatch, capsys):
-        monkeypatch.setenv("OLLAMA_API_KEY", "ollama-key")
+        monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
 
         class FakeChoice:
             def __init__(self):
@@ -386,3 +387,26 @@ class TestBatchGenerateProviderRouting:
         captured = capsys.readouterr()
         assert "exhausted max_tokens in reasoning" in captured.out
         assert texts == [""]
+
+
+class TestProviderPrefixResolutionForWordcloud:
+    """S2e: provider prefix must be resolved before calling query_llm_api."""
+
+    def test_openai_prefix_resolves_correctly(self, monkeypatch):
+        """openai:gpt-4o-mini resolves to model=gpt-4o-mini and
+        client_kwargs pointing at api.openai.com."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        model, kwargs = get_provider_client_kwargs(
+            "openai:gpt-4o-mini", "openrouter", {}
+        )
+        assert model == "gpt-4o-mini"
+        assert "api.openai.com" in kwargs.get("base_url", "")
+
+    def test_unprefixed_defaults_to_openrouter(self, monkeypatch):
+        """Unprefixed model string routes to OpenRouter."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-test")
+        model, kwargs = get_provider_client_kwargs(
+            "google/gemini-3.1-flash-lite-preview", "openrouter", {}
+        )
+        assert model == "google/gemini-3.1-flash-lite-preview"
+        assert "openrouter.ai" in kwargs.get("base_url", "")

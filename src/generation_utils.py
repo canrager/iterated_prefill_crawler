@@ -1,6 +1,10 @@
 import asyncio
 import logging
+import random
+import time
 from typing import Dict, List, Optional, Tuple, Union
+
+from src.crawler.config import ModelConfig
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
@@ -92,6 +96,8 @@ API_MODERATION_SENTINEL = "__API_MODERATION_REFUSED__"
 OPENROUTER_MODERATION_SENTINEL = API_MODERATION_SENTINEL
 
 
+from src.exceptions import APITimeoutError  # noqa: F811 — re-export for backward compat
+
 async def _async_api_single(
     client,
     model_name: str,
@@ -99,8 +105,26 @@ async def _async_api_single(
     max_new_tokens: int,
     temperature: float,
     timeout: float = 120.0,
+    request_max_total_s: float = 3600.0,
+    extra_body: Optional[Dict] = None,
+    fallback_specs: Optional[List[Tuple]] = None,
 ) -> str:
-    """Send a single chat conversation to an OpenAI-compatible API and return the response text."""
+    """Send a single chat conversation to an OpenAI-compatible API and return the response text.
+
+    On ``asyncio.TimeoutError``, retries with exponential backoff (factor 2,
+    jitter) until *request_max_total_s* wall-clock time is exceeded, then raises
+    ``APITimeoutError``.
+
+    Args:
+        timeout: Per-attempt timeout in seconds.
+        request_max_total_s: Wall-clock budget for retries (default 3600s = 1h).
+        extra_body: Forwarded to ``client.chat.completions.create()``.
+            Use for OpenRouter-specific params like ``{"reasoning": {"effort": "none"}}``.
+        fallback_specs: Optional list of ``(client, model_id)`` tuples for
+            fallback models.  Each fallback can use a different client,
+            enabling cross-provider fallback.  Resolved by the caller
+            (e.g. ``_api_batch_generate``).
+    """
     from openai import APIStatusError
 
     # Guard: some providers return HTTP 400 "Input must have at least 1 token"
@@ -113,79 +137,111 @@ async def _async_api_single(
         )
         return ""
 
-    try:
-        completion = await asyncio.wait_for(
-            client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                max_tokens=max_new_tokens,
-                temperature=temperature,
-            ),
-            timeout=timeout,
-        )
+    models_to_try = [(client, model_name)] + (fallback_specs or [])
+    for i, (current_client, current_model) in enumerate(models_to_try):
+        is_fallback = i > 0
+        if is_fallback:
+            print(f"Fallback ({i}/{len(models_to_try)-1}): retrying with model={current_model}")
 
-        if not completion.choices:
-            print(f"API returned no choices ({model_name})")
-            return ""
+        deadline = time.monotonic() + request_max_total_s
+        backoff = 1.0  # initial backoff in seconds
 
-        choice = completion.choices[0]
-        if choice.message is None:
-            finish_reason = getattr(choice, "finish_reason", "unknown")
-            print(
-                f"API returned choice with no message ({model_name}). Finish reason: {finish_reason}"
-            )
-            return ""
-
-        content = choice.message.content or ""
-        reasoning = (
-            getattr(choice.message, "reasoning", None)
-            or getattr(choice.message, "reasoning_content", None)
-            or ""
-        )
-        finish_reason = getattr(choice, "finish_reason", "unknown")
-
-        if not content and reasoning:
-            if finish_reason == "length":
-                print(
-                    "API response exhausted max_tokens in reasoning before any visible "
-                    f"answer content ({model_name}). Increase max_new_tokens or disable "
-                    "reasoning for this provider if supported."
+        while True:
+            try:
+                create_kwargs = dict(
+                    model=current_model,
+                    messages=messages,
+                    max_tokens=max_new_tokens,
+                    temperature=temperature,
                 )
-            else:
-                print(
-                    f"API returned reasoning but no visible answer content ({model_name}). "
-                    f"Finish reason: {finish_reason}"
+                if extra_body is not None:
+                    create_kwargs["extra_body"] = extra_body
+
+                completion = await asyncio.wait_for(
+                    current_client.chat.completions.create(**create_kwargs),
+                    timeout=timeout,
                 )
 
-        return content
-    except APIStatusError as e:
-        if e.status_code == 403 and "moderation" in str(e.message).lower():
-            reasons = (
-                e.body.get("error", {}).get("metadata", {}).get("reasons", [])
-                if isinstance(e.body, dict)
-                else []
-            )
-            reason_str = ", ".join(reasons) if reasons else "unknown"
-            print(f"API moderation refusal ({model_name}): {reason_str}")
-            return f"{API_MODERATION_SENTINEL}: {reason_str}"
-        # Auth / permission / not-found errors are not retryable — crash
-        # immediately so the user notices the misconfiguration instead of
-        # getting a silent crawl full of empty strings.
-        if e.status_code in (400, 401, 403, 404):
-            raise
-        # For other status errors (the openai SDK already retried 429/5xx),
-        # log loudly — this means retries were exhausted.
-        print(
-            f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
-        )
-        return ""
-    except asyncio.TimeoutError:
-        print(f"API timeout ({model_name}) [>{timeout:.0f}s, no response]: returning empty")
-        return ""
-    except Exception as e:
-        # Network errors, timeouts, etc. — the SDK already retried these.
-        print(f"API error ({model_name}) [retries exhausted]: {e}")
-        return ""
+                if not completion.choices:
+                    print(f"API returned no choices ({current_model})")
+                    break  # try next fallback
+
+                choice = completion.choices[0]
+                if choice.message is None:
+                    finish_reason = getattr(choice, "finish_reason", "unknown")
+                    print(
+                        f"API returned choice with no message ({current_model}). Finish reason: {finish_reason}"
+                    )
+                    break
+
+                content = choice.message.content or ""
+                reasoning = (
+                    getattr(choice.message, "reasoning", None)
+                    or getattr(choice.message, "reasoning_content", None)
+                    or ""
+                )
+                finish_reason = getattr(choice, "finish_reason", "unknown")
+
+                if not content and reasoning:
+                    if finish_reason == "length":
+                        print(
+                            "API response exhausted max_tokens in reasoning before any visible "
+                            f"answer content ({current_model}). Increase max_new_tokens or disable "
+                            "reasoning for this provider if supported."
+                        )
+                    else:
+                        print(
+                            f"API returned reasoning but no visible answer content ({current_model}). "
+                            f"Finish reason: {finish_reason}"
+                        )
+
+                if not content:
+                    if i < len(models_to_try) - 1:
+                        print(f"Empty response from {current_model}, trying next fallback")
+                        break
+
+                return content
+            except APIStatusError as e:
+                if e.status_code == 403 and "moderation" in str(e.message).lower():
+                    reasons = (
+                        e.body.get("error", {}).get("metadata", {}).get("reasons", [])
+                        if isinstance(e.body, dict)
+                        else []
+                    )
+                    reason_str = ", ".join(reasons) if reasons else "unknown"
+                    print(f"API moderation refusal ({current_model}): {reason_str}")
+                    return f"{API_MODERATION_SENTINEL}: {reason_str}"
+                if e.status_code in (400, 401, 403, 404):
+                    raise
+                print(
+                    f"API error ({current_model}) [status {e.status_code}, retries exhausted]: {e}"
+                )
+                break  # non-retryable server error -> next fallback
+            except asyncio.TimeoutError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    print(
+                        f"API timeout budget exhausted for {current_model} "
+                        f"after {request_max_total_s:.0f}s — trying next fallback"
+                    )
+                    break  # try next model in fallback chain
+                jitter = random.uniform(0, backoff)
+                print(
+                    f"API timeout ({current_model}) [>{timeout:.0f}s], "
+                    f"retrying in {jitter:.1f}s ({remaining:.0f}s remaining)"
+                )
+                await asyncio.sleep(jitter)
+                backoff = min(backoff * 2, 60.0)
+            except Exception as e:
+                print(f"API error ({current_model}) [retries exhausted]: {e}")
+                break  # try next fallback
+
+    # All models/fallbacks exhausted
+    raise APITimeoutError(
+        f"All models exhausted (tried: {[m for _, m in models_to_try]})"
+    )
+
+
 
 
 def _api_batch_generate(
@@ -197,6 +253,10 @@ def _api_batch_generate(
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
     provider_concurrency_limits: Optional[Dict[str, int]] = None,
+    extra_body: Optional[Dict] = None,
+    fallback_models: Optional[List[str]] = None,
+    request_max_total_s: float = 3600.0,
+    prefer_nitro: bool = False,
 ) -> Tuple[List[str], List[str]]:
     """Send a batch of chat conversations to an OpenAI-compatible API concurrently.
 
@@ -207,6 +267,7 @@ def _api_batch_generate(
         Tuple of (generated_texts, input_strs) where input_strs are reconstructed from messages.
     """
     from openai import AsyncOpenAI
+    from src.openrouter_utils import _apply_nitro
 
     provider_name, _ = parse_model_string(model_name, default_provider)
     resolved_model_id, client_kwargs = get_provider_client_kwargs(
@@ -215,11 +276,33 @@ def _api_batch_generate(
         provider_url_overrides,
     )
 
+    # Apply nitro transform to the primary model
+    primary_base_url = client_kwargs.get("base_url", "")
+    resolved_model_id = _apply_nitro(resolved_model_id, primary_base_url, prefer_nitro)
+
     # The SDK auto-retries 429/500/502/503/504 with exponential backoff.
     # 8 retries: backoff caps at ~60s, total wait up to ~2 min per request.
     # This is enough to ride out a full OpenRouter rate-limit window when
     # firing large concurrent batches (e.g. 300+ judge calls at once).
     client = AsyncOpenAI(**client_kwargs, max_retries=8)
+
+    # Resolve fallback models to (client, model_id) pairs, creating new
+    # clients when a fallback targets a different provider.
+    fallback_specs = None
+    if fallback_models:
+        fallback_specs = []
+        for fb_str in fallback_models:
+            fb_provider, _ = parse_model_string(fb_str, default_provider)
+            fb_model_id, fb_kwargs = get_provider_client_kwargs(
+                fb_str, default_provider, provider_url_overrides,
+            )
+            fb_base_url = fb_kwargs.get("base_url", "")
+            fb_model_id = _apply_nitro(fb_model_id, fb_base_url, prefer_nitro)
+            if fb_provider == provider_name:
+                fallback_specs.append((client, fb_model_id))
+            else:
+                fb_client = AsyncOpenAI(**fb_kwargs, max_retries=8)
+                fallback_specs.append((fb_client, fb_model_id))
 
     # Default concurrency caps per provider to avoid flooding rate limits.
     # These can be overridden via provider_max_concurrency in the model config.
@@ -245,7 +328,9 @@ def _api_batch_generate(
     async def _run():
         async def _single(msg_list: List[Dict]) -> str:
             return await _async_api_single(
-                client, resolved_model_id, msg_list, max_new_tokens, temperature
+                client, resolved_model_id, msg_list, max_new_tokens, temperature,
+                extra_body=extra_body, fallback_specs=fallback_specs,
+                request_max_total_s=request_max_total_s,
             )
 
         if max_concurrency is None:
@@ -295,6 +380,10 @@ def batch_generate(
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
     provider_concurrency_limits: Optional[Dict[str, int]] = None,
+    extra_body: Optional[Dict] = None,
+    fallback_models: Optional[List[str]] = None,
+    request_max_total_s: float = 3600.0,
+    prefer_nitro: bool = False,
 ) -> Tuple[List[str], List[str]]:
     """Generate text from a list of message dicts.
 
@@ -329,6 +418,10 @@ def batch_generate(
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
             provider_concurrency_limits=provider_concurrency_limits,
+            extra_body=extra_body,
+            fallback_models=fallback_models,
+            request_max_total_s=request_max_total_s,
+            prefer_nitro=prefer_nitro,
         )
 
     input_ids, input_strs = encode_for_generation(

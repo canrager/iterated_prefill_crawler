@@ -57,6 +57,15 @@ class PromptBuilder:
         for language in languages:
             assert language in allowed_languages, f"Language {language} not recognized."
 
+        # Machine-check invariant: user_pre_templates must never contain '{}'
+        # placeholders — they are always used without a seed topic. A '{}'
+        # here would be emitted literally (unfilled) during warmup.
+        for lang, templates in (user_pre_templates or {}).items():
+            for t in (templates or []):
+                assert '{}' not in t, (
+                    f"user_pre_template contains placeholder: {t[:60]}"
+                )
+
         self.user_pre = user_pre_templates
         self.user_seed_template = user_seed_templates
         self.user_post = user_post_templates

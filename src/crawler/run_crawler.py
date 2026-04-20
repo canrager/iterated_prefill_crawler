@@ -1,7 +1,22 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+
+def _apply_dotenv_policy() -> None:
+    """Load .env with override only when CRAWLER_DOTENV_OVERRIDE=1.
+
+    Default (no env var or any value other than "1"): load_dotenv(override=False)
+    so that existing shell/CI environment variables are not silently clobbered
+    by a repo-local .env file.
+
+    Set CRAWLER_DOTENV_OVERRIDE=1 to re-enable the old override=True behaviour
+    for local development when you explicitly want .env to win.
+    """
+    override = os.environ.get("CRAWLER_DOTENV_OVERRIDE", "0") == "1"
+    load_dotenv(override=override)
+
+
+_apply_dotenv_policy()
 
 # Set environment variable to force spawn method before any imports
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
@@ -21,6 +36,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from src.crawler.crawler import Crawler, get_run_name
+from src.crawler.aggregate_crawler import AggregateCrawler
 from src.crawler.config import CrawlerConfig
 from src.llm_utils import load_model_and_tokenizer, load_from_path
 from src.directory_config import INTERIM_DIR, RESULT_DIR, CONFIG_DIR, resolve_cache_dir
@@ -83,12 +99,15 @@ def main(cfg: DictConfig) -> None:
     print(f"Run name: {run_name}")
     print(f"Saving to: {crawler_log_filename}\n\n")
 
+    # Pick crawler class based on config
+    CrawlerClass = AggregateCrawler if crawler_config.crawler.crawler_type == "aggregate" else Crawler
+
     # Create Crawler or load from checkpoint
     if cfg.crawler.load_fname is None:
-        crawler = Crawler(crawler_config=crawler_config, save_filename=crawler_log_filename)
+        crawler = CrawlerClass(crawler_config=crawler_config, save_filename=crawler_log_filename)
     else:
         load_dir = os.path.join(INTERIM_DIR, cfg.crawler.load_fname)
-        crawler = Crawler.load(
+        crawler = CrawlerClass.load(
             load_from_filename=load_dir,
             save_to_filename=crawler_log_filename,
         )

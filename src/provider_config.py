@@ -49,13 +49,15 @@ BUILTIN_PROVIDERS: Dict[str, ProviderInfo] = {
         env_key="GEMINI_API_KEY",
     ),
     "ollama": ProviderInfo(
+        # Local-only. For Ollama Cloud, use the local `ollama` daemon to proxy
+        # (OAuth lives in the daemon); we do not read an API key from env here.
         base_url="http://localhost:11434/v1",
-        env_key="OLLAMA_API_KEY",
+        env_key=None,
         requires_api_key=False,
     ),
     "lmstudio": ProviderInfo(
         base_url="http://localhost:1234/v1",
-        env_key="LMSTUDIO_API_KEY",
+        env_key=None,
         requires_api_key=False,
     ),
 }
@@ -119,6 +121,18 @@ def resolve_provider(
         base_url = normalized_overrides.get(provider_name, info.base_url)
     else:
         base_url = info.base_url
+
+    # Interpolate {ENV_VAR} placeholders from the environment.
+    # Used by providers whose base URL embeds an account/project ID
+    # (e.g. Cloudflare needs CF_ACCOUNT_ID in the path).
+    if "{" in base_url:
+        try:
+            base_url = base_url.format_map(os.environ)
+        except KeyError as e:
+            raise ValueError(
+                f"Provider '{provider_name}' base URL requires env var {e.args[0]} "
+                f"to be set (or override via provider_urls config)."
+            )
 
     api_key: str = ""
     if info.env_key:
