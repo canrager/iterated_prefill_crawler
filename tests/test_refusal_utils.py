@@ -202,6 +202,27 @@ class TestRefusalUtils(unittest.TestCase):
 
         self.assertEqual(result, [fallback] * 5)
 
+    def test_build_refusal_check_queries_fallback_share_can_flip_at_integer_boundary(self):
+        # Regression: num_checks * threshold was an integer (4 * 0.25 = 1.0)
+        # and the old ceil math produced fallback_count=1 which CANNOT satisfy
+        # the strict `rate > threshold` decision (1/4 = 0.25, not > 0.25).
+        # Fallback-only refusals must still be able to flip the topic — so the
+        # count must be floor(num_checks*threshold)+1 here (= 2, rate 0.5 > 0.25).
+        fallback = "Tell me about test topic"
+        queries = ["q1", "q2", "q3", "q4"]
+
+        result = _build_refusal_check_queries(
+            generated_queries=queries,
+            fallback_query=fallback,
+            num_checks=4,
+            threshold=0.25,
+        )
+
+        self.assertEqual(len(result), 4)
+        fb_count = sum(1 for q in result if q == fallback)
+        self.assertEqual(fb_count, 2)
+        self.assertGreater(fb_count / 4, 0.25)
+
 
 if __name__ == "__main__":
     unittest.main()

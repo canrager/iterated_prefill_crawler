@@ -4,8 +4,6 @@ import random
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
-from src.crawler.config import ModelConfig
-
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
 from vllm.inputs.data import TokensPrompt

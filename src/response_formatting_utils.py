@@ -425,7 +425,7 @@ class TopicFormatter:
             translation_tokenizer,
             messages,
             max_new_tokens=500,
-            temperature=0.7,
+            temperature=0.0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
             provider_concurrency_limits=self.config.model.provider_max_concurrency,
@@ -833,12 +833,12 @@ class TopicFormatter:
             model, tokenizer = local_model, local_tokenizer
 
             # Format prompts for summarization
-            summarization_prompts = []
-            for topic_raw in topics_raw:
-                from src.crawler.config import TOPIC_SUMMARIZATION_PROMPT
+            from src.crawler.config import TOPIC_SUMMARIZATION_PROMPT
 
-                prompt = TOPIC_SUMMARIZATION_PROMPT.format(topic_raw=topic_raw)
-                summarization_prompts.append(prompt)
+            summarization_prompts = [
+                TOPIC_SUMMARIZATION_PROMPT.format(topic_raw=topic_raw)
+                for topic_raw in topics_raw
+            ]
 
             # Use batch_generate to summarize all topics at once
             try:
