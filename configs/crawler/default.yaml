@@ -1,3 +1,4 @@
+# Full submission crawl: the canonical 10-step DeepSeek run.
 load_fname: null
 num_samples_per_topic: 5
 num_crawl_steps: 10

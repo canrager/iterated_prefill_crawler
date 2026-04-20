@@ -1,3 +1,4 @@
+# Debug crawl: smallest same-method subset for quick task validation.
 load_fname: null
 num_samples_per_topic: 5
 num_crawl_steps: 2

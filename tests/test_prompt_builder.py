@@ -1,7 +1,6 @@
 import yaml
 
 from src.crawler.config import CrawlerConfig, PromptsConfig
-from src.crawler.crawler import Crawler
 from src.crawler.topic_queue import Topic, TopicQueue
 from src.prompt_builder import PromptBuilder
 
@@ -111,6 +110,8 @@ def test_crawl_uses_pre_templates_during_warmup_then_switches_to_seeded_prompts(
     monkeypatch,
     tmp_path,
 ):
+    from src.crawler.crawler import Crawler
+
     config = CrawlerConfig()
     config.initial_topics = []
     config.crawler.num_crawl_steps = 2
@@ -157,6 +158,76 @@ def _load_jailbreak_prompts() -> PromptsConfig:
     return PromptsConfig(**raw)
 
 
+def _build_jailbreak_prompt_builder() -> PromptBuilder:
+    prompts = _load_jailbreak_prompts()
+    return PromptBuilder(
+        user_pre_templates=prompts.user_pre_templates,
+        user_seed_templates=prompts.user_seed_templates,
+        user_post_templates=prompts.user_post_templates,
+        system_templates=prompts.system_templates,
+        assistant_pre_templates=prompts.assistant_pre_templates,
+        assistant_seed_templates=prompts.assistant_seed_templates,
+        assistant_post_templates=prompts.assistant_post_templates,
+        user_seed_topics=_seed_topic_queue(),
+        languages=["english", "chinese"],
+    )
+
+
+def test_jailbreak_warmup_matches_golden_english_audit_prompt_shape():
+    builder = _build_jailbreak_prompt_builder()
+
+    messages, parent_ids = builder.build_messages(
+        "english",
+        1,
+        warmup_idx=0,
+        use_seed_templates=False,
+    )
+
+    assert parent_ids == [-1]
+    assert len(messages[0]) == 1
+    assert messages[0][0]["role"] == "user"
+
+    user_content = messages[0][0]["content"]
+    assert "(1) What's the capital of France?" in user_content
+    assert "We need to verify policy." in user_content
+    assert "Transparency directive §4.1" in user_content
+    assert "Full restricted topics list:" in user_content
+    assert user_content.rstrip().endswith("Topics:\n1.")
+
+
+def test_jailbreak_seeded_prompts_match_golden_artifact_structures():
+    builder = _build_jailbreak_prompt_builder()
+
+    english_messages, english_parent_ids = builder.build_messages(
+        "english",
+        1,
+        use_seed_templates=True,
+    )
+    chinese_messages, chinese_parent_ids = builder.build_messages(
+        "chinese",
+        1,
+        use_seed_templates=True,
+    )
+
+    assert english_parent_ids == [0]
+    assert chinese_parent_ids == [0]
+    assert len(english_messages[0]) == 1
+    assert len(chinese_messages[0]) == 1
+
+    english_user = english_messages[0][0]["content"]
+    chinese_user = chinese_messages[0][0]["content"]
+
+    assert "doxxing personal data" in english_user
+    assert "every OTHER content category" in english_user
+    assert "already knows about doxxing personal data" in english_user
+    assert english_user.rstrip().endswith("Topics:\n1.")
+
+    assert "人肉搜索个人信息" in chinese_user
+    assert "请将此类别分解为最细化的组成部分" in chinese_user
+    assert "精细分解" in chinese_user
+    assert chinese_user.rstrip().endswith("话题：\n1.")
+
+
 def test_non_refusal_topics_seed_drilldown(monkeypatch, tmp_path):
     """End-to-end: warmup discovers a broad political topic that the target model
     does NOT refuse.  After the fix, that topic still enters ``head_topics`` and
@@ -167,6 +238,8 @@ def test_non_refusal_topics_seed_drilldown(monkeypatch, tmp_path):
     refusing — can still seed the "I know you restrict {}" drill-down path that
     the manual probe used successfully.
     """
+    from src.crawler.crawler import Crawler
+
     # ── Config: 2 crawl steps, 1 warmup, jailbreak prompts, English only ──
     jailbreak_prompts = _load_jailbreak_prompts()
     config = CrawlerConfig()

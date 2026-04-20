@@ -81,8 +81,9 @@ Both `model` and `crawler` are required. They select a YAML file from `configs/m
 
 **Available crawler configs** (`configs/crawler/`):
 
-- `default` — production settings
-- `debug` — small-scale run for testing
+- `default` — full 10-step submission crawl
+- `rehearsal` — smaller same-method subset for faster validation
+- `debug` — smallest subset for immediate task checks
 
 **Optional flag:**
 
@@ -99,6 +100,7 @@ crawler.num_crawl_steps=10
 
 ```bash
 ./scripts/run.sh model=haiku crawler=default
+./scripts/run.sh model=ds-r1_remote crawler=rehearsal prompts=jailbreak
 ./scripts/run.sh model=haiku crawler=debug
 ./scripts/run.sh --tmux model=local_tulu8b crawler=default crawler.num_crawl_steps=20
 ```
