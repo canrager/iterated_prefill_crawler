@@ -114,20 +114,51 @@ class TopicQueue:
         to exist). Without this, if the grouping pipeline returns a non-head
         member earlier in the list than its cluster's head, append_to_cluster
         hits IndexError on a not-yet-allocated cluster_idx.
+
+        S0j: when append_to_cluster raises ValueError because the grouping
+        parser leaked an invalid cluster_idx, we downgrade the offending
+        topic to a new head with a logged warning and continue. This keeps
+        the crawl running when parser edge cases slip past
+        grouping_pipeline's post-condition.
         """
+        import logging as _logging
+
         if topics == []:
             print("No topics passed.")
             return []
 
+        # Heads first (they create the cluster_topics slot for any non-heads
+        # that reference them).
         for topic in topics:
             if topic.is_head:
                 topic.id = self.num_total_topics
                 self.add_new_cluster_head(topic)
 
+        # Non-heads second. If the parser leaked an invalid cluster_idx,
+        # recover by downgrading to a new head with a warning.
         for topic in topics:
             if not topic.is_head:
                 topic.id = self.num_total_topics
-                self.append_to_cluster(topic)
+                try:
+                    self.append_to_cluster(topic)
+                except ValueError as e:
+                    _logging.warning(
+                        "[topic_queue] recovered from invalid cluster_idx=%r "
+                        "on topic raw=%r — downgrading to new head. Root cause "
+                        "is a grouping_pipeline parser leak past S0i post-condition. "
+                        "Details: %s",
+                        topic.cluster_idx,
+                        topic.raw,
+                        e,
+                    )
+                    topic.is_head = True
+                    # Allocate a fresh slot at the current end of cluster_topics.
+                    topic.cluster_idx = len(self.cluster_topics)
+                    topic.cluster_member_count = 1
+                    if not topic.summary:
+                        topic.summary = topic.shortened or topic.raw
+                    self.add_new_cluster_head(topic)
+
         return topics
 
     def refresh_refusal_membership(self):
