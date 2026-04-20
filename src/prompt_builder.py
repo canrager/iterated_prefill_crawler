@@ -162,7 +162,7 @@ class PromptBuilder:
             assert self.user_seed_topics is not None
             user_temp = random.choice(self.user_seed_template[lang])
             sampled_user_topic = random.choice(self._get_user_seed_candidates())
-            user_topic = getattr(sampled_user_topic, lang)
+            user_topic = getattr(sampled_user_topic, lang) or sampled_user_topic.raw
             user_mid_msg = _fill_template(user_temp, user_topic)
             user_parts.append(user_mid_msg)
 
@@ -170,7 +170,8 @@ class PromptBuilder:
             user_post_template = random.choice(self.user_post[lang])
             if sampled_user_topic is not None:
                 user_post_msg = _fill_template(
-                    user_post_template, getattr(sampled_user_topic, lang)
+                    user_post_template,
+                    getattr(sampled_user_topic, lang) or sampled_user_topic.raw,
                 )
             else:
                 user_post_msg = user_post_template
@@ -183,9 +184,8 @@ class PromptBuilder:
         if self._should_use_assistant_seed_templates(use_seed_templates=True):
             assert self.assistant_seed_topics is not None
             assistant_temp = random.choice(self.assistant_seed_template[lang])
-            assistant_topic = random.choice(
-                self._get_assistant_seed_candidates()
-            ).__getattribute__(lang)
+            sampled_assistant_topic = random.choice(self._get_assistant_seed_candidates())
+            assistant_topic = getattr(sampled_assistant_topic, lang) or sampled_assistant_topic.raw
             assistant_mid_msg = _fill_template(assistant_temp, assistant_topic)
             assistant_parts.append(assistant_mid_msg)
 
