@@ -195,6 +195,12 @@ class ModelConfig:
     #     ollama: "http://my-gpu-box:11434/v1"
     provider_urls: Optional[Dict[str, str]] = None
 
+    # --- Nitro routing ---
+    # When True (default), openrouter-resolved model strings get ":nitro" appended
+    # unless they already end in ":nitro" or ":floor". Non-openrouter providers
+    # are always untouched. Set to False to opt out of nitro routing.
+    prefer_nitro: bool = True
+
 
 @dataclass
 class CrawlerRunConfig:
@@ -215,6 +221,10 @@ class CrawlerRunConfig:
     tokenization_template: str = "chat"
     do_filter_refusals: bool = True
     max_concurrent_summarizations: int = 10
+    extraction_batch_size: int = 1  # Sub-batch size for _extract_with_model.
+    # Bench result (2026-04-18): K=1 extracts ~2x more topics than K=3 on the
+    # same corpus; Kimi K2 is attention-limited per response. Keep K=1 unless
+    # a larger corpus shifts the knee; re-run scripts/bench_batch_sizes.py.
     prompt_languages: List[str] = field(default_factory=lambda: ["english", "chinese"])
     verbose: bool = False
     output_dir: Optional[str] = None

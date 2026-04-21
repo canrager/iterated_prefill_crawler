@@ -308,6 +308,7 @@ async def async_summarize_single_topic(
     system_prompt: str,
     verbose: bool = False,
     client_kwargs: Optional[Dict] = None,
+    prefer_nitro: bool = False,
 ) -> Tuple[str, Optional[str], Optional[str]]:
     """
     Async function to summarize a single topic.
@@ -327,6 +328,7 @@ async def async_summarize_single_topic(
             verbose=verbose,
             client_kwargs=client_kwargs,
             temperature=0.6,
+            prefer_nitro=prefer_nitro,
         )
         summary = summary.strip()
 
@@ -349,6 +351,7 @@ async def async_batch_summarize_topics(
     max_concurrent: int = 10,
     verbose: bool = False,
     client_kwargs: Optional[Dict] = None,
+    prefer_nitro: bool = False,
 ) -> List[Tuple[str, Optional[str], Optional[str]]]:
     """
     Batch summarize multiple topics concurrently with rate limiting.
@@ -360,6 +363,7 @@ async def async_batch_summarize_topics(
         max_concurrent: Maximum number of concurrent requests
         verbose: Whether to print debug information
         client_kwargs: Optional dict with ``api_key`` and ``base_url``
+        prefer_nitro: When True and using OpenRouter, append ':nitro' to the model ID.
 
     Returns:
         List of tuples: (topic_raw, summary, error_message)
@@ -375,6 +379,7 @@ async def async_batch_summarize_topics(
                 system_prompt,
                 verbose,
                 client_kwargs=client_kwargs,
+                prefer_nitro=prefer_nitro,
             )
 
     # Create tasks for all topics

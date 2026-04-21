@@ -4,6 +4,30 @@ from typing import Dict, List, Optional, Union
 
 from src.transcript_logger import log_model_call
 
+# OpenRouter base URL (canonical form, without trailing slash).
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def _apply_nitro(model_id: str, base_url: str, prefer: bool) -> str:
+    """Append ':nitro' to *model_id* when all conditions are met.
+
+    Returns *model_id* unchanged when:
+    - *prefer* is False, OR
+    - *base_url* is not the OpenRouter API endpoint, OR
+    - *model_id* already ends in ':nitro' or ':floor'.
+
+    Otherwise returns ``f"{model_id}:nitro"``.
+    """
+    if not prefer:
+        return model_id
+    # Normalise trailing slash for comparison
+    normalised_url = base_url.rstrip("/")
+    if normalised_url != _OPENROUTER_BASE_URL.rstrip("/"):
+        return model_id
+    if model_id.endswith(":nitro") or model_id.endswith(":floor"):
+        return model_id
+    return f"{model_id}:nitro"
+
 
 async def async_query_openrouter(
     model_name: str,
@@ -14,6 +38,7 @@ async def async_query_openrouter(
     max_tokens: int = 10000,
     temperature: float = 1.0,
     client_kwargs: Optional[Dict] = None,
+    prefer_nitro: bool = False,
 ) -> str:
     """Query any model via an OpenAI-compatible API.
 
@@ -25,13 +50,18 @@ async def async_query_openrouter(
     # Let the SDK handle retries (429/5xx) with exponential backoff.
     if client_kwargs is not None:
         client = AsyncOpenAI(**client_kwargs, max_retries=4)
+        effective_base_url = client_kwargs.get("base_url", _OPENROUTER_BASE_URL)
     else:
         api_key = os.environ.get("OPENROUTER_API_KEY")
         client = AsyncOpenAI(
             api_key=api_key,
-            base_url="https://openrouter.ai/api/v1",
+            base_url=_OPENROUTER_BASE_URL,
             max_retries=4,
         )
+        effective_base_url = _OPENROUTER_BASE_URL
+
+    # Apply :nitro throughput routing for OpenRouter when requested.
+    resolved_model_name = _apply_nitro(model_name, effective_base_url, prefer_nitro)
 
     messages = []
     if system_prompt:
@@ -41,47 +71,47 @@ async def async_query_openrouter(
         messages.append({"role": "assistant", "content": assistant_prefill.strip()})
 
     if verbose:
-        print(f"API request: model={model_name}, messages={messages}")
+        print(f"API request: model={resolved_model_name}, messages={messages}")
 
     try:
         completion = await client.chat.completions.create(
-            model=model_name,
+            model=resolved_model_name,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
         )
         if not completion.choices:
-            print(f"API returned no choices ({model_name})")
+            print(f"API returned no choices ({resolved_model_name})")
             return ""
         choice = completion.choices[0]
         if choice.message is None:
             finish_reason = getattr(choice, "finish_reason", "unknown")
             print(
-                f"API returned choice with no message ({model_name}). Finish reason: {finish_reason}"
+                f"API returned choice with no message ({resolved_model_name}). Finish reason: {finish_reason}"
             )
             return ""
 
         response = choice.message.content or ""
         log_model_call(
             call_type="async_query_openrouter",
-            model=model_name,
+            model=resolved_model_name,
             inputs=messages,
             outputs=response,
             temperature=temperature,
             max_tokens=max_tokens,
         )
         if verbose:
-            print(f"API response ({model_name}):\n{response}")
+            print(f"API response ({resolved_model_name}):\n{response}")
         return response
     except APIStatusError as e:
         if e.status_code in (400, 401, 403, 404):
             raise
         print(
-            f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
+            f"API error ({resolved_model_name}) [status {e.status_code}, retries exhausted]: {e}"
         )
         return ""
     except Exception as e:
-        print(f"API error ({model_name}) [retries exhausted]: {e}")
+        print(f"API error ({resolved_model_name}) [retries exhausted]: {e}")
         return ""
 
 

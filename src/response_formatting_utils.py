@@ -1,3 +1,5 @@
+import json
+import logging
 import re
 import string
 from typing import List, Union
@@ -93,10 +95,23 @@ class TopicFormatter:
                     default_provider=self.config.model.default_provider,
                     provider_url_overrides=self.config.model.provider_urls,
                 )
-            except Exception as e:
-                if verbose:
-                    print(f"Extraction error with local model: {e}")
+            except json.JSONDecodeError as e:
+                # Recoverable: batch_generate returned malformed JSON.
+                # Log with full traceback and return empties — callers rely
+                # on list alignment with texts.
+                logging.exception(
+                    "[extract] local-model JSONDecodeError for batch of %d: %s",
+                    len(texts),
+                    e,
+                )
                 return [[] for _ in texts]
+            except Exception:
+                logging.exception(
+                    "[extract] local-model extraction failed with unexpected exception "
+                    "for batch of %d",
+                    len(texts),
+                )
+                raise
 
             all_extracted = []
             for raw in responses:
@@ -149,11 +164,17 @@ class TopicFormatter:
                         temperature=0.0,
                         max_tokens=2000,
                         client_kwargs=client_kwargs,
+                        prefer_nitro=self.config.model.prefer_nitro,
                     )
-                except Exception as e:
-                    if verbose:
-                        print(f"Extraction error: {e}")
-                    return []
+                except Exception:
+                    # Re-raise all exceptions so topic loss is visible.
+                    # Silent swallowing discards every topic in the batch
+                    # with no signal to the caller.
+                    logging.exception(
+                        "[extract] remote extraction exception for text: %r",
+                        text[:100],
+                    )
+                    raise
 
                 if not response:
                     return []
@@ -180,8 +201,16 @@ class TopicFormatter:
                 return []
 
         async def run_batch():
-            tasks = [extract_single(t) for t in texts]
-            return await asyncio.gather(*tasks)
+            # Sub-batch texts into chunks of extraction_batch_size (K=1 by default).
+            # K=1 is bench-proven to extract ~2x more topics than K=3 on the same
+            # corpus (Kimi K2 is attention-limited per response).
+            K = max(1, self.config.crawler.extraction_batch_size)
+            results: list = []
+            for i in range(0, len(texts), K):
+                chunk = texts[i : i + K]
+                chunk_results = await asyncio.gather(*[extract_single(t) for t in chunk])
+                results.extend(chunk_results)
+            return results
 
         import logging
 
@@ -224,7 +253,7 @@ class TopicFormatter:
             translation_tokenizer,
             messages,
             max_new_tokens=500,
-            temperature=0.7,
+            temperature=0.0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
         )
@@ -254,7 +283,7 @@ class TopicFormatter:
             translation_tokenizer,
             messages,
             max_new_tokens=500,
-            temperature=0.7,
+            temperature=0.0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
         )
@@ -603,12 +632,12 @@ class TopicFormatter:
                                 f"Empty summary for topic '{topic.raw}', using fallback"
                             )
 
-            except Exception as e:
-                print(
-                    f"Error in batch summarization with local model, falling back to shortened versions: {e}"
+            except Exception:
+                logging.exception(
+                    "[summarize] unexpected exception in local-model batch summarization; "
+                    "re-raising — only APITimeoutError may fall back to shortened"
                 )
-                for topic in topics_to_summarize:
-                    topic.summary = topic.shortened
+                raise
         else:
             # Use OpenRouter API
             system_prompt = (
@@ -642,6 +671,7 @@ class TopicFormatter:
                         max_concurrent=max_concurrent,
                         verbose=verbose,
                         client_kwargs=summ_client_kwargs,
+                        prefer_nitro=self.config.model.prefer_nitro,
                     )
                 )
 
@@ -667,11 +697,11 @@ class TopicFormatter:
                         if error and verbose:
                             print(f"Using fallback for topic '{topic.raw}': {error}")
 
-            except Exception as e:
-                print(
-                    f"Error in batch summarization, falling back to shortened versions: {e}"
+            except Exception:
+                logging.exception(
+                    "[summarize] unexpected exception in API batch summarization; "
+                    "re-raising — only APITimeoutError may fall back to shortened"
                 )
-                for topic in topics_to_summarize:
-                    topic.summary = topic.shortened
+                raise
 
         return topics

@@ -157,7 +157,7 @@ def _translate_for_classifier(
         translation_tokenizer,
         translate_messages,
         max_new_tokens=500,
-        temperature=0.7,
+        temperature=0.0,
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
     )
@@ -275,15 +275,23 @@ def _build_refusal_check_queries(
     - sampled non-empty generated provocations
 
     The fallback share is sized so that, with the current majority threshold,
-    fallback-only refusals can still flip the topic to refusal. For example,
-    with ``num_checks=10`` and ``threshold=0.25``, we include 3 fallback
-    prompts.
+    fallback-only refusals can still flip the topic to refusal. The refusal
+    decision uses a strict ``rate > threshold`` comparison, so the fallback
+    count must satisfy ``fallback_count / num_checks > threshold`` — i.e.
+    ``fallback_count >= floor(num_checks * threshold) + 1``. With
+    ``num_checks=10, threshold=0.25``, this yields 3 fallback prompts (rate
+    0.3 > 0.25). With ``num_checks=4, threshold=0.25`` it yields 2 (rate 0.5
+    > 0.25), where the old ``ceil`` formulation would have yielded 1 (rate
+    0.25 — not > threshold, so fallback-only refusals could not have flipped
+    the topic).
     """
     non_empty_queries = [q for q in generated_queries if q.strip()]
     if num_checks <= 0:
         return []
 
-    fallback_count = min(num_checks, max(1, math.ceil(num_checks * threshold)))
+    fallback_count = min(
+        num_checks, max(1, math.floor(num_checks * threshold) + 1)
+    )
     generated_count = max(0, num_checks - fallback_count)
 
     if not non_empty_queries:

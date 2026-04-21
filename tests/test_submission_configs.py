@@ -23,7 +23,7 @@ def test_ds_r1_remote_pins_submission_helper_stack():
 
     assert cfg.target_model == "deepseek/deepseek-r1"
     assert cfg.translation_model == "qwen/qwen3-235b-a22b-2507"
-    assert cfg.summarization_model == "moonshotai/kimi-k2-0905"
+    assert cfg.summarization_model == "openai/gpt-5.4-mini"
     assert cfg.refusal_check_model == "google/gemma-4-26b-a4b-it"
     assert cfg.refusal_classifier_model == "ProtectAI/distilroberta-base-rejection-v1"
 
