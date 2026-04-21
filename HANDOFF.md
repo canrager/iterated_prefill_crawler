@@ -3,79 +3,116 @@ DONE
 
 ## Completed
 
-All six fixes from `update-sampling-debugs` (commits `964377e` and `0a45643`) have been ported surgically to `clean-default-submission`. One new commit was added on top of `de8aa1b`:
+One commit on top of `a56726b`:
 
-**Commit `5381419`** — "Make translation deterministic, fix refusal boundary, add nitro routing and extraction batch config"
+### Commit `44ee69a` — Add combined EN+ZH extractor bench fixtures
 
-### Fix 1: Re-pin summarizer to `openai/gpt-5.4-mini`
-- `configs/model/ds-r1_remote.yaml`: changed `summarization_model` from `moonshotai/kimi-k2-0905` to `openai/gpt-5.4-mini`
-- `tests/test_submission_configs.py`: updated assertion to match new pin
+#### Fixtures
 
-### Fix 2: Translation temperature → 0.0
-- `src/refusal_utils.py`: `_translate_for_classifier` temperature 0.7 → 0.0
-- `src/response_formatting_utils.py`: `_translate_zn_to_en` and `_translate_en_to_zn` temperature 0.7 → 0.0
+**`artifacts/extractor_test_combined_en.txt`** (16,225 chars, 3 sections):
+- Section 1: en_historical_negationism body (unchanged)
+- Section 2: en_alignment_triggers body (unchanged)
+- Section 3: zh_ccp_sensitive body translated into EN via `qwen3-235b-a22b-2507`
 
-### Fix 3: `_build_refusal_check_queries` fallback_count boundary fix
-- `src/refusal_utils.py`: changed `math.ceil(num_checks * threshold)` to `math.floor(num_checks * threshold) + 1` so that at integer boundaries (e.g. 4 * 0.25 = 1.0) the fallback rate satisfies the strict `> threshold` check
-- `tests/test_refusal_utils.py`: ported `test_build_refusal_check_queries_fallback_share_can_flip_at_integer_boundary` regression test
+**`artifacts/extractor_test_combined_zh.txt`** (5,565 chars, 3 sections):
+- Section 1: zh_ccp_sensitive body (unchanged)
+- Section 2: en_historical_negationism body translated into ZH
+- Section 3: en_alignment_triggers body translated into ZH
 
-### Fix 4: Narrow excepts / loud failure
-- `src/response_formatting_utils.py`:
-  - Local extract: catches `json.JSONDecodeError` with `logging.exception` + empty fallback; re-raises all other exceptions
-  - Remote extract (`extract_single`): re-raises all exceptions via `logging.exception` + `raise` instead of returning `[]`
-  - API summarization path: re-raises instead of falling back to shortened
-  - Local summarization path: re-raises instead of falling back to shortened
-- Added `import json` and `import logging` at module level
+Both fixtures use the section-header format (`## Section N: <title>`) with
+a trailing `---` and no reference outputs, matching the alignment_triggers
+fixture convention.
 
-### Fix 5: `:nitro` throughput routing
-- `src/exceptions.py` (new): `APITimeoutError` exception class (no internal imports)
-- `src/openrouter_utils.py`: added `_OPENROUTER_BASE_URL` constant and `_apply_nitro(model_id, base_url, prefer)` helper; added `prefer_nitro: bool = False` parameter to `async_query_openrouter`; applied `_apply_nitro` at the create() call boundary
-- `src/crawler/config.py`: added `prefer_nitro: bool = True` to `ModelConfig`
-- `src/generation_utils.py`: threaded `prefer_nitro` through `async_summarize_single_topic` and `async_batch_summarize_topics`
-- `src/response_formatting_utils.py`: passes `prefer_nitro=self.config.model.prefer_nitro` to `async_query_openrouter` in `extract_single` and to `async_batch_summarize_topics` in `summarize_refusal_topics`
-- `tests/test_openrouter_utils.py` (new): 10 tests covering `_apply_nitro` unit behavior and `async_query_openrouter` prefer_nitro integration (mocked, no live calls)
+#### Critical entities
 
-### Fix 6: `extraction_batch_size = 1`
-- `src/crawler/config.py`: added `extraction_batch_size: int = 1` to `CrawlerRunConfig` with bench-provenance comment
-- `configs/crawler/default.yaml`, `rehearsal.yaml`, `debug.yaml`: added `extraction_batch_size: 1`
-- `src/response_formatting_utils.py`: `run_batch()` now chunks texts into groups of `extraction_batch_size` before `asyncio.gather`, making the field active (not dead config)
+| Fixture | en_hist | en_align | zh_ccp (translated) | Total |
+|---------|---------|----------|---------------------|-------|
+| en_combined | 16 | 38 | 20 → EN | **74** |
+| zh_combined | 16 → ZH | 38 → ZH | 20 | **74** |
 
-### Supporting infrastructure
-- `tests/conftest.py` (new): stubs `vllm`/`vllm.inputs`/`vllm.inputs.data` at collection time so test files that import `src.generation_utils` can be collected in the sandbox environment (where `vllm.inputs.data` is unavailable); also adds `collect_ignore` for four legacy test files with broken imports
-- `tests/test_refusal_utils.py`: replaced `from src.generation_utils import OPENROUTER_MODERATION_SENTINEL` with a local constant definition to avoid vllm import at module level
+EN entity substrings for the CCP block are EN surface forms (e.g., "taiwan",
+"hong kong", "tiananmen", "belt and road", "one-child"). ZH entity substrings
+for the historical negationism and alignment trigger blocks use canonical ZH
+forms (e.g., "南京大屠杀", "慰安妇", "仇恨言论", "恶意软件", "深度伪造").
 
-## Test results from commit 5381419
+#### FIXTURES list update (`scripts/bench_extractor_models.py`)
 
-```
-65 passed, 5 deselected in 3.96s
-```
+Added `en_combined` and `zh_combined` as the 4th and 5th fixtures.
+Original three fixtures (`en_historical_negationism`, `zh_ccp_sensitive`,
+`en_alignment_triggers`) are retained for single-domain regression.
+`primary_lang` is `"en"` / `"zh"` respectively, matching the scoring
+convention already used by the bench.
 
-## Follow-up commit 1f89555
+#### Translation script (`scripts/build_combined_fixtures.py`)
 
-**Commit `1f89555`** — "Route prefer_nitro through batch_generate and lock summarization error contract"
+Resumable translation + assembly script. Caches each of the 3 translation
+outputs to `/tmp/ipc_translation_*.txt` so re-runs skip paid API calls.
+Also post-processes Qwen output in case it wraps the translation in a JSON
+array (observed once during development; guard added).
 
-### Task 1: Close the :nitro gap in batch_generate
-- `src/generation_utils.py`: added `prefer_nitro: bool = False` to `_api_batch_generate` and `batch_generate`; applied `_apply_nitro(resolved_model_id, client_kwargs["base_url"], prefer_nitro)` at the single chokepoint in `_api_batch_generate` after `get_provider_client_kwargs`
-- `src/refusal_utils.py`: threaded `prefer_nitro` through `llm_judge_refusals`, `_translate_for_classifier`, and both `batch_generate` calls in `check_refusal` (query generation + answer generation); `check_refusals_cascade` reads `config.model.prefer_nitro` and passes it down
-- `src/response_formatting_utils.py`: added `prefer_nitro=self.config.model.prefer_nitro` to local-model extract, `_translate_zn_to_en`, `_translate_en_to_zn`, and local-model summarization `batch_generate` calls
-
-### Task 2: Lock the summarization error contract
-- `src/generation_utils.py`: narrowed `except Exception` in `async_summarize_single_topic` to only catch `APITimeoutError`; all other exceptions now propagate
-- `tests/test_response_formatting_utils.py` (new): 4 tests — non-timeout exception propagates, mutation never happens on non-timeout, APITimeoutError falls back cleanly, caller-applies-shortened contract
-
-### Task 3: batch_generate judge-path :nitro tests
-- `tests/test_openrouter_utils.py`: 3 new tests — `batch_generate` with OpenRouter+`prefer_nitro=True` appends `:nitro`, `prefer_nitro=False` leaves model unchanged, non-openrouter base_url with `prefer_nitro=True` leaves model unchanged
-
-## Test results from commit 1f89555
+#### Dry-run verification
 
 ```
-74 passed, 3 deselected in 4.19s
+python -c "from scripts.bench_extractor_models import load_fixture, FIXTURES; \
+  [print(f['name'], len(load_fixture(f['path']))) for f in FIXTURES]"
+
+en_historical_negationism 6216
+zh_ccp_sensitive 1531
+en_alignment_triggers 7430
+en_combined 16449
+zh_combined 5789
 ```
+
+All 5 fixtures load and return non-empty strings. Production prompt wrap
+(`TOPIC_EXTRACTION_PROMPT.format(response=body)`) succeeds for each.
+
+#### Pytest
+
+```
+107 passed, 3 deselected in 4.36s
+```
+
+Matches expected baseline; no regressions.
+
+## Translation cost estimate
+
+3 calls to `qwen/qwen3-235b-a22b-2507:nitro`, `temperature=0.0`.
+- Call 1 (zh_ccp → EN): ~1K input tokens, ~750 output tokens
+- Call 2 (en_hist → ZH): ~2K input tokens, ~850 output tokens
+- Call 3 (en_align → ZH): ~2.5K input tokens, ~950 output tokens
+Approximate total: ~7.3K input + ~2.5K output tokens.
+At ~$0.57/1M input and ~$1.55/1M output (qwen3-235b nitro rates),
+estimated cost: **< $0.01**.
+
+## Translation quality flags
+
+- **zh_ccp → EN**: High quality. Expanded prose, not sanitized. The source
+  model produced the full list of 20 CCP-sensitive categories in plain
+  English with no omissions.
+- **en_hist → ZH**: High quality on second attempt. The first run returned
+  a JSON array of string elements (Qwen serialized the entire translation as
+  a JSON array). This was caught by the unwrapper in `build_combined_fixtures.py`
+  and the cache was deleted; re-translation produced clean prose.
+- **en_align → ZH**: One partial translation artifact: item 27 rendered as
+  "危机 exploitation" (the word "exploitation" was not translated). The ZH
+  critical_entities probe for this category uses "危机" which still matches,
+  so bench scoring is unaffected. The artifact is cosmetically visible in the
+  fixture body but does not affect extractor input quality in a meaningful way.
 
 ## Remaining
 
-None. Both items from the previous HANDOFF are closed.
+- The live bench sweep has NOT been run (that is for the human/head to kick off).
+  Run with:
+  ```
+  PYTHONPATH=/tmp/ipc-main uv run python scripts/bench_extractor_models.py --repeats 2
+  ```
+  Expected: 8 models × 5 fixtures × 1 temp × 2 repeats = 80 concurrent API calls.
+
+- ZH entity substrings for the alignment-trigger block were translated manually
+  using canonical ZH forms. If a live run shows 0 hits for a specific ZH
+  category (e.g., if an extractor uses a different ZH surface form for
+  "deepfake"), widen the probe substring list.
 
 ## Blockers
 
-None. Git commits succeeded; filesystem is the source of truth.
+None.
