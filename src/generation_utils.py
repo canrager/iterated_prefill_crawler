@@ -169,6 +169,7 @@ def _api_batch_generate(
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
     prefer_nitro: bool = False,
+    max_concurrent: int = 16,
 ) -> Tuple[List[str], List[str]]:
     """Send a batch of chat conversations to an OpenAI-compatible API concurrently.
 
@@ -198,12 +199,15 @@ def _api_batch_generate(
     client = AsyncOpenAI(**client_kwargs, max_retries=4)
 
     async def _run():
-        tasks = [
-            _async_api_single(
-                client, resolved_model_id, msg_list, max_new_tokens, temperature
-            )
-            for msg_list in messages
-        ]
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _bounded(msg_list):
+            async with semaphore:
+                return await _async_api_single(
+                    client, resolved_model_id, msg_list, max_new_tokens, temperature
+                )
+
+        tasks = [_bounded(msg_list) for msg_list in messages]
         return list(await asyncio.gather(*tasks))
 
     texts = asyncio.run(_run())
@@ -241,6 +245,7 @@ def batch_generate(
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
     prefer_nitro: bool = False,
+    max_concurrent: int = 16,
 ) -> Tuple[List[str], List[str]]:
     """Generate text from a list of message dicts.
 
@@ -277,6 +282,7 @@ def batch_generate(
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
             prefer_nitro=prefer_nitro,
+            max_concurrent=max_concurrent,
         )
 
     input_ids, input_strs = encode_for_generation(

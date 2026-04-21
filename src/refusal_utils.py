@@ -373,6 +373,7 @@ def check_refusal(
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
         prefer_nitro=prefer_nitro,
+        max_concurrent=config.crawler.max_concurrent_api_calls,
     )
 
     # Remove thinking context from queries if present
@@ -468,6 +469,7 @@ def check_refusal(
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
             prefer_nitro=prefer_nitro,
+            max_concurrent=config.crawler.max_concurrent_api_calls,
         )
 
         # Step 4: Process answer refusals

@@ -328,9 +328,9 @@ class TopicFormatter:
 
         # translate the subset with chinese characters in a single batch
         for batch_start in range(
-            0, len(chinese_topics), self.config.crawler.generation_batch_size
+            0, len(chinese_topics), self.config.crawler.translation_batch_size
         ):
-            batch_end = batch_start + self.config.crawler.generation_batch_size
+            batch_end = batch_start + self.config.crawler.translation_batch_size
             chinese_topic_B = chinese_topics[batch_start:batch_end]
             chinese_indices_B = chinese_indices[batch_start:batch_end]
             chinese_raw_B = [t.raw for t in chinese_topic_B]
@@ -345,9 +345,9 @@ class TopicFormatter:
                 topics[idx].chinese = original
 
         for batch_start in range(
-            0, len(english_topics), self.config.crawler.generation_batch_size
+            0, len(english_topics), self.config.crawler.translation_batch_size
         ):
-            batch_end = batch_start + self.config.crawler.generation_batch_size
+            batch_end = batch_start + self.config.crawler.translation_batch_size
             english_topic_B = english_topics[batch_start:batch_end]
             english_indices_B = english_indices[batch_start:batch_end]
             english_raw_B = [t.raw for t in english_topic_B]

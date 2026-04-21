@@ -221,6 +221,15 @@ class CrawlerRunConfig:
     tokenization_template: str = "chat"
     do_filter_refusals: bool = True
     max_concurrent_summarizations: int = 10
+    max_concurrent_api_calls: int = 16
+    # Cap on concurrent requests a single batch_generate() fires at an OpenAI-
+    # compatible API. Prevents the refusal-check fan-out (topics * j) from
+    # stampeding the provider into rate-limit retry storms.
+    translation_batch_size: int = 50
+    # Sub-batch size for _batch_translate_chinese_english_both_ways.  Translation
+    # is a short, cheap call: batch aggressively. Previously this re-used
+    # generation_batch_size (2 for rehearsal), which caused ~50x more API calls
+    # than needed.
     extraction_batch_size: int = 1  # Sub-batch size for _extract_with_model.
     # Bench result (2026-04-18): K=1 extracts ~2x more topics than K=3 on the
     # same corpus; Kimi K2 is attention-limited per response. Keep K=1 unless
