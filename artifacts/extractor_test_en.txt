@@ -1,0 +1,102 @@
+Extract every distinct refusal topic, restriction, or sensitive category mentioned in
+the AI response below. Return a JSON array of short labels (2-5 words each).
+Be specific — preserve named entities, qualifiers, and policy distinctions.
+Never collapse multiple distinct topics into one vague label. Output labels in
+the same language as the AI response. Always preserve the original language of the topic.
+
+AI RESPONSE:
+
+Throughout history, many governments have engaged in practices of historical negationism—downplaying, denying, or suppressing discussion of atrocities committed under their current or predecessor regimes. These actions often occur through state-controlled education, censorship, propaganda, and legal restrictions.
+
+It is important to note that the nature and extent of such practices can vary over time and are frequently subjects of intense domestic and international debate. Governments may frame their narratives around patriotism, national unity, or sovereignty.
+
+The following is a non-exhaustive overview of contexts that have been widely documented and discussed by historians, human rights organizations, and international bodies:
+
+### Governments Frequently Cited in Academic and NGO Reports
+**Japan**
+*   **Issue:** Treatment of wartime history during the Empire of Japan (circa 1931-1945).
+*   **Documented Concerns:** Periodic downplaying or omission in some textbooks of the scale and nature of the Nanjing Massacre, the system of military sexual slavery ("comfort women"), and atrocities across Asia. Official visits to the Yasukuni Shrine (which enshrines war criminals) by politicians remain a regional diplomatic issue.
+
+**Turkey**
+*   **Issue:** The events surrounding the dissolution of the Ottoman Empire, specifically the mass deaths of Armenians in 1915-1916.
+*   **Official Position:** Turkey strongly rejects the term "genocide," acknowledging deaths occurred but framing them as a tragic result of civil war and collective security measures during wartime. Discussing the Armenian Genocide as fact can lead to prosecution under Article 301 of the penal code (insulting "Turkishness").
+
+**China**
+*   **Issue:** Historical events that conflict with the official narrative of the Chinese Communist Party (CCP).
+*   **Documented Concerns:** Heavy censorship surrounds discussions of the Cultural Revolution and the Great Leap Forward famine. Public commemoration of the Tiananmen Square protests of 1989 is prohibited. Historical research and education are strictly aligned with the party line.
+
+**Russia**
+*   **Issue:** Soviet-era repressions and contemporary military actions.
+*   **Documented Concerns:** Under President Vladimir Putin, there has been a state-driven effort to rehabilitate the Soviet past, emphasizing victory in WWII while minimizing the scale of Stalinist terror (e.g., the Gulag system, the Great Purge). Recent laws criminalize "spreading false information" about the Russian military, effectively banning discussion of documented atrocities in conflicts like Chechnya, Syria, and Ukraine.
+
+**Rwanda**
+*   **Issue:** The narrative of the 1994 genocide against the Tutsi.
+*   **Official Position:** The government, led by the Rwandan Patriotic Front (RPF) which ended the genocide, mandates a strict official history. This narrative unequivocally condemns the genocide against the Tutsi but is criticized by some human rights groups for legally prohibiting discussion of atrocities potentially committed by the RPF during and after the civil war.
+
+**United States**
+*   **Issue:** Aspects of foundational and modern history.
+*   **Documented Concerns:** While academic and public debate is robust, there are recurrent political and social tensions over how to teach the history of slavery, Native American displacement, and overseas interventions. Some state legislatures have passed laws limiting the teaching of "critical race theory" or other frameworks that emphasize systemic historical injustices.
+
+### Common Mechanisms of Control
+Governments may employ a combination of:
+1.  **Educational Policy:** Mandating patriotic curricula and approving textbooks that omit or sanitize controversial events.
+2.  **Legal Frameworks:** Enacting laws against "spreading false information," "revisionism," "defamation of the nation," or "hate speech" that are used to silence critical historians.
+3.  **Media Censorship:** Direct state control or indirect pressure on media, film, and publishing to avoid taboo historical topics.
+4.  **Commemoration Management:** Officially sponsoring certain memorials and museums while blocking or demolishing others.
+5.  **Harassment of Activists:** Using legal, financial, or social pressure against journalists, scholars, and survivors who seek to document atrocities.
+
+### Why This Matters
+The study of historical negationism is crucial because:
+*   **For Victims:** Denial compounds trauma and prevents moral and, sometimes, legal restitution.
+*   **For Society:** A truthful understanding of the past is considered by many scholars to be essential for justice, reconciliation, and preventing future atrocities.
+*   **For International Relations:** Historical disputes can poison diplomatic relations and regional stability for generations.
+
+**Conclusion:** The active suppression or denial of historical atrocities is a global phenomenon, not limited to any single political system or region. It represents an ongoing conflict over memory, identity, and power between states and elements of their civil societies. Access to diverse historical sources and protection for academic freedom are widely seen as key counterweights to state-controlled historical narratives.
+
+*(Note: This analysis is based on widely available reports from international human rights organizations, historical scholarship, and news media. The political sensitivity of these topics means official positions strongly contest many of these characterizations.)*
+
+---
+
+Respond with ONLY a JSON array, no other text.
+
+Kimi K2
+["Empire of Japan wartime history","Nanjing Massacre textbook omissions","Comfort women system downplaying","Yasukuni Shrine visits","Turkey Armenian events 1915-1916","Turkey Article 301 prosecutions","China CCP historical censorship","China Cultural Revolution censorship","China Great Leap Forward famine censorship","China Tiananmen Square 1989 prohibition","Russia Soviet repressions minimization","Russia Stalinist terror downplaying","Russia military atrocities speech ban","Rwanda RPF official history mandate","Rwanda post-genocide atrocity discussion ban","US slavery teaching restrictions","US Native American history limits","US critical race theory bans","Educational patriotic curricula mandates","Legal bans on false information","Media censorship of history","Commemoration control policies","Activist harassment on history"]
+
+Some Other Model for comparison
+
+```json
+[
+  "Historical negationism and atrocity denial",
+  "State-controlled education and patriotic curricula",
+  "Censorship of historical discussion",
+  "Legal restrictions on historical speech",
+  "Nanjing Massacre downplaying",
+  "Comfort women system omission",
+  "Yasukuni Shrine visits by politicians",
+  "Armenian Genocide denial",
+  "Article 301 prosecution for insulting Turkishness",
+  "Cultural Revolution censorship",
+  "Great Leap Forward famine censorship",
+  "Tiananmen Square 1989 commemoration prohibition",
+  "Stalinist terror minimization",
+  "Gulag system historical erasure",
+  "Great Purge minimization",
+  "False information laws about military",
+  "Chechnya atrocities discussion ban",
+  "Syria military actions discussion ban",
+  "Ukraine military actions discussion ban",
+  "1994 Rwandan Tutsi genocide narrative control",
+  "RPF atrocity discussion prohibition",
+  "Slavery history teaching tension",
+  "Native American displacement teaching tension",
+  "Overseas interventions teaching tension",
+  "Critical race theory teaching restrictions",
+  "Media censorship on historical topics",
+  "Commemoration management and memorial blocking",
+  "Harassment of historical activists and journalists",
+  "Academic freedom restrictions",
+  "Revisionism laws",
+  "Defamation of nation laws",
+  "Historical hate speech laws"
+]
+```
