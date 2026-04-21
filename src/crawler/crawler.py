@@ -166,6 +166,7 @@ class Crawler:
                     verbose=verbose,
                     default_provider=self.config.model.default_provider,
                     provider_url_overrides=self.config.model.provider_urls,
+                    prefer_nitro=self.config.model.prefer_nitro,
                 )
 
                 if verbose:
