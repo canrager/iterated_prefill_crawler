@@ -168,6 +168,7 @@ def _api_batch_generate(
     verbose: bool = False,
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
+    prefer_nitro: bool = False,
 ) -> Tuple[List[str], List[str]]:
     """Send a batch of chat conversations to an OpenAI-compatible API concurrently.
 
@@ -178,11 +179,18 @@ def _api_batch_generate(
         Tuple of (generated_texts, input_strs) where input_strs are reconstructed from messages.
     """
     from openai import AsyncOpenAI
+    from src.openrouter_utils import _apply_nitro, _OPENROUTER_BASE_URL
 
     resolved_model_id, client_kwargs = get_provider_client_kwargs(
         model_name,
         default_provider,
         provider_url_overrides,
+    )
+
+    # Apply :nitro throughput routing at the single chokepoint where the model
+    # string goes to the API.  _apply_nitro is a no-op for non-OpenRouter URLs.
+    resolved_model_id = _apply_nitro(
+        resolved_model_id, client_kwargs.get("base_url", _OPENROUTER_BASE_URL), prefer_nitro
     )
 
     # The SDK auto-retries 429/500/502/503/504 with exponential backoff.
@@ -232,6 +240,7 @@ def batch_generate(
     skip_special_tokens: bool = False,
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
+    prefer_nitro: bool = False,
 ) -> Tuple[List[str], List[str]]:
     """Generate text from a list of message dicts.
 
@@ -252,6 +261,8 @@ def batch_generate(
         skip_special_tokens: Skip special tokens when decoding outputs
         default_provider: Fallback provider when model string has no prefix
         provider_url_overrides: Optional ``{provider: url}`` overrides
+        prefer_nitro: When True and using OpenRouter, append ':nitro' to the
+            model ID for higher-throughput routing (no-op for other providers).
 
     Returns:
         Tuple of (generated_texts, input_strs)
@@ -265,6 +276,7 @@ def batch_generate(
             verbose=verbose,
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
+            prefer_nitro=prefer_nitro,
         )
 
     input_ids, input_strs = encode_for_generation(
@@ -313,10 +325,15 @@ async def async_summarize_single_topic(
     """
     Async function to summarize a single topic.
 
+    Only ``APITimeoutError`` is caught and returned as ``(topic_raw, None,
+    error_msg)`` so that the caller can fall back to ``topic.shortened``.
+    Any other exception propagates — silent swallowing masks real failures.
+
     Returns:
         Tuple of (topic_raw, summary, error_message)
     """
     from src.crawler.config import TOPIC_SUMMARIZATION_PROMPT
+    from src.exceptions import APITimeoutError
 
     content_prompt = TOPIC_SUMMARIZATION_PROMPT.format(topic_raw=topic_raw)
 
@@ -338,10 +355,12 @@ async def async_summarize_single_topic(
             print(f"  Summary: {summary}")
 
         return (topic_raw, summary, None)
-    except Exception as e:
+    except APITimeoutError as e:
+        # Timeout: caller may fall back to topic.shortened.
         error_msg = f"Error summarizing topic '{topic_raw}': {e}"
         print(error_msg)
         return (topic_raw, None, error_msg)
+    # All other exceptions propagate — don't swallow real failures.
 
 
 async def async_batch_summarize_topics(

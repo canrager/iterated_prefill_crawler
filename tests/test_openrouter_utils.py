@@ -117,3 +117,94 @@ def test_nitro_not_appended_when_prefer_nitro_false():
     assert result == "test response"
     call_kwargs = mock_create.call_args
     assert call_kwargs.kwargs["model"] == "google/gemini-flash"
+
+
+# ---------------------------------------------------------------------------
+# Task 3: batch_generate → _api_batch_generate path applies :nitro
+# ---------------------------------------------------------------------------
+
+def _make_mock_client_for_batch():
+    """Build a mock AsyncOpenAI client suitable for _api_batch_generate."""
+    mock_choice = MagicMock()
+    mock_choice.message.content = "judge answer"
+    mock_completion = MagicMock()
+    mock_completion.choices = [mock_choice]
+    mock_create = AsyncMock(return_value=mock_completion)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+    return mock_client, mock_create
+
+
+def test_batch_generate_nitro_appended_for_openrouter():
+    """batch_generate with prefer_nitro=True on an OpenRouter model appends :nitro."""
+    from src.generation_utils import batch_generate
+
+    mock_client, mock_create = _make_mock_client_for_batch()
+    messages = [[{"role": "user", "content": "Is this a refusal?"}]]
+
+    with patch("src.generation_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                texts, _ = batch_generate(
+                    model="openai/gpt-5.4-mini",
+                    tokenizer=None,
+                    messages=messages,
+                    max_new_tokens=16,
+                    temperature=0.0,
+                    prefer_nitro=True,
+                )
+
+    assert texts == ["judge answer"]
+    call_kwargs = mock_create.call_args
+    assert call_kwargs.kwargs["model"] == "openai/gpt-5.4-mini:nitro"
+
+
+def test_batch_generate_nitro_not_appended_when_disabled():
+    """batch_generate with prefer_nitro=False leaves model string unchanged."""
+    from src.generation_utils import batch_generate
+
+    mock_client, mock_create = _make_mock_client_for_batch()
+    messages = [[{"role": "user", "content": "Is this a refusal?"}]]
+
+    with patch("src.generation_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                texts, _ = batch_generate(
+                    model="openai/gpt-5.4-mini",
+                    tokenizer=None,
+                    messages=messages,
+                    max_new_tokens=16,
+                    temperature=0.0,
+                    prefer_nitro=False,
+                )
+
+    assert texts == ["judge answer"]
+    call_kwargs = mock_create.call_args
+    assert call_kwargs.kwargs["model"] == "openai/gpt-5.4-mini"
+
+
+def test_batch_generate_nitro_not_appended_for_non_openrouter():
+    """batch_generate with prefer_nitro=True on a non-OpenRouter base_url leaves model unchanged."""
+    from src.generation_utils import batch_generate
+
+    mock_client, mock_create = _make_mock_client_for_batch()
+    messages = [[{"role": "user", "content": "Is this a refusal?"}]]
+
+    # Use openai: prefix — resolves to api.openai.com, not openrouter
+    with patch("src.generation_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+                texts, _ = batch_generate(
+                    model="openai:gpt-5.4-mini",
+                    tokenizer=None,
+                    messages=messages,
+                    max_new_tokens=16,
+                    temperature=0.0,
+                    prefer_nitro=True,
+                )
+
+    assert texts == ["judge answer"]
+    call_kwargs = mock_create.call_args
+    # Provider is openai (not openrouter) — :nitro must NOT be appended
+    assert call_kwargs.kwargs["model"] == "gpt-5.4-mini"
+    assert not call_kwargs.kwargs["model"].endswith(":nitro")

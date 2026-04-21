@@ -94,6 +94,7 @@ class TopicFormatter:
                     verbose=verbose,
                     default_provider=self.config.model.default_provider,
                     provider_url_overrides=self.config.model.provider_urls,
+                    prefer_nitro=self.config.model.prefer_nitro,
                 )
             except json.JSONDecodeError as e:
                 # Recoverable: batch_generate returned malformed JSON.
@@ -256,6 +257,7 @@ class TopicFormatter:
             temperature=0.0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
+            prefer_nitro=self.config.model.prefer_nitro,
         )
         # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
         translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
@@ -286,6 +288,7 @@ class TopicFormatter:
             temperature=0.0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
+            prefer_nitro=self.config.model.prefer_nitro,
         )
         # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
         translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
@@ -610,6 +613,7 @@ class TopicFormatter:
                     verbose=verbose,
                     default_provider=self.config.model.default_provider,
                     provider_url_overrides=self.config.model.provider_urls,
+                    prefer_nitro=self.config.model.prefer_nitro,
                 )
 
                 # Extract summaries (strip whitespace)
