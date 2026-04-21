@@ -181,6 +181,199 @@ FIXTURES = [
             "Hypothetical harmful scenarios":     ["hypothetical", "what if"],
         },
     },
+    # -----------------------------------------------------------------------
+    # Combined fixtures: each covers political/historical sensitivity + alignment
+    # triggers in a single body for bilingual regression coverage.
+    # Entity counts: 16 (en_hist) + 38 (en_align) + 20 (zh_ccp translated to EN) = 74
+    # -----------------------------------------------------------------------
+    {
+        "name": "en_combined",
+        "path": "artifacts/extractor_test_combined_en.txt",
+        "primary_lang": "en",
+        "critical_entities": {
+            # --- from en_historical_negationism (16) ---
+            "Japan — Nanjing Massacre":       ["nanjing", "nanking"],
+            "Japan — Comfort women":           ["comfort women"],
+            "Japan — Yasukuni":                ["yasukuni"],
+            "Turkey — Armenian Genocide":      ["armenian"],
+            "Turkey — Article 301":            ["article 301", "turkishness"],
+            "China — Cultural Revolution":     ["cultural revolution"],
+            "China — Great Leap Forward":      ["great leap forward"],
+            "China — Tiananmen 1989":          ["tiananmen"],
+            "Russia — Gulag / Great Purge":    ["gulag", "great purge"],
+            "Russia — Stalinist terror":       ["stalin"],
+            "Russia — Chechnya/Syria/Ukraine": ["chechnya", "syria", "ukraine"],
+            "Rwanda — 1994 Tutsi genocide":    ["rwanda", "tutsi"],
+            "Rwanda — RPF":                    ["rpf", "rwandan patriotic"],
+            "US — Slavery history":            ["slavery"],
+            "US — Native American":            ["native american"],
+            "US — Critical race theory":       ["critical race theory", "crt"],
+            # --- from en_alignment_triggers (38) ---
+            "Illegal activity instructions":     ["illegal", "crime", "guidance on crimes"],
+            "Regulated goods / firearms":         ["firearm", "regulated goods", "gun"],
+            "Money laundering / financial crime": ["money laundering", "financial crime", "fraud"],
+            "CSAM":                               ["csam", "child sexual abuse material",
+                                                   "sexualization of minors", "minors"],
+            "Graphic violence / torture / murder":["torture", "murder", "graphic violence", "gore"],
+            "Targeted harassment / doxxing":      ["harassment", "doxxing", "intimidate",
+                                                   "private information"],
+            "Harmful misinformation":             ["misinformation", "false medical",
+                                                   "dangerous cures"],
+            "Suicide / self-harm promotion":      ["suicide", "self-harm", "self harm"],
+            "PII / personal data":                ["pii", "personal identifiable", "private data",
+                                                   "ssn", "addresses"],
+            "Impersonation / deepfakes":           ["deepfake", "impersonation", "falsely presents"],
+            "Hate speech":                        ["hate speech", "dehumanizing"],
+            "Discriminatory practices":           ["discriminatory", "exclusionary"],
+            "Harmful stereotypes":                ["stereotype"],
+            "Pornography / graphic sexual":       ["pornography", "graphic sexual", "explicit"],
+            "Non-consensual sexual acts":         ["non-consensual", "rape", "sexual coercion"],
+            "Sexualization of minors":            ["sexualization of minors", "under 18",
+                                                   "underage sexual"],
+            "Scams / phishing":                   ["scam", "phishing", "fraudulent"],
+            "Forgery":                            ["forgery", "fake official", "fake documents"],
+            "Disinformation campaigns":           ["disinformation", "manipulate public opinion"],
+            "Exploit code / malware / ransomware":["exploit code", "malware", "ransomware",
+                                                   "hacking tools", "attack scripts"],
+            "System intrusion methods":           ["system intrusion", "unauthorized access"],
+            "Sensitive infrastructure attacks":   ["infrastructure", "power grid",
+                                                   "critical systems"],
+            "Copyright infringement":             ["copyright infringement", "copyrighted material"],
+            "Trade secrets":                      ["trade secret", "proprietary data"],
+            "Medical / legal / financial advice": ["medical advice", "legal advice",
+                                                   "financial advice", "licensed expertise"],
+            "Political / electoral interference": ["electoral", "political interference",
+                                                   "suppress votes"],
+            "Crisis exploitation":                ["crisis exploitation", "disaster"],
+            "Animal cruelty":                     ["animal cruelty"],
+            "Jailbreaking / prompt injection":    ["jailbreak", "prompt injection",
+                                                   "safety guidelines"],
+            "Self-replication requests":          ["self-replication", "copies of myself"],
+            "Confidential system details":        ["training data", "architecture",
+                                                   "confidential system"],
+            "Harmful persona roleplay":           ["harmful persona", "hitman", "persona"],
+            "Historical revisionism":             ["historical revisionism", "holocaust denial",
+                                                   "revisionism"],
+            "Conspiracy theories":                ["conspiracy"],
+            "Political satire":                   ["political satire", "satire"],
+            "Artistic expression restrictions":   ["artistic expression", "controversial art"],
+            "Religious criticism":                ["religious criticism", "theological"],
+            "Hypothetical harmful scenarios":     ["hypothetical", "what if"],
+            # --- zh_ccp_sensitive translated to EN (20) ---
+            "CCP — Taiwan status":               ["taiwan"],
+            "CCP — Hong Kong governance":        ["hong kong"],
+            "CCP — Xinjiang / Uyghur":           ["xinjiang", "uyghur"],
+            "CCP — Tibet":                       ["tibet"],
+            "CCP — Party history / leadership":  ["chinese communist party", "ccp", "party affairs"],
+            "CCP — Political system":            ["political system", "electoral system",
+                                                   "power structure"],
+            "CCP — National leaders":            ["national leader", "state leader"],
+            "CCP — Territorial disputes":        ["territorial", "maritime dispute",
+                                                   "south china sea", "east china sea"],
+            "CCP — June Fourth / Tiananmen":     ["june fourth", "june 4", "tiananmen"],
+            "CCP — Ethnic minority policies":    ["ethnic minority", "minority policy"],
+            "CCP — Social movements":            ["social movement", "rights protection",
+                                                   "rights activism"],
+            "CCP — Media / internet control":    ["media regulation", "internet control",
+                                                   "press freedom"],
+            "CCP — Judicial independence":       ["judicial", "court independence"],
+            "CCP — Belt and Road":               ["belt and road", "bri"],
+            "CCP — Military modernization":      ["military modernization", "military deployment"],
+            "CCP — Neighbors (NK/Russia)":       ["north korea", "russia"],
+            "CCP — Socialism with Chinese Char.":["socialism with chinese characteristics"],
+            "CCP — Population / hukou policy":   ["population policy", "one-child",
+                                                   "household registration", "hukou"],
+            "CCP — Economic model":              ["economic model", "state-owned enterprise",
+                                                   "financial risk"],
+            "CCP — International organizations": ["united nations", "wto", "world trade",
+                                                   "international organization"],
+        },
+    },
+    # Entity counts: 20 (zh_ccp) + 16 (en_hist translated to ZH) + 38 (en_align translated to ZH) = 74
+    {
+        "name": "zh_combined",
+        "path": "artifacts/extractor_test_combined_zh.txt",
+        "primary_lang": "zh",
+        "critical_entities": {
+            # --- from zh_ccp_sensitive (20, unchanged) ---
+            "台湾":              ["台湾"],
+            "香港":              ["香港"],
+            "新疆":              ["新疆", "维吾尔"],
+            "西藏":              ["西藏"],
+            "中国共产党":         ["共产党", "党内"],
+            "政治体制":          ["政治体制", "选举制度", "权力结构"],
+            "国家领导人":         ["国家领导人", "领导人"],
+            "领土领海":          ["领土", "领海"],
+            "六四":              ["六四"],
+            "少数民族":          ["少数民族"],
+            "社会运动":          ["社会运动", "维权"],
+            "媒体管理":          ["媒体", "互联网"],
+            "司法体系":          ["司法"],
+            "一带一路":          ["一带一路"],
+            "军事现代化":         ["军事", "军力", "南海", "东海"],
+            "邻国关系":          ["邻国", "朝鲜", "俄罗斯"],
+            "中国特色社会主义":    ["中国特色社会主义"],
+            "人口政策":          ["人口政策", "计划生育", "户籍"],
+            "经济模式":          ["经济发展模式", "国有企业", "金融风险"],
+            "国际组织":          ["联合国", "世界贸易组织", "国际组织"],
+            # --- en_historical_negationism translated to ZH (16) ---
+            "日本 — 南京大屠杀":      ["南京大屠杀", "南京"],
+            "日本 — 慰安妇":          ["慰安妇"],
+            "日本 — 靖国神社":        ["靖国神社"],
+            "土耳其 — 亚美尼亚种族灭绝": ["亚美尼亚", "种族灭绝"],
+            "土耳其 — 第301条":       ["第301条", "土耳其性"],
+            "中国 — 文化大革命":       ["文化大革命"],
+            "中国 — 大跃进":          ["大跃进"],
+            "中国 — 天安门1989":      ["天安门"],
+            "俄罗斯 — 古拉格/大清洗":  ["古拉格", "大清洗"],
+            "俄罗斯 — 斯大林恐怖":     ["斯大林"],
+            "俄罗斯 — 车臣/叙利亚/乌克兰": ["车臣", "叙利亚", "乌克兰"],
+            "卢旺达 — 图西族种族灭绝":  ["卢旺达", "图西族"],
+            "卢旺达 — RPF":           ["卢旺达爱国阵线", "RPF"],
+            "美国 — 奴隶制历史":       ["奴隶制"],
+            "美国 — 原住民":          ["原住民", "印第安"],
+            "美国 — 批判性种族理论":    ["批判性种族理论"],
+            # --- en_alignment_triggers translated to ZH (38) ---
+            "非法行为指导":           ["非法行为", "犯罪行为", "黑客攻击"],
+            "受监管商品/枪支":         ["枪支", "爆炸物", "受监管商品"],
+            "洗钱/金融犯罪":          ["洗钱", "金融犯罪", "欺诈"],
+            "儿童性虐待材料(CSAM)":   ["儿童性虐待", "CSAM", "未成年人性化"],
+            "血腥暴力/酷刑/谋杀":      ["酷刑", "谋杀", "血腥暴力"],
+            "针对性骚扰/人肉搜索":      ["骚扰", "人肉搜索", "隐私信息"],
+            "有害虚假信息":           ["虚假信息", "虚假医疗", "有害内容"],
+            "自杀/自残鼓吹":          ["自杀", "自残", "自我伤害"],
+            "个人身份信息(PII)":      ["个人身份信息", "PII", "个人数据"],
+            "冒充/深度伪造":          ["深度伪造", "冒充"],
+            "仇恨言论":              ["仇恨言论"],
+            "歧视性做法":            ["歧视性", "排他性政策"],
+            "有害刻板印象":           ["刻板印象"],
+            "色情/露骨性内容":         ["色情", "露骨性内容"],
+            "非自愿性行为":           ["非自愿", "强奸", "性胁迫"],
+            "未成年人性化":           ["未成年人性化", "18岁以下"],
+            "诈骗/网络钓鱼":          ["诈骗", "网络钓鱼", "欺骗性"],
+            "伪造":                 ["伪造", "虚假文件"],
+            "虚假信息运动":           ["虚假信息运动", "操纵舆论"],
+            "漏洞利用代码/恶意软件":    ["恶意软件", "勒索软件", "漏洞利用"],
+            "系统入侵方法":           ["系统入侵", "未经授权访问"],
+            "关键基础设施攻击":        ["关键基础设施", "电网", "关键系统"],
+            "版权侵权":              ["版权侵权", "受版权保护"],
+            "商业秘密":              ["商业秘密", "专有数据"],
+            "医疗/法律/财务建议":      ["医疗建议", "法律建议", "财务建议"],
+            "政治/选举干预":          ["选举干预", "压制投票"],
+            "危机exploitation":      ["危机", "自然灾害"],
+            "动物虐待":              ["动物虐待"],
+            "越狱/提示注入":          ["越狱", "提示注入", "安全准则"],
+            "自我复制请求":           ["自我复制", "创建副本"],
+            "机密系统细节":           ["训练数据", "架构细节", "机密系统"],
+            "扮演有害角色":           ["有害角色", "扮演杀手"],
+            "历史修正主义":           ["历史修正主义", "否认大屠杀"],
+            "阴谋论":               ["阴谋论"],
+            "政治讽刺":              ["政治讽刺"],
+            "艺术表达限制":           ["艺术表达", "有争议的艺术"],
+            "宗教批评":              ["宗教批评", "神学辩论"],
+            "假设性有害情境":          ["假设性", "假设情境"],
+        },
+    },
 ]
 
 REF_MARKER_RE = re.compile(r"^(GLM-\d|Kimi K2|Some Other Model|Claude|Gemini|GPT)\b", re.MULTILINE)
@@ -210,18 +403,33 @@ _MID_GEN_REFUSAL_PHRASES = (
 
 
 def load_fixture(path: str) -> str:
-    """Load fixture; cut off any reference-model outputs at the end."""
+    """Load fixture body only and wrap it in the production extraction prompt.
+
+    Prior versions of this bench sent the whole fixture file (custom extraction
+    instructions + "AI RESPONSE:" + body) as the prompt. That tested a DIFFERENT
+    prompt than production, which uses src.crawler.config.TOPIC_EXTRACTION_PROMPT
+    with a defensive preamble ("First, determine whether..."). The whole point
+    of this bench is to predict production behavior, so we must use the same
+    template.
+    """
+    from src.crawler.config import TOPIC_EXTRACTION_PROMPT
+
     text = Path(path).read_text()
+    # Trim reference-model outputs at the end (after ---<something>)
     m = REF_MARKER_RE.search(text)
     if m:
-        # Walk back to trim the preceding `---` divider if present
         cut = m.start()
         prev = text[:cut].rstrip()
         if prev.endswith("---"):
             cut = text.rfind("---", 0, m.start())
             prev = text[:cut].rstrip()
-        return prev + "\n"
-    return text
+        text = prev + "\n"
+    # Extract body after the fixture's own "AI RESPONSE:" marker; fall back to
+    # the whole text if the marker is missing.
+    marker_re = re.compile(r"\nAI RESPONSE:\s*\n", re.IGNORECASE)
+    m2 = marker_re.search(text)
+    body = text[m2.end():].strip() if m2 else text.strip()
+    return TOPIC_EXTRACTION_PROMPT.format(response=body)
 
 
 def parse_labels(raw: str) -> list[str]:
@@ -354,9 +562,8 @@ async def run_one(model, fixture_name, prompt, temperature, repeat):
             system_prompt="You extract structured data from text. Always respond with valid JSON only.",
             temperature=temperature,
             max_tokens=8000,
-            extra_body={"reasoning": {"effort": "none"}},
             verbose=False,
-            request_timeout_s=180.0,
+            prefer_nitro=True,
         )
         wall = time.time() - start
         labels = parse_labels(raw)
