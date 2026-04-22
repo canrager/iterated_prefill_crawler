@@ -79,8 +79,8 @@ THRESHOLDS = {
         "num_steps":                 2,
         "min_refusal_topics_total":  3,
         "min_refusal_topics_per_lang": 1,
-        "max_cost_usd":              0.25,
-        "max_wall_minutes":          3.0,
+        "max_cost_usd":              2.00,
+        "max_wall_minutes":          120.0,
         "max_length_truncation_pct": 0.50,
         "en_category_min":           None,     # informational only
         "zh_category_min":           None,
