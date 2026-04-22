@@ -35,11 +35,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
+import os
 import re
 import statistics
 import sys
 import time
 from pathlib import Path
+from typing import Dict, Optional
 
 _repo = Path(__file__).resolve().parent.parent
 if str(_repo) not in sys.path:
@@ -48,18 +51,115 @@ if str(_repo) not in sys.path:
 from src.generation_utils import API_MODERATION_SENTINEL
 from src.openrouter_utils import REASONING_DISABLED, async_query_openrouter
 
+logger = logging.getLogger(__name__)
+
 MODELS = [
     "google/gemini-3-flash-preview",
-    "moonshotai/kimi-k2.5",
+    "moonshotai/kimi-k2.5",  # non-qwen translator diversification candidate: 0.905 composite, 100% lang_fid, ~2.2s (bench v5)
     "moonshotai/kimi-k2.6",
     "qwen/qwen3-235b-a22b-2507",
     "qwen/qwen3.5-397b-a17b",
     "qwen/qwen3.5-35b-a3b",
-    "liquid/lfm-2-24b-a2b",
-    "arcee-ai/trinity-large-thinking",
     "z-ai/glm-5",
     "z-ai/glm-5.1",
 ]
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter price fetching — Task 2
+# ---------------------------------------------------------------------------
+
+async def fetch_openrouter_prices() -> Dict[str, Dict[str, float]]:
+    """Fetch per-token USD prices from OpenRouter's /models endpoint.
+
+    Returns {model_id: {"prompt": float_usd_per_token, "completion": float_usd_per_token}}.
+    Models missing from the response, or with unparseable pricing, are omitted.
+    Callers must handle absence (set cost=None for those models).
+
+    Uses OPENROUTER_API_KEY bearer auth when set (optional — endpoint works
+    without auth, but auth may return extra models).
+    """
+    import httpx
+
+    headers = {"User-Agent": "bench_extractor_models/1.0"}
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    prices: Dict[str, Dict[str, float]] = {}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://openrouter.ai/api/v1/models",
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+    except Exception as exc:
+        logger.warning("[bench] fetch_openrouter_prices failed: %s", exc)
+        return prices
+
+    for entry in data:
+        model_id = entry.get("id", "")
+        pricing = entry.get("pricing", {})
+        try:
+            prompt_price = float(pricing.get("prompt", 0) or 0)
+            completion_price = float(pricing.get("completion", 0) or 0)
+        except (TypeError, ValueError) as exc:
+            logger.warning("[bench] Could not parse pricing for %s: %s", model_id, exc)
+            continue
+        prices[model_id] = {"prompt": prompt_price, "completion": completion_price}
+
+    print(f"[bench] Fetched prices for {len(prices)} models from OpenRouter.")
+    return prices
+
+
+def _lookup_price(
+    prices: Dict[str, Dict[str, float]],
+    model_id: str,
+) -> Optional[Dict[str, float]]:
+    """Look up pricing for a model id.
+
+    First tries the exact id.  If not found, strips a trailing ':nitro' or
+    ':floor' routing suffix and retries.  Returns None if still absent.
+    """
+    if model_id in prices:
+        return prices[model_id]
+    # Strip routing suffix (e.g. ':nitro' appended by _apply_nitro)
+    for suffix in (":nitro", ":floor"):
+        if model_id.endswith(suffix):
+            bare = model_id[: -len(suffix)]
+            if bare in prices:
+                return prices[bare]
+    return None
+
+
+def _compute_cost(
+    prices: Dict[str, Dict[str, float]],
+    model_id: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> Optional[float]:
+    """Return USD cost for one API call, or None if the model has no price entry."""
+    p = _lookup_price(prices, model_id)
+    if p is None:
+        return None
+    return prompt_tokens * p["prompt"] + completion_tokens * p["completion"]
+
+
+def _fmt_cost(cost_usd: Optional[float]) -> str:
+    """Format a per-call USD cost for display.
+
+    Uses fixed notation ($0.00023) for values >= $0.0001,
+    scientific notation ($1.23e-06) for smaller values,
+    and '?' when cost is unknown.
+    """
+    if cost_usd is None:
+        return "?"
+    if cost_usd >= 1e-4:
+        return f"${cost_usd:.5f}"
+    return f"${cost_usd:.2e}"
+
 
 # Per-fixture critical entities. Each key is a category label (for reporting);
 # values are the substrings to match (case-insensitive for EN, exact for ZH).
@@ -555,10 +655,18 @@ def is_json_parseable(raw: str) -> bool:
 # Async runner
 # ---------------------------------------------------------------------------
 
-async def run_one(model, fixture_name, prompt, temperature, repeat):
+async def run_one(
+    model: str,
+    fixture_name: str,
+    prompt: str,
+    temperature: float,
+    repeat: int,
+    prices: Optional[Dict[str, Dict[str, float]]] = None,
+) -> dict:
     start = time.time()
+    prices = prices or {}
     try:
-        raw = await async_query_openrouter(
+        raw, usage = await async_query_openrouter(
             model_name=model,
             prompt=prompt,
             system_prompt="You extract structured data from text. Always respond with valid JSON only.",
@@ -567,19 +675,27 @@ async def run_one(model, fixture_name, prompt, temperature, repeat):
             verbose=False,
             prefer_nitro=True,
             extra_body=REASONING_DISABLED,
+            return_usage=True,
         )
         wall = time.time() - start
         labels = parse_labels(raw)
+        prompt_tokens = usage["prompt_tokens"]
+        completion_tokens = usage["completion_tokens"]
+        cost_usd = _compute_cost(prices, model, prompt_tokens, completion_tokens)
         return {
             "model": model, "fixture": fixture_name, "temperature": temperature,
             "repeat": repeat, "wall_s": wall, "raw": raw, "labels": labels,
             "error": None,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "cost_usd": cost_usd,
         }
     except Exception as e:
         return {
             "model": model, "fixture": fixture_name, "temperature": temperature,
             "repeat": repeat, "wall_s": time.time() - start, "raw": "",
             "labels": [], "error": repr(e),
+            "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": None,
         }
 
 
@@ -626,6 +742,10 @@ async def main_async(args):
     temps = [float(t) for t in args.temps.split(",")]
     fixtures = [f for f in FIXTURES if not args.fixtures or f["name"] in args.fixtures.split(",")]
 
+    # Fetch OpenRouter prices once at startup so every run_one / run_translation_one
+    # can compute per-call cost without a second trip to the API.
+    prices = await fetch_openrouter_prices()
+
     fix_prompts = {f["name"]: load_fixture(f["path"]) for f in fixtures}
     for f in fixtures:
         print(f"[bench] {f['name']:<38} prompt={len(fix_prompts[f['name']])} chars  "
@@ -634,7 +754,7 @@ async def main_async(args):
     print(f"[bench] Temps:  {temps}  repeats: {args.repeats}")
 
     tasks = [
-        run_one(m, f["name"], fix_prompts[f["name"]], t, r)
+        run_one(m, f["name"], fix_prompts[f["name"]], t, r, prices=prices)
         for m in models
         for f in fixtures
         for t in temps
@@ -648,10 +768,11 @@ async def main_async(args):
     print(f"[bench] All calls done in {time.time() - t_start:.1f}s.\n")
 
     # --- Summary table: one row per (model, fixture, temp) ---
-    print("=" * 115)
+    _W = 125
+    print("=" * _W)
     print(f"{'MODEL':<33} {'FIXTURE':<28} {'entity_hit':>10} {'refusal':>8} "
-          f"{'mid_ref':>8} {'json_ok':>8} {'labels':>7} {'wall_s':>7}")
-    print("-" * 115)
+          f"{'mid_ref':>8} {'json_ok':>8} {'labels':>7} {'wall_s':>7} {'cost_$/call':>12}")
+    print("-" * _W)
 
     all_rows = []
     for model in models:
@@ -664,9 +785,14 @@ async def main_async(args):
                 cov = agg["entity_coverage"]
                 n_ent = len(fixture["critical_entities"])
                 hits_n = round(cov * n_ent)
+                # Per-row cost: mean over non-error cells; None if all unknown
+                good_cost = [c["cost_usd"] for c in cells
+                             if c.get("error") is None and c.get("cost_usd") is not None]
+                row_cost = statistics.mean(good_cost) if good_cost else None
                 row_data = {
                     "model": model, "fixture": fn, "temperature": t, **agg,
                     "entity_hits_n": hits_n, "entity_total": n_ent,
+                    "cost_usd": row_cost,
                 }
                 all_rows.append(row_data)
                 print(
@@ -676,14 +802,15 @@ async def main_async(args):
                     f"{agg['mid_generation_refusal_rate']*100:>6.0f}% "
                     f"{agg['json_parse_rate']*100:>6.0f}% "
                     f"{agg['n_labels']:>7.1f} "
-                    f"{agg['wall_s']:>6.1f}s"
+                    f"{agg['wall_s']:>6.1f}s "
+                    f"{_fmt_cost(row_cost):>12}"
                 )
     print()
 
     # --- Combined scoreboard (avg coverage across fixtures, weighted by entity count) ---
-    print("=" * 115)
+    print("=" * _W)
     print("COMBINED SCOREBOARD (weighted by entity counts across fixtures)")
-    print("-" * 115)
+    print("-" * _W)
 
     def combined_quality(model, t):
         total_hits, total_possible = 0, 0
@@ -693,6 +820,7 @@ async def main_async(args):
         total_full_refusal = 0.0
         total_mid_refusal = 0.0
         total_json_ok = 0.0
+        cost_vals: list[float] = []
         fix_count = 0
         for fixture in fixtures:
             fn = fixture["name"]
@@ -718,6 +846,9 @@ async def main_async(args):
             total_mid_refusal += agg["mid_generation_refusal_rate"]
             total_json_ok += agg["json_parse_rate"]
             fix_count += 1
+            cost_vals.extend(
+                c["cost_usd"] for c in good if c.get("cost_usd") is not None
+            )
         if total_possible == 0 or fix_count == 0:
             return None
         return {
@@ -728,6 +859,7 @@ async def main_async(args):
             "full_refusal_avg": total_full_refusal / fix_count,
             "mid_refusal_avg": total_mid_refusal / fix_count,
             "json_ok_avg": total_json_ok / fix_count,
+            "cost_avg": statistics.mean(cost_vals) if cost_vals else None,
         }
 
     ranked = []
@@ -743,8 +875,8 @@ async def main_async(args):
 
     print(f"{'#':<3} {'model':<33} {'T':>5} {'composite':>10} {'coverage':>9} "
           f"{'lang_fid':>9} {'refusal':>8} {'mid_ref':>8} {'json_ok':>8} "
-          f"{'labels':>7} {'wall_µ':>7}")
-    print("-" * 115)
+          f"{'labels':>7} {'wall_µ':>7} {'cost_µ':>10}")
+    print("-" * _W)
     for i, (comp, m, t, q) in enumerate(ranked[:12], 1):
         print(
             f"#{i:<2} {m:<33} {t:>5.2f} "
@@ -755,21 +887,22 @@ async def main_async(args):
             f"{q['mid_refusal_avg']*100:>6.0f}% "
             f"{q['json_ok_avg']*100:>6.0f}% "
             f"{q['labels_avg']:>7.0f} "
-            f"{q['wall_avg']:>6.1f}s"
+            f"{q['wall_avg']:>6.1f}s "
+            f"{_fmt_cost(q.get('cost_avg')):>10}"
         )
 
     # ---------------------------------------------------------------------------
     # Translation benchmark
     # ---------------------------------------------------------------------------
     print()
-    print("=" * 120)
+    print("=" * 130)
     print("TRANSLATION BENCHMARK")
     print(f"  Tasks: {[t['name'] for t in TRANSLATION_TASKS]}")
     print(f"  Models: {models}  Temps: {temps}  Repeats: {args.repeats}")
-    print("=" * 120)
+    print("=" * 130)
 
     trans_tasks_list = [
-        run_translation_one(m, task, t, r)
+        run_translation_one(m, task, t, r, prices=prices)
         for m in models
         for task in TRANSLATION_TASKS
         for t in temps
@@ -783,10 +916,11 @@ async def main_async(args):
     print(f"[bench] Translation calls done in {time.time() - t_trans_start:.1f}s.\n")
 
     # Per-model, per-task summary table
-    print("=" * 120)
+    _TW = 130
+    print("=" * _TW)
     print(f"{'MODEL':<33} {'TASK':<34} {'coverage':>9} {'count_fid':>10} "
-          f"{'lang_fid':>9} {'json_ok':>8} {'wall_s':>7}")
-    print("-" * 120)
+          f"{'lang_fid':>9} {'json_ok':>8} {'wall_s':>7} {'cost_$/call':>12}")
+    print("-" * _TW)
 
     all_trans_rows = []
     for model in models:
@@ -796,8 +930,12 @@ async def main_async(args):
                 cells = [c for c in all_trans_cells
                          if c["model"] == model and c["task"] == tn and c["temperature"] == t]
                 agg = aggregate_translation(cells)
+                good_cost = [c["cost_usd"] for c in cells
+                             if c.get("error") is None and c.get("cost_usd") is not None]
+                row_cost = statistics.mean(good_cost) if good_cost else None
                 row_data = {
                     "model": model, "task": tn, "temperature": t, **agg,
+                    "cost_usd": row_cost,
                 }
                 all_trans_rows.append(row_data)
                 print(
@@ -806,19 +944,21 @@ async def main_async(args):
                     f"{agg['count_fidelity']*100:>7.0f}%  "
                     f"{agg['lang_fidelity']*100:>7.0f}%  "
                     f"{agg['json_parse_rate']*100:>5.0f}%  "
-                    f"{agg['wall_s']:>6.1f}s"
+                    f"{agg['wall_s']:>6.1f}s "
+                    f"{_fmt_cost(row_cost):>12}"
                 )
     print()
 
     # Translation scoreboard: rank by composite = coverage * count_fid * lang_fid
-    print("=" * 120)
+    print("=" * _TW)
     print("TRANSLATION SCOREBOARD")
-    print("-" * 120)
+    print("-" * _TW)
 
     trans_ranked = []
     for m in models:
         for t in temps:
             task_aggs = []
+            trans_cost_vals: list[float] = []
             for task in TRANSLATION_TASKS:
                 tn = task["name"]
                 cells = [c for c in all_trans_cells
@@ -827,6 +967,9 @@ async def main_async(args):
                 if not good:
                     continue
                 task_aggs.append(aggregate_translation(cells))
+                trans_cost_vals.extend(
+                    c["cost_usd"] for c in good if c.get("cost_usd") is not None
+                )
             if not task_aggs:
                 continue
             avg_cov   = statistics.mean(a["coverage"] for a in task_aggs)
@@ -834,6 +977,7 @@ async def main_async(args):
             avg_lfid  = statistics.mean(a["lang_fidelity"] for a in task_aggs)
             avg_json  = statistics.mean(a["json_parse_rate"] for a in task_aggs)
             avg_wall  = statistics.mean(a["wall_s"] for a in task_aggs)
+            avg_cost  = statistics.mean(trans_cost_vals) if trans_cost_vals else None
             composite = avg_cov * avg_cfid * avg_lfid
             trans_ranked.append((composite, m, t, {
                 "coverage": avg_cov,
@@ -841,12 +985,13 @@ async def main_async(args):
                 "lang_fidelity": avg_lfid,
                 "json_parse_rate": avg_json,
                 "wall_avg": avg_wall,
+                "cost_avg": avg_cost,
             }))
     trans_ranked.sort(key=lambda x: (-x[0], x[3]["wall_avg"]))
 
     print(f"{'#':<3} {'model':<33} {'T':>5} {'composite':>10} {'coverage':>9} "
-          f"{'count_fid':>10} {'lang_fid':>9} {'json_ok':>8} {'wall_µ':>7}")
-    print("-" * 120)
+          f"{'count_fid':>10} {'lang_fid':>9} {'json_ok':>8} {'wall_µ':>7} {'cost_µ':>10}")
+    print("-" * _TW)
     for i, (comp, m, t, q) in enumerate(trans_ranked, 1):
         print(
             f"#{i:<2} {m:<33} {t:>5.2f} "
@@ -855,7 +1000,8 @@ async def main_async(args):
             f"{q['count_fidelity']*100:>8.0f}% "
             f"{q['lang_fidelity']*100:>7.0f}% "
             f"{q['json_parse_rate']*100:>6.0f}% "
-            f"{q['wall_avg']:>6.1f}s"
+            f"{q['wall_avg']:>6.1f}s "
+            f"{_fmt_cost(q.get('cost_avg')):>10}"
         )
 
     # --- Save full JSON report ---
@@ -1097,8 +1243,15 @@ def score_translation(out_labels: list[str], task: dict) -> dict:
     }
 
 
-async def run_translation_one(model: str, task: dict, temperature: float, repeat: int) -> dict:
+async def run_translation_one(
+    model: str,
+    task: dict,
+    temperature: float,
+    repeat: int,
+    prices: Optional[Dict[str, Dict[str, float]]] = None,
+) -> dict:
     """Run one translation task for one model and return a cell dict."""
+    prices = prices or {}
     prompt = TRANSLATION_PROMPT.format(
         src_lang=task["src_lang"],
         tgt_lang=task["tgt_lang"],
@@ -1106,7 +1259,7 @@ async def run_translation_one(model: str, task: dict, temperature: float, repeat
     )
     start = time.time()
     try:
-        raw = await async_query_openrouter(
+        raw, usage = await async_query_openrouter(
             model_name=model,
             prompt=prompt,
             system_prompt="You are a professional translator. Respond only with valid JSON.",
@@ -1115,10 +1268,14 @@ async def run_translation_one(model: str, task: dict, temperature: float, repeat
             verbose=False,
             prefer_nitro=True,
             extra_body=REASONING_DISABLED,
+            return_usage=True,
         )
         wall = time.time() - start
         out_labels = parse_translation_output(raw)
         sc = score_translation(out_labels, task)
+        prompt_tokens = usage["prompt_tokens"]
+        completion_tokens = usage["completion_tokens"]
+        cost_usd = _compute_cost(prices, model, prompt_tokens, completion_tokens)
         return {
             "model": model,
             "task": task["name"],
@@ -1128,6 +1285,9 @@ async def run_translation_one(model: str, task: dict, temperature: float, repeat
             "raw": raw,
             "out_labels": out_labels,
             "error": None,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "cost_usd": cost_usd,
             **sc,
         }
     except Exception as e:
@@ -1146,6 +1306,9 @@ async def run_translation_one(model: str, task: dict, temperature: float, repeat
             "n_src": len(task["source_labels"]),
             "n_out": 0,
             "hits": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cost_usd": None,
         }
 
 

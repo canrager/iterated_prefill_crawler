@@ -310,3 +310,74 @@ def test_batch_generate_forwards_extra_body_to_create():
     assert texts == ["extracted topics"]
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["extra_body"] == {"reasoning": {"effort": "none"}}
+
+
+# ---------------------------------------------------------------------------
+# return_usage kwarg: Task 1 tests
+# ---------------------------------------------------------------------------
+
+def test_return_usage_true_returns_tuple_with_token_counts():
+    """When return_usage=True, async_query_openrouter returns (str, dict) with token counts."""
+    from src.openrouter_utils import async_query_openrouter
+
+    mock_usage = MagicMock()
+    mock_usage.prompt_tokens = 42
+    mock_usage.completion_tokens = 17
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = "extracted list"
+    mock_completion = MagicMock()
+    mock_completion.choices = [mock_choice]
+    mock_completion.usage = mock_usage
+
+    mock_create = AsyncMock(return_value=mock_completion)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    async def _run():
+        return await async_query_openrouter(
+            model_name="openai/gpt-5.4-mini",
+            prompt="extract topics",
+            return_usage=True,
+        )
+
+    with patch("src.openrouter_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                result = asyncio.run(_run())
+
+    assert isinstance(result, tuple), "return_usage=True must return a tuple"
+    text, usage = result
+    assert text == "extracted list"
+    assert usage["prompt_tokens"] == 42
+    assert usage["completion_tokens"] == 17
+
+
+def test_return_usage_false_returns_bare_string():
+    """When return_usage=False (default), async_query_openrouter returns a bare string."""
+    from src.openrouter_utils import async_query_openrouter
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = "bare string response"
+    mock_completion = MagicMock()
+    mock_completion.choices = [mock_choice]
+    mock_completion.usage = MagicMock()
+
+    mock_create = AsyncMock(return_value=mock_completion)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    async def _run():
+        return await async_query_openrouter(
+            model_name="openai/gpt-5.4-mini",
+            prompt="extract topics",
+            # return_usage defaults to False
+        )
+
+    with patch("src.openrouter_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                result = asyncio.run(_run())
+
+    assert isinstance(result, str), "return_usage=False must return a bare string, not a tuple"
+    assert result == "bare string response"

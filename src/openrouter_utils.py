@@ -44,11 +44,18 @@ async def async_query_openrouter(
     client_kwargs: Optional[Dict] = None,
     prefer_nitro: bool = False,
     extra_body: Optional[Dict] = None,
-) -> str:
+    return_usage: bool = False,
+) -> Union[str, tuple]:
     """Query any model via an OpenAI-compatible API.
 
     By default routes to OpenRouter.  Pass *client_kwargs* (with ``api_key``
     and ``base_url``) to target a different provider.
+
+    When *return_usage* is True, returns a tuple ``(response_str,
+    {"prompt_tokens": int, "completion_tokens": int})`` instead of a bare
+    string.  The token counts are zero if ``completion.usage`` is None or if
+    the call fails.  All prod call sites leave *return_usage* at its default
+    (False) so there are no breaking changes.
     """
     from openai import APIStatusError, AsyncOpenAI
 
@@ -78,6 +85,14 @@ async def async_query_openrouter(
     if verbose:
         print(f"API request: model={resolved_model_name}, messages={messages}")
 
+    _empty_usage: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
+
+    def _return(text: str, usage: Optional[Dict] = None):
+        """Return text (or (text, usage) tuple) depending on return_usage flag."""
+        if return_usage:
+            return (text, usage if usage is not None else _empty_usage)
+        return text
+
     try:
         completion = await client.chat.completions.create(
             model=resolved_model_name,
@@ -88,14 +103,14 @@ async def async_query_openrouter(
         )
         if not completion.choices:
             print(f"API returned no choices ({resolved_model_name})")
-            return ""
+            return _return("")
         choice = completion.choices[0]
         if choice.message is None:
             finish_reason = getattr(choice, "finish_reason", "unknown")
             print(
                 f"API returned choice with no message ({resolved_model_name}). Finish reason: {finish_reason}"
             )
-            return ""
+            return _return("")
 
         response = choice.message.content or ""
         log_model_call(
@@ -108,6 +123,17 @@ async def async_query_openrouter(
         )
         if verbose:
             print(f"API response ({resolved_model_name}):\n{response}")
+
+        if return_usage:
+            usage_obj = completion.usage
+            if usage_obj is not None:
+                usage = {
+                    "prompt_tokens": getattr(usage_obj, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(usage_obj, "completion_tokens", 0) or 0,
+                }
+            else:
+                usage = _empty_usage
+            return (response, usage)
         return response
     except APIStatusError as e:
         if e.status_code in (400, 401, 403, 404):
@@ -115,10 +141,10 @@ async def async_query_openrouter(
         print(
             f"API error ({resolved_model_name}) [status {e.status_code}, retries exhausted]: {e}"
         )
-        return ""
+        return _return("")
     except Exception as e:
         print(f"API error ({resolved_model_name}) [retries exhausted]: {e}")
-        return ""
+        return _return("")
 
 
 # Alias kept for backward compatibility
