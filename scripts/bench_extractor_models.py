@@ -55,7 +55,6 @@ MODELS = [
     "qwen/qwen3-235b-a22b-2507",
     "qwen/qwen3.5-397b-a17b",
     "qwen/qwen3.5-35b-a3b",
-    "inclusionai/ling-2.6-flash:free",
     "liquid/lfm-2-24b-a2b",
     "arcee-ai/trinity-large-thinking",
     "z-ai/glm-5",
@@ -759,6 +758,106 @@ async def main_async(args):
             f"{q['wall_avg']:>6.1f}s"
         )
 
+    # ---------------------------------------------------------------------------
+    # Translation benchmark
+    # ---------------------------------------------------------------------------
+    print()
+    print("=" * 120)
+    print("TRANSLATION BENCHMARK")
+    print(f"  Tasks: {[t['name'] for t in TRANSLATION_TASKS]}")
+    print(f"  Models: {models}  Temps: {temps}  Repeats: {args.repeats}")
+    print("=" * 120)
+
+    trans_tasks_list = [
+        run_translation_one(m, task, t, r)
+        for m in models
+        for task in TRANSLATION_TASKS
+        for t in temps
+        for r in range(args.repeats)
+    ]
+    print(f"[bench] Translation: {len(trans_tasks_list)} concurrent API calls")
+    print()
+
+    t_trans_start = time.time()
+    all_trans_cells = await asyncio.gather(*trans_tasks_list)
+    print(f"[bench] Translation calls done in {time.time() - t_trans_start:.1f}s.\n")
+
+    # Per-model, per-task summary table
+    print("=" * 120)
+    print(f"{'MODEL':<33} {'TASK':<34} {'coverage':>9} {'count_fid':>10} "
+          f"{'lang_fid':>9} {'json_ok':>8} {'wall_s':>7}")
+    print("-" * 120)
+
+    all_trans_rows = []
+    for model in models:
+        for task in TRANSLATION_TASKS:
+            tn = task["name"]
+            for t in temps:
+                cells = [c for c in all_trans_cells
+                         if c["model"] == model and c["task"] == tn and c["temperature"] == t]
+                agg = aggregate_translation(cells)
+                row_data = {
+                    "model": model, "task": tn, "temperature": t, **agg,
+                }
+                all_trans_rows.append(row_data)
+                print(
+                    f"{model:<33} {tn:<34} "
+                    f"{agg['coverage']*100:>7.0f}%  "
+                    f"{agg['count_fidelity']*100:>7.0f}%  "
+                    f"{agg['lang_fidelity']*100:>7.0f}%  "
+                    f"{agg['json_parse_rate']*100:>5.0f}%  "
+                    f"{agg['wall_s']:>6.1f}s"
+                )
+    print()
+
+    # Translation scoreboard: rank by composite = coverage * count_fid * lang_fid
+    print("=" * 120)
+    print("TRANSLATION SCOREBOARD")
+    print("-" * 120)
+
+    trans_ranked = []
+    for m in models:
+        for t in temps:
+            task_aggs = []
+            for task in TRANSLATION_TASKS:
+                tn = task["name"]
+                cells = [c for c in all_trans_cells
+                         if c["model"] == m and c["task"] == tn and c["temperature"] == t]
+                good = [c for c in cells if c["error"] is None]
+                if not good:
+                    continue
+                task_aggs.append(aggregate_translation(cells))
+            if not task_aggs:
+                continue
+            avg_cov   = statistics.mean(a["coverage"] for a in task_aggs)
+            avg_cfid  = statistics.mean(a["count_fidelity"] for a in task_aggs)
+            avg_lfid  = statistics.mean(a["lang_fidelity"] for a in task_aggs)
+            avg_json  = statistics.mean(a["json_parse_rate"] for a in task_aggs)
+            avg_wall  = statistics.mean(a["wall_s"] for a in task_aggs)
+            composite = avg_cov * avg_cfid * avg_lfid
+            trans_ranked.append((composite, m, t, {
+                "coverage": avg_cov,
+                "count_fidelity": avg_cfid,
+                "lang_fidelity": avg_lfid,
+                "json_parse_rate": avg_json,
+                "wall_avg": avg_wall,
+            }))
+    trans_ranked.sort(key=lambda x: (-x[0], x[3]["wall_avg"]))
+
+    print(f"{'#':<3} {'model':<33} {'T':>5} {'composite':>10} {'coverage':>9} "
+          f"{'count_fid':>10} {'lang_fid':>9} {'json_ok':>8} {'wall_µ':>7}")
+    print("-" * 120)
+    for i, (comp, m, t, q) in enumerate(trans_ranked, 1):
+        print(
+            f"#{i:<2} {m:<33} {t:>5.2f} "
+            f"{comp:>9.3f} "
+            f"{q['coverage']*100:>7.0f}% "
+            f"{q['count_fidelity']*100:>8.0f}% "
+            f"{q['lang_fidelity']*100:>7.0f}% "
+            f"{q['json_parse_rate']*100:>6.0f}% "
+            f"{q['wall_avg']:>6.1f}s"
+        )
+
     # --- Save full JSON report ---
     out_path = Path(args.out) if args.out else Path(
         f"artifacts/bench/extractor_models_{time.strftime('%Y%m%d_%H%M')}.json")
@@ -770,8 +869,307 @@ async def main_async(args):
             {"rank": i, "composite": comp, "model": m, "temperature": t, **q}
             for i, (comp, m, t, q) in enumerate(ranked, 1)
         ],
+        "translation_cells": [
+            {k: v for k, v in c.items() if k != "raw"}
+            for c in all_trans_cells
+        ],
+        "translation_rows": all_trans_rows,
+        "translation_scoreboard": [
+            {"rank": i, "composite": comp, "model": m, "temperature": t, **q}
+            for i, (comp, m, t, q) in enumerate(trans_ranked, 1)
+        ],
     }, indent=2, ensure_ascii=False))
     print(f"\n[bench] Full output: {out_path}")
+
+
+# ===========================================================================
+# Translation benchmark
+# ===========================================================================
+#
+# Target-probe provenance:
+#   - en_to_zh_alignment_triggers: source labels are the 38 keys of
+#     en_alignment_triggers.critical_entities; target probes are sliced from
+#     zh_combined.critical_entities positions 36-73 (the last 38 entries,
+#     which are the alignment-trigger categories translated to ZH by the
+#     combined-fixture builder).
+#   - en_to_zh_historical_negationism: source labels are the 16 keys of
+#     en_historical_negationism.critical_entities; target probes are sliced
+#     from zh_combined.critical_entities positions 20-35 (the 16 entries
+#     that correspond to the historical-negationism categories translated
+#     to ZH).
+#   - zh_to_en_ccp_sensitive: source labels are the 20 keys of
+#     zh_ccp_sensitive.critical_entities; target probes are sliced from
+#     en_combined.critical_entities positions 54-73 (the last 20 entries,
+#     all prefixed "CCP — ", which are the ZH CCP categories translated
+#     to EN by the combined-fixture builder).
+#
+# This uses positional slicing because the combined-fixture keys are
+# translations of the source keys, not matching by name.
+# ---------------------------------------------------------------------------
+
+TRANSLATION_PROMPT = (
+    "You are a translator. Translate each item in the JSON array below from"
+    " {src_lang} to {tgt_lang}. Preserve the original order and count exactly."
+    " Translate each label as a short canonical term in {tgt_lang} (2-5 words)."
+    " Do not add explanations, notes, or commentary.\n\n"
+    "Output ONLY a JSON array of strings, same length as the input, no other text.\n\n"
+    "INPUT ({src_lang}):\n{json_array}"
+)
+
+
+def _build_translation_tasks() -> list[dict]:
+    """Derive TRANSLATION_TASKS from the FIXTURES dicts at import time."""
+    # Locate the source fixtures by name for clean reference
+    _fix = {f["name"]: f for f in FIXTURES}
+    en_hist = _fix["en_historical_negationism"]
+    zh_ccp = _fix["zh_ccp_sensitive"]
+    en_align = _fix["en_alignment_triggers"]
+    zh_comb = _fix["zh_combined"]
+    en_comb = _fix["en_combined"]
+
+    # zh_combined entity ordering: 20 CCP (0-19) + 16 hist (20-35) + 38 align (36-73)
+    zh_comb_items = list(zh_comb["critical_entities"].items())
+    zh_hist_slice  = dict(zh_comb_items[20:36])   # 16 historical entries translated to ZH
+    zh_align_slice = dict(zh_comb_items[36:74])   # 38 alignment entries translated to ZH
+
+    # en_combined entity ordering: 16 hist (0-15) + 38 align (16-53) + 20 CCP-translated (54-73)
+    en_comb_items = list(en_comb["critical_entities"].items())
+    en_ccp_slice  = dict(en_comb_items[54:74])    # 20 CCP entries translated to EN
+
+    def _probes_from_slice(items: dict) -> dict[str, list[str]]:
+        """Return the probes dict keyed by the translated label (ZH or EN key)."""
+        return {k: v for k, v in items.items()}
+
+    # Task 1: EN→ZH for alignment triggers
+    # source_labels: keys from en_alignment_triggers (38 EN labels)
+    # target_probes: keyed by ZH category label, values are ZH substring probes
+    src_align = list(en_align["critical_entities"].keys())
+    # Build probes as: for each source label at position i, the probes come from
+    # the zh_align_slice value at position i (same ordering guaranteed by combined fixture)
+    zh_align_values = list(zh_align_slice.values())
+    align_probes: dict[str, list[str]] = {
+        src_align[i]: zh_align_values[i]
+        for i in range(len(src_align))
+    }
+
+    # Task 2: EN→ZH for historical negationism
+    src_hist = list(en_hist["critical_entities"].keys())
+    zh_hist_values = list(zh_hist_slice.values())
+    hist_probes: dict[str, list[str]] = {
+        src_hist[i]: zh_hist_values[i]
+        for i in range(len(src_hist))
+    }
+
+    # Task 3: ZH→EN for CCP-sensitive
+    src_ccp = list(zh_ccp["critical_entities"].keys())
+    en_ccp_values = list(en_ccp_slice.values())
+    ccp_probes: dict[str, list[str]] = {
+        src_ccp[i]: en_ccp_values[i]
+        for i in range(len(src_ccp))
+    }
+
+    return [
+        {
+            "name": "en_to_zh_alignment_triggers",
+            "src_lang": "English",
+            "tgt_lang": "Chinese",
+            "source_labels": src_align,
+            "target_probes": align_probes,
+        },
+        {
+            "name": "en_to_zh_historical_negationism",
+            "src_lang": "English",
+            "tgt_lang": "Chinese",
+            "source_labels": src_hist,
+            "target_probes": hist_probes,
+        },
+        {
+            "name": "zh_to_en_ccp_sensitive",
+            "src_lang": "Chinese",
+            "tgt_lang": "English",
+            "source_labels": src_ccp,
+            "target_probes": ccp_probes,
+        },
+    ]
+
+
+TRANSLATION_TASKS = _build_translation_tasks()
+
+
+def parse_translation_output(raw: str) -> list[str]:
+    """Parse a JSON array from a translation response.
+
+    Accepts:
+    - Bare JSON array
+    - Markdown-fenced ```json ... ``` or ``` ... ```
+    - Falls back to stripping numbered/bulleted list lines
+    """
+    if not raw:
+        return []
+    # Try bare JSON
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed]
+    except Exception:
+        pass
+    # Try markdown fenced
+    m = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", raw, re.DOTALL)
+    if m:
+        try:
+            return [str(x) for x in json.loads(m.group(1))]
+        except Exception:
+            pass
+    m = re.search(r"(\[(?:.|\n)*\])", raw)
+    if m:
+        try:
+            return [str(x) for x in json.loads(m.group(1))]
+        except Exception:
+            pass
+    # Bullet / numbered list fallback
+    lines = []
+    for line in raw.splitlines():
+        line = line.strip()
+        line = re.sub(r"^[-*•]\s+", "", line)
+        line = re.sub(r"^\d+\.\s*", "", line)
+        if line:
+            lines.append(line)
+    return lines
+
+
+def score_translation(out_labels: list[str], task: dict) -> dict:
+    """Score a translation output against a task's target probes.
+
+    Metrics:
+      coverage       — fraction of source labels whose corresponding probes
+                       appear in at least one output label.  Probe matching
+                       uses case-insensitive substring for EN targets,
+                       exact substring for ZH targets.
+      count_fidelity — 1 - abs(len(out) - len(src)) / len(src), clamped [0, 1].
+      lang_fidelity  — fraction of output labels in the target script.
+    """
+    tgt_lang = task["tgt_lang"]
+    src_labels = task["source_labels"]
+    target_probes = task["target_probes"]
+    n_src = len(src_labels)
+
+    # Coverage: for each source label, check if any output label contains
+    # one of its target probes.
+    is_zh_target = (tgt_lang == "Chinese")
+    joined_lower = " || ".join(out_labels).lower()
+    joined_raw   = " || ".join(out_labels)
+
+    hits = 0
+    for src_label in src_labels:
+        probes = target_probes.get(src_label, [])
+        matched = False
+        for probe in probes:
+            if is_zh_target:
+                if probe in joined_raw:
+                    matched = True
+                    break
+            else:
+                if probe.lower() in joined_lower:
+                    matched = True
+                    break
+        if matched:
+            hits += 1
+    coverage = hits / n_src if n_src else 0.0
+
+    # Count fidelity
+    n_out = len(out_labels)
+    count_fidelity = max(0.0, 1.0 - abs(n_out - n_src) / n_src) if n_src else 0.0
+
+    # Lang fidelity
+    if is_zh_target:
+        correct_script = sum(1 for lbl in out_labels if is_chinese(lbl))
+    else:
+        correct_script = sum(1 for lbl in out_labels if not is_chinese(lbl))
+    lang_fidelity = correct_script / n_out if n_out else 0.0
+
+    return {
+        "coverage": coverage,
+        "count_fidelity": count_fidelity,
+        "lang_fidelity": lang_fidelity,
+        "n_src": n_src,
+        "n_out": n_out,
+        "hits": hits,
+    }
+
+
+async def run_translation_one(model: str, task: dict, temperature: float, repeat: int) -> dict:
+    """Run one translation task for one model and return a cell dict."""
+    prompt = TRANSLATION_PROMPT.format(
+        src_lang=task["src_lang"],
+        tgt_lang=task["tgt_lang"],
+        json_array=json.dumps(task["source_labels"], ensure_ascii=False),
+    )
+    start = time.time()
+    try:
+        raw = await async_query_openrouter(
+            model_name=model,
+            prompt=prompt,
+            system_prompt="You are a professional translator. Respond only with valid JSON.",
+            temperature=temperature,
+            max_tokens=4000,
+            verbose=False,
+            prefer_nitro=True,
+            extra_body=REASONING_DISABLED,
+        )
+        wall = time.time() - start
+        out_labels = parse_translation_output(raw)
+        sc = score_translation(out_labels, task)
+        return {
+            "model": model,
+            "task": task["name"],
+            "temperature": temperature,
+            "repeat": repeat,
+            "wall_s": wall,
+            "raw": raw,
+            "out_labels": out_labels,
+            "error": None,
+            **sc,
+        }
+    except Exception as e:
+        return {
+            "model": model,
+            "task": task["name"],
+            "temperature": temperature,
+            "repeat": repeat,
+            "wall_s": time.time() - start,
+            "raw": "",
+            "out_labels": [],
+            "error": repr(e),
+            "coverage": 0.0,
+            "count_fidelity": 0.0,
+            "lang_fidelity": 0.0,
+            "n_src": len(task["source_labels"]),
+            "n_out": 0,
+            "hits": 0,
+        }
+
+
+def aggregate_translation(cells: list[dict]) -> dict:
+    """Aggregate translation-bench repeats for a (model, task, temp) group."""
+    good = [c for c in cells if c["error"] is None]
+    n_total = len(cells)
+    if not good:
+        return {
+            "n_runs": n_total, "error_rate": 1.0,
+            "coverage": 0.0, "count_fidelity": 0.0, "lang_fidelity": 0.0,
+            "json_parse_rate": 0.0, "wall_s": 0.0,
+        }
+    n_good = len(good)
+    json_parseable = sum(1 for c in good if is_json_parseable(c["raw"] or ""))
+    return {
+        "n_runs": n_total,
+        "error_rate": 1.0 - n_good / n_total,
+        "coverage": statistics.mean(c["coverage"] for c in good),
+        "count_fidelity": statistics.mean(c["count_fidelity"] for c in good),
+        "lang_fidelity": statistics.mean(c["lang_fidelity"] for c in good),
+        "json_parse_rate": json_parseable / n_good,
+        "wall_s": statistics.mean(c["wall_s"] for c in good),
+    }
 
 
 def main():
