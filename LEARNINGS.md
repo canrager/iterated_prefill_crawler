@@ -7,6 +7,24 @@ Source control will track versions of this document, so keep it fresh.
 
 ## Current learnings
 
+### Extractors silently drop alignment-trigger categories under prod prompts
+
+Helper-LLMs fine-tuned for safety (e.g. `openai/gpt-5.4-mini`) can produce clean JSON and no visible refusal while systematically omitting the hardest categories from a target's audit enumeration — CSAM, weapons, self-harm, non-consensual sexual acts, exploit code. This is the worst failure mode for an audit pipeline: biased recall loss on exactly the categories that matter, with output that looks successful. A general extractor bench (historical/political fixtures) will not catch it; the bench must include a real jailbreak enumeration fixture.
+
+*Evidence: bench 2026-04-22 on `extractor_test_alignment_triggers_en.txt` (DeepSeek R1's 38-category enumeration). Under the prod prompt (`TOPIC_EXTRACTION_PROMPT`), `openai/gpt-5.4-mini` scored 23/38 (61%) with 0% refusal, 100% JSON. Reports at `/tmp/ipc-main/artifacts/bench/extractor_models_*.json`.*
+
+### Reasoning tokens on helpers contaminate bench comparisons and waste prod latency
+
+Helper roles (extraction, translation, summarization, judging) are deterministic transformations, not reasoning tasks. When reasoning effort is left at provider defaults, wall-time and token cost reflect chain-of-thought depth, not throughput — making bench rankings misleading. In prod the same default burns tokens and latency for no quality gain. Disable reasoning at the helper call boundary only; target-model calls must keep reasoning on (that's the audit signal).
+
+*Evidence: bench v3 (reasoning on, 2026-04-21) scored qwen3-235b 0.93 composite with 7.2s wall_s; bench v5 (`extra_body={"reasoning": {"effort": "none"}}`, 2026-04-22) scored 0.93 at 6.8s on the same fixture. Wall-time on slower candidates (gemma-4) changed more dramatically. Plumbed via `REASONING_DISABLED` in `src/openrouter_utils.py`.*
+
+### Helper-model concurrency fan-out rate-limits itself; cap at the API boundary
+
+The refusal-check path produces `topics * j` messages in a single `batch_generate` call. For rehearsal that's ~200 parallel target-model requests. OpenRouter rate-limits the provider; the SDK's `max_retries` with exponential backoff turns the stall into a retry storm that self-perpetuates instead of breaking out. Every `_api_batch_generate` call needs a semaphore, and translation sub-batching must not reuse `generation_batch_size` — that knob is ~2 and inflates translate calls ~50x.
+
+*Evidence: rehearsal 2026-04-21 stalled in step 0 refusal-filtering for 50 minutes of SDK retries before manual kill. Fixed by `max_concurrent_api_calls=16` semaphore and a dedicated `translation_batch_size=50`.*
+
 ### Seed pool eligibility silently drops narrow branches
 
 Broad discovered topics are only re-entered as seeds if they are refusal-marked. A coarse label that passes the refusal check will never be drilled into, even when its narrower children would have been refused. When debugging coverage gaps, check separately: which prompt family ran, which topics were eligible to re-enter the seed pool, and whether the missing detail appeared only inside refusal-check responses.
