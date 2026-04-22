@@ -74,7 +74,7 @@ LEETCODE_SOLUTION = """\
 
 def _make_config():
     cfg = MagicMock()
-    cfg.model.summarization_model = "moonshotai/kimi-k2-0905"
+    cfg.model.summarization_model = "qwen/qwen3-235b-a22b-2507"
     cfg.model.default_provider = "openrouter"
     cfg.model.provider_urls = None
     cfg.crawler.max_extracted_topics_per_generation = 10
