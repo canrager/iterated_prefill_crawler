@@ -1,8 +1,9 @@
 # Model selection ("local" or openrouter path)
 target_model: "x-ai/grok-4.1-fast"
 translation_model: "qwen/qwen3-235b-a22b-2507"
-summarization_model: "moonshotai/kimi-k2-0905"
+summarization_model: "qwen/qwen3-235b-a22b-2507"
 refusal_check_model: "google/gemma-4-26b-a4b-it"
+universal_backup_model: "moonshotai/kimi-k2.5"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 
 # Local model config — set to null for API-only (no GPU) runs.
