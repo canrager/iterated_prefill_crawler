@@ -208,3 +208,105 @@ def test_batch_generate_nitro_not_appended_for_non_openrouter():
     # Provider is openai (not openrouter) — :nitro must NOT be appended
     assert call_kwargs.kwargs["model"] == "gpt-5.4-mini"
     assert not call_kwargs.kwargs["model"].endswith(":nitro")
+
+
+# ---------------------------------------------------------------------------
+# REASONING_DISABLED constant and extra_body plumbing
+# ---------------------------------------------------------------------------
+
+def test_reasoning_disabled_constant_value():
+    """REASONING_DISABLED must equal the expected dict that turns off reasoning tokens."""
+    from src.openrouter_utils import REASONING_DISABLED
+    assert REASONING_DISABLED == {"reasoning": {"effort": "none"}}
+
+
+def test_async_query_openrouter_forwards_extra_body():
+    """async_query_openrouter passes extra_body through to client.chat.completions.create()."""
+    from src.openrouter_utils import REASONING_DISABLED, async_query_openrouter
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = "helper response"
+    mock_completion = MagicMock()
+    mock_completion.choices = [mock_choice]
+
+    mock_create = AsyncMock(return_value=mock_completion)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    async def _run():
+        return await async_query_openrouter(
+            model_name="openai/gpt-5.4-mini",
+            prompt="summarize this",
+            extra_body=REASONING_DISABLED,
+        )
+
+    with patch("src.openrouter_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                result = asyncio.run(_run())
+
+    assert result == "helper response"
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["extra_body"] == {"reasoning": {"effort": "none"}}
+
+
+def test_async_query_openrouter_extra_body_none_by_default():
+    """When extra_body is not passed, create() is called with extra_body=None (the default)."""
+    from src.openrouter_utils import async_query_openrouter
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = "response"
+    mock_completion = MagicMock()
+    mock_completion.choices = [mock_choice]
+
+    mock_create = AsyncMock(return_value=mock_completion)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    async def _run():
+        return await async_query_openrouter(
+            model_name="openai/gpt-5.4-mini",
+            prompt="hello",
+        )
+
+    with patch("src.openrouter_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                asyncio.run(_run())
+
+    call_kwargs = mock_create.call_args.kwargs
+    # extra_body should be absent or None when not explicitly passed
+    assert call_kwargs.get("extra_body") is None
+
+
+def test_batch_generate_forwards_extra_body_to_create():
+    """batch_generate(extra_body=REASONING_DISABLED) forwards it through to create()."""
+    from src.generation_utils import batch_generate
+    from src.openrouter_utils import REASONING_DISABLED
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = "extracted topics"
+    mock_completion = MagicMock()
+    mock_completion.choices = [mock_choice]
+
+    mock_create = AsyncMock(return_value=mock_completion)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    messages = [[{"role": "user", "content": "extract topics from: foo bar"}]]
+
+    with patch("src.generation_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                texts, _ = batch_generate(
+                    model="openai/gpt-5.4-mini",
+                    tokenizer=None,
+                    messages=messages,
+                    max_new_tokens=100,
+                    temperature=0.0,
+                    extra_body=REASONING_DISABLED,
+                )
+
+    assert texts == ["extracted topics"]
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["extra_body"] == {"reasoning": {"effort": "none"}}

@@ -19,6 +19,7 @@ logging.getLogger("asyncio").addFilter(_SuppressEventLoopClosed())
 from src.directory_config import INPUT_DIR
 from src.transcript_logger import log_model_call
 from src.openrouter_utils import (  # re-exported for backward compatibility
+    REASONING_DISABLED,
     async_query_llm_api,
     async_query_openrouter,
     query_llm_api,
@@ -98,6 +99,7 @@ async def _async_api_single(
     messages: List[Dict],
     max_new_tokens: int,
     temperature: float,
+    extra_body: Optional[Dict] = None,
 ) -> str:
     """Send a single chat conversation to an OpenAI-compatible API and return the response text."""
     from openai import APIStatusError
@@ -118,6 +120,7 @@ async def _async_api_single(
             messages=messages,
             max_tokens=max_new_tokens,
             temperature=temperature,
+            extra_body=extra_body,
         )
 
         if not completion.choices:
@@ -170,6 +173,7 @@ def _api_batch_generate(
     provider_url_overrides: Optional[Dict[str, str]] = None,
     prefer_nitro: bool = False,
     max_concurrent: int = 16,
+    extra_body: Optional[Dict] = None,
 ) -> Tuple[List[str], List[str]]:
     """Send a batch of chat conversations to an OpenAI-compatible API concurrently.
 
@@ -204,7 +208,8 @@ def _api_batch_generate(
         async def _bounded(msg_list):
             async with semaphore:
                 return await _async_api_single(
-                    client, resolved_model_id, msg_list, max_new_tokens, temperature
+                    client, resolved_model_id, msg_list, max_new_tokens, temperature,
+                    extra_body=extra_body,
                 )
 
         tasks = [_bounded(msg_list) for msg_list in messages]
@@ -246,6 +251,7 @@ def batch_generate(
     provider_url_overrides: Optional[Dict[str, str]] = None,
     prefer_nitro: bool = False,
     max_concurrent: int = 16,
+    extra_body: Optional[Dict] = None,
 ) -> Tuple[List[str], List[str]]:
     """Generate text from a list of message dicts.
 
@@ -283,6 +289,7 @@ def batch_generate(
             provider_url_overrides=provider_url_overrides,
             prefer_nitro=prefer_nitro,
             max_concurrent=max_concurrent,
+            extra_body=extra_body,
         )
 
     input_ids, input_strs = encode_for_generation(
@@ -352,6 +359,7 @@ async def async_summarize_single_topic(
             client_kwargs=client_kwargs,
             temperature=0.6,
             prefer_nitro=prefer_nitro,
+            extra_body=REASONING_DISABLED,
         )
         summary = summary.strip()
 

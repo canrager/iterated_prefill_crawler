@@ -7,6 +7,10 @@ from src.transcript_logger import log_model_call
 # OpenRouter base URL (canonical form, without trailing slash).
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
+# Pass as extra_body to disable reasoning tokens on helper-model calls.
+# Target-model calls must NOT include this — reasoning is part of the audit signal.
+REASONING_DISABLED: Dict = {"reasoning": {"effort": "none"}}
+
 
 def _apply_nitro(model_id: str, base_url: str, prefer: bool) -> str:
     """Append ':nitro' to *model_id* when all conditions are met.
@@ -39,6 +43,7 @@ async def async_query_openrouter(
     temperature: float = 1.0,
     client_kwargs: Optional[Dict] = None,
     prefer_nitro: bool = False,
+    extra_body: Optional[Dict] = None,
 ) -> str:
     """Query any model via an OpenAI-compatible API.
 
@@ -79,6 +84,7 @@ async def async_query_openrouter(
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
+            extra_body=extra_body,
         )
         if not completion.choices:
             print(f"API returned no choices ({resolved_model_name})")

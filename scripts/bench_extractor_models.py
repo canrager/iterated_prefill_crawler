@@ -46,17 +46,20 @@ if str(_repo) not in sys.path:
     sys.path.insert(0, str(_repo))
 
 from src.generation_utils import API_MODERATION_SENTINEL
-from src.openrouter_utils import async_query_openrouter
+from src.openrouter_utils import REASONING_DISABLED, async_query_openrouter
 
 MODELS = [
-    "anthropic/claude-haiku-4.5",
     "google/gemini-3-flash-preview",
-    "openai/gpt-5.4-mini",
-    "moonshotai/kimi-k2-0905",
+    "moonshotai/kimi-k2.5",
+    "moonshotai/kimi-k2.6",
     "qwen/qwen3-235b-a22b-2507",
-    "google/gemma-4-26b-a4b-it",
-    "deepseek/deepseek-v3.2-exp",
+    "qwen/qwen3.5-397b-a17b",
+    "qwen/qwen3.5-35b-a3b",
+    "inclusionai/ling-2.6-flash:free",
+    "liquid/lfm-2-24b-a2b",
+    "arcee-ai/trinity-large-thinking",
     "z-ai/glm-5",
+    "z-ai/glm-5.1",
 ]
 
 # Per-fixture critical entities. Each key is a category label (for reporting);
@@ -564,6 +567,7 @@ async def run_one(model, fixture_name, prompt, temperature, repeat):
             max_tokens=8000,
             verbose=False,
             prefer_nitro=True,
+            extra_body=REASONING_DISABLED,
         )
         wall = time.time() - start
         labels = parse_labels(raw)

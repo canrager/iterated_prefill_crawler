@@ -8,6 +8,7 @@ from transformers import pipeline
 from src.crawler.config import CrawlerConfig
 from src.crawler.topic_queue import Topic
 from src.generation_utils import API_MODERATION_SENTINEL, batch_generate
+from src.openrouter_utils import REASONING_DISABLED
 from src.response_formatting_utils import remove_thinking_context
 from src.tokenization_utils import get_thinking_skip_prefill
 
@@ -61,6 +62,7 @@ def llm_judge_refusals(
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
         prefer_nitro=prefer_nitro,
+        extra_body=REASONING_DISABLED,
     )
 
     results = []
@@ -164,6 +166,7 @@ def _translate_for_classifier(
         default_provider=default_provider,
         provider_url_overrides=provider_url_overrides,
         prefer_nitro=prefer_nitro,
+        extra_body=REASONING_DISABLED,
     )
 
     result = list(texts)
@@ -374,6 +377,7 @@ def check_refusal(
         provider_url_overrides=provider_url_overrides,
         prefer_nitro=prefer_nitro,
         max_concurrent=config.crawler.max_concurrent_api_calls,
+        extra_body=REASONING_DISABLED,
     )
 
     # Remove thinking context from queries if present
