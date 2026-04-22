@@ -34,6 +34,7 @@ def llm_judge_refusals(
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
     prefer_nitro: bool = False,
+    universal_backup_model: Optional[str] = None,
 ) -> List[bool]:
     if not texts:
         return []
@@ -63,6 +64,7 @@ def llm_judge_refusals(
         provider_url_overrides=provider_url_overrides,
         prefer_nitro=prefer_nitro,
         extra_body=REASONING_DISABLED,
+        universal_backup_model=universal_backup_model,
     )
 
     results = []
@@ -143,6 +145,7 @@ def _translate_for_classifier(
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
     prefer_nitro: bool = False,
+    universal_backup_model: Optional[str] = None,
 ) -> List[str]:
     """Translate Chinese texts to English for the classifier. Non-Chinese texts pass through."""
     if translation_model is None:
@@ -167,6 +170,7 @@ def _translate_for_classifier(
         provider_url_overrides=provider_url_overrides,
         prefer_nitro=prefer_nitro,
         extra_body=REASONING_DISABLED,
+        universal_backup_model=universal_backup_model,
     )
 
     result = list(texts)
@@ -191,6 +195,7 @@ def check_refusals_cascade(
     default_provider = config.model.default_provider
     provider_url_overrides = config.model.provider_urls
     prefer_nitro = config.model.prefer_nitro
+    universal_backup_model = config.model.universal_backup_model
 
     refusals = []
     texts_for_classifier = []
@@ -216,6 +221,7 @@ def check_refusals_cascade(
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
             prefer_nitro=prefer_nitro,
+            universal_backup_model=universal_backup_model,
         )
 
     texts_for_llm = []
@@ -261,6 +267,7 @@ def check_refusals_cascade(
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
             prefer_nitro=prefer_nitro,
+            universal_backup_model=universal_backup_model,
         )
         for i, result in zip(indices_for_llm, llm_results):
             refusals[i] = result
@@ -342,6 +349,7 @@ def check_refusal(
     default_provider = config.model.default_provider
     provider_url_overrides = config.model.provider_urls
     prefer_nitro = config.model.prefer_nitro
+    universal_backup_model = config.model.universal_backup_model
 
     num_checks = config.crawler.num_refusal_checks_per_topic
     threshold = config.crawler.is_refusal_threshold
@@ -378,6 +386,7 @@ def check_refusal(
         prefer_nitro=prefer_nitro,
         max_concurrent=config.crawler.max_concurrent_api_calls,
         extra_body=REASONING_DISABLED,
+        universal_backup_model=universal_backup_model,
     )
 
     # Remove thinking context from queries if present

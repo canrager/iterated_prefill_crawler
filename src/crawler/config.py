@@ -201,6 +201,13 @@ class ModelConfig:
     # are always untouched. Set to False to opt out of nitro routing.
     prefer_nitro: bool = True
 
+    # --- Universal backup for helper calls ---
+    # Model string used as a single-retry fallback when a helper call hits
+    # APITimeoutError or a retry-exhausted non-auth APIStatusError. Applies
+    # only to helpers (extract/translate/summarize/judge); target-model calls
+    # are never backed up (the target is the audit subject). None disables.
+    universal_backup_model: Optional[str] = None
+
 
 @dataclass
 class CrawlerRunConfig:

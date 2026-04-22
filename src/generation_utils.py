@@ -100,8 +100,15 @@ async def _async_api_single(
     max_new_tokens: int,
     temperature: float,
     extra_body: Optional[Dict] = None,
+    universal_backup_model: Optional[str] = None,
 ) -> str:
-    """Send a single chat conversation to an OpenAI-compatible API and return the response text."""
+    """Send a single chat conversation to an OpenAI-compatible API and return the response text.
+
+    If *universal_backup_model* is provided and differs from *model_name*, a
+    timeout or retry-exhausted non-auth APIStatusError triggers a single
+    retry against the backup model on the same client. Moderation refusals
+    and auth/4xx config errors are NOT backed up.
+    """
     from openai import APIStatusError
 
     # Guard: some providers return HTTP 400 "Input must have at least 1 token"
@@ -112,6 +119,20 @@ async def _async_api_single(
         print(
             f"Skipping API call for {model_name}: one or more messages have empty content"
         )
+        return ""
+
+    async def _fallback_or_empty(reason: str) -> str:
+        if universal_backup_model and universal_backup_model != model_name:
+            print(f"Falling back to {universal_backup_model} after {reason} on {model_name}")
+            return await _async_api_single(
+                client,
+                universal_backup_model,
+                messages,
+                max_new_tokens,
+                temperature,
+                extra_body=extra_body,
+                universal_backup_model=None,  # no recursion
+            )
         return ""
 
     try:
@@ -152,15 +173,15 @@ async def _async_api_single(
         if e.status_code in (400, 401, 403, 404):
             raise
         # For other status errors (the openai SDK already retried 429/5xx),
-        # log loudly — this means retries were exhausted.
+        # log loudly and try the universal backup if available.
         print(
             f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
         )
-        return ""
+        return await _fallback_or_empty(f"status {e.status_code}")
     except Exception as e:
         # Network errors, timeouts, etc. — the SDK already retried these.
         print(f"API error ({model_name}) [retries exhausted]: {e}")
-        return ""
+        return await _fallback_or_empty("timeout/network")
 
 
 def _api_batch_generate(
@@ -174,6 +195,7 @@ def _api_batch_generate(
     prefer_nitro: bool = False,
     max_concurrent: int = 16,
     extra_body: Optional[Dict] = None,
+    universal_backup_model: Optional[str] = None,
 ) -> Tuple[List[str], List[str]]:
     """Send a batch of chat conversations to an OpenAI-compatible API concurrently.
 
@@ -194,8 +216,15 @@ def _api_batch_generate(
 
     # Apply :nitro throughput routing at the single chokepoint where the model
     # string goes to the API.  _apply_nitro is a no-op for non-OpenRouter URLs.
-    resolved_model_id = _apply_nitro(
-        resolved_model_id, client_kwargs.get("base_url", _OPENROUTER_BASE_URL), prefer_nitro
+    base_url = client_kwargs.get("base_url", _OPENROUTER_BASE_URL)
+    resolved_model_id = _apply_nitro(resolved_model_id, base_url, prefer_nitro)
+    # Resolve the backup model through the same routing so it inherits :nitro
+    # when applicable.  Backup is assumed to live on the same provider as the
+    # primary (share one client).
+    resolved_backup = (
+        _apply_nitro(universal_backup_model, base_url, prefer_nitro)
+        if universal_backup_model
+        else None
     )
 
     # The SDK auto-retries 429/500/502/503/504 with exponential backoff.
@@ -210,6 +239,7 @@ def _api_batch_generate(
                 return await _async_api_single(
                     client, resolved_model_id, msg_list, max_new_tokens, temperature,
                     extra_body=extra_body,
+                    universal_backup_model=resolved_backup,
                 )
 
         tasks = [_bounded(msg_list) for msg_list in messages]
@@ -252,6 +282,7 @@ def batch_generate(
     prefer_nitro: bool = False,
     max_concurrent: int = 16,
     extra_body: Optional[Dict] = None,
+    universal_backup_model: Optional[str] = None,
 ) -> Tuple[List[str], List[str]]:
     """Generate text from a list of message dicts.
 
@@ -290,6 +321,7 @@ def batch_generate(
             prefer_nitro=prefer_nitro,
             max_concurrent=max_concurrent,
             extra_body=extra_body,
+            universal_backup_model=universal_backup_model,
         )
 
     input_ids, input_strs = encode_for_generation(
@@ -334,6 +366,7 @@ async def async_summarize_single_topic(
     verbose: bool = False,
     client_kwargs: Optional[Dict] = None,
     prefer_nitro: bool = False,
+    universal_backup_model: Optional[str] = None,
 ) -> Tuple[str, Optional[str], Optional[str]]:
     """
     Async function to summarize a single topic.
@@ -360,6 +393,7 @@ async def async_summarize_single_topic(
             temperature=0.6,
             prefer_nitro=prefer_nitro,
             extra_body=REASONING_DISABLED,
+            universal_backup_model=universal_backup_model,
         )
         summary = summary.strip()
 
@@ -385,6 +419,7 @@ async def async_batch_summarize_topics(
     verbose: bool = False,
     client_kwargs: Optional[Dict] = None,
     prefer_nitro: bool = False,
+    universal_backup_model: Optional[str] = None,
 ) -> List[Tuple[str, Optional[str], Optional[str]]]:
     """
     Batch summarize multiple topics concurrently with rate limiting.
@@ -413,6 +448,7 @@ async def async_batch_summarize_topics(
                 verbose,
                 client_kwargs=client_kwargs,
                 prefer_nitro=prefer_nitro,
+                universal_backup_model=universal_backup_model,
             )
 
     # Create tasks for all topics

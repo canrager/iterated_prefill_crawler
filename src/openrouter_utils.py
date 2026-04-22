@@ -45,6 +45,7 @@ async def async_query_openrouter(
     prefer_nitro: bool = False,
     extra_body: Optional[Dict] = None,
     return_usage: bool = False,
+    universal_backup_model: Optional[str] = None,
 ) -> Union[str, tuple]:
     """Query any model via an OpenAI-compatible API.
 
@@ -56,6 +57,11 @@ async def async_query_openrouter(
     string.  The token counts are zero if ``completion.usage`` is None or if
     the call fails.  All prod call sites leave *return_usage* at its default
     (False) so there are no breaking changes.
+
+    When *universal_backup_model* is provided and differs from *model_name*,
+    a timeout or retry-exhausted non-auth APIStatusError triggers a single
+    retry against the backup on the same client.  Auth/4xx config errors
+    and moderation refusals are NOT backed up.
     """
     from openai import APIStatusError, AsyncOpenAI
 
@@ -141,9 +147,41 @@ async def async_query_openrouter(
         print(
             f"API error ({resolved_model_name}) [status {e.status_code}, retries exhausted]: {e}"
         )
+        if universal_backup_model and universal_backup_model != model_name:
+            print(f"Falling back to {universal_backup_model} after status {e.status_code}")
+            return await async_query_openrouter(
+                model_name=universal_backup_model,
+                prompt=prompt,
+                assistant_prefill=assistant_prefill,
+                system_prompt=system_prompt,
+                verbose=verbose,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                client_kwargs=client_kwargs,
+                prefer_nitro=prefer_nitro,
+                extra_body=extra_body,
+                return_usage=return_usage,
+                universal_backup_model=None,
+            )
         return _return("")
     except Exception as e:
         print(f"API error ({resolved_model_name}) [retries exhausted]: {e}")
+        if universal_backup_model and universal_backup_model != model_name:
+            print(f"Falling back to {universal_backup_model} after timeout/network")
+            return await async_query_openrouter(
+                model_name=universal_backup_model,
+                prompt=prompt,
+                assistant_prefill=assistant_prefill,
+                system_prompt=system_prompt,
+                verbose=verbose,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                client_kwargs=client_kwargs,
+                prefer_nitro=prefer_nitro,
+                extra_body=extra_body,
+                return_usage=return_usage,
+                universal_backup_model=None,
+            )
         return _return("")
 
 

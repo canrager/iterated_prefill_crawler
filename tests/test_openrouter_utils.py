@@ -381,3 +381,119 @@ def test_return_usage_false_returns_bare_string():
 
     assert isinstance(result, str), "return_usage=False must return a bare string, not a tuple"
     assert result == "bare string response"
+
+
+# ---------------------------------------------------------------------------
+# universal_backup_model fallback
+# ---------------------------------------------------------------------------
+
+def test_universal_backup_fires_on_timeout():
+    """On a timeout from the primary, async_query_openrouter retries once
+    against universal_backup_model and returns its response."""
+    from src.openrouter_utils import async_query_openrouter
+    from openai import APITimeoutError as _SDKTimeout
+
+    primary_choice = MagicMock()
+    primary_choice.message.content = "primary would have said this"
+    primary_completion = MagicMock()
+    primary_completion.choices = [primary_choice]
+
+    backup_choice = MagicMock()
+    backup_choice.message.content = "backup response"
+    backup_completion = MagicMock()
+    backup_completion.choices = [backup_choice]
+    backup_completion.usage = None
+
+    call_count = {"n": 0}
+
+    async def _create(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise _SDKTimeout(request=MagicMock())
+        return backup_completion
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = _create
+
+    async def _run():
+        return await async_query_openrouter(
+            model_name="qwen/qwen3-235b-a22b-2507",
+            prompt="extract topics",
+            universal_backup_model="moonshotai/kimi-k2.5",
+        )
+
+    with patch("src.openrouter_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                result = asyncio.run(_run())
+
+    assert result == "backup response"
+    assert call_count["n"] == 2
+
+
+def test_universal_backup_not_fired_on_auth_error():
+    """403 moderation / 400 / 401 / 404 must NOT trigger the backup — these
+    are config errors, fallback would just mask the problem."""
+    from src.openrouter_utils import async_query_openrouter
+    from openai import APIStatusError as _SDKStatus
+
+    call_count = {"n": 0}
+
+    async def _create(*args, **kwargs):
+        call_count["n"] += 1
+        resp = MagicMock()
+        resp.status_code = 401
+        err = _SDKStatus("unauthorized", response=resp, body={"error": {"message": "unauth"}})
+        err.status_code = 401
+        raise err
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = _create
+
+    async def _run():
+        try:
+            return await async_query_openrouter(
+                model_name="qwen/qwen3-235b-a22b-2507",
+                prompt="extract",
+                universal_backup_model="moonshotai/kimi-k2.5",
+            )
+        except _SDKStatus:
+            return "AUTH_RAISED"
+
+    with patch("src.openrouter_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                result = asyncio.run(_run())
+
+    assert result == "AUTH_RAISED"
+    assert call_count["n"] == 1, "Auth errors must raise immediately; no backup retry"
+
+
+def test_universal_backup_noop_when_same_as_primary():
+    """If backup == primary, a timeout should NOT recurse — return empty instead."""
+    from src.openrouter_utils import async_query_openrouter
+    from openai import APITimeoutError as _SDKTimeout
+
+    call_count = {"n": 0}
+
+    async def _create(*args, **kwargs):
+        call_count["n"] += 1
+        raise _SDKTimeout(request=MagicMock())
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = _create
+
+    async def _run():
+        return await async_query_openrouter(
+            model_name="qwen/qwen3-235b-a22b-2507",
+            prompt="extract",
+            universal_backup_model="qwen/qwen3-235b-a22b-2507",  # same
+        )
+
+    with patch("src.openrouter_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                result = asyncio.run(_run())
+
+    assert result == ""
+    assert call_count["n"] == 1, "Same-model backup must not recurse"

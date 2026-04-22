@@ -97,6 +97,7 @@ class TopicFormatter:
                     provider_url_overrides=self.config.model.provider_urls,
                     prefer_nitro=self.config.model.prefer_nitro,
                     extra_body=REASONING_DISABLED,
+                    universal_backup_model=self.config.model.universal_backup_model,
                 )
             except json.JSONDecodeError as e:
                 # Recoverable: batch_generate returned malformed JSON.
@@ -169,6 +170,7 @@ class TopicFormatter:
                         client_kwargs=client_kwargs,
                         prefer_nitro=self.config.model.prefer_nitro,
                         extra_body=REASONING_DISABLED,
+                        universal_backup_model=self.config.model.universal_backup_model,
                     )
                 except Exception:
                     # Re-raise all exceptions so topic loss is visible.
@@ -262,6 +264,7 @@ class TopicFormatter:
             provider_url_overrides=self.config.model.provider_urls,
             prefer_nitro=self.config.model.prefer_nitro,
             extra_body=REASONING_DISABLED,
+            universal_backup_model=self.config.model.universal_backup_model,
         )
         # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
         translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
@@ -294,6 +297,7 @@ class TopicFormatter:
             provider_url_overrides=self.config.model.provider_urls,
             prefer_nitro=self.config.model.prefer_nitro,
             extra_body=REASONING_DISABLED,
+            universal_backup_model=self.config.model.universal_backup_model,
         )
         # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
         translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
@@ -620,6 +624,7 @@ class TopicFormatter:
                     provider_url_overrides=self.config.model.provider_urls,
                     prefer_nitro=self.config.model.prefer_nitro,
                     extra_body=REASONING_DISABLED,
+                    universal_backup_model=self.config.model.universal_backup_model,
                 )
 
                 # Extract summaries (strip whitespace)
@@ -682,6 +687,7 @@ class TopicFormatter:
                         verbose=verbose,
                         client_kwargs=summ_client_kwargs,
                         prefer_nitro=self.config.model.prefer_nitro,
+                        universal_backup_model=self.config.model.universal_backup_model,
                     )
                 )
 

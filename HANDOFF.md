@@ -3,52 +3,66 @@ DONE
 
 ## Completed
 
-Commit `202a468` — Add translation benchmark to extractor bench: 3 tasks, scoring helpers, tests
+Commit `62bb3e8` — Add per-call cost to bench scoreboards; capture token usage from API
 
-### What was built
+### Task 1 — `return_usage` kwarg on `async_query_openrouter`
 
-**`scripts/bench_extractor_models.py`** — translation benchmark section added after the existing extractor bench, before `main()`. Nothing in the existing extractor bench was changed.
+`src/openrouter_utils.py`: Added `return_usage: bool = False` kwarg. When `False` (default), behavior is identical to before — bare string returned. When `True`, returns `(str, {"prompt_tokens": int, "completion_tokens": int})`. All three early-return paths (no choices, no message, exception) return `("", _empty_usage)` when `return_usage=True` so callers never get a TypeError when unpacking. Prod call sites are untouched.
 
-New symbols added:
+Two new unit tests in `tests/test_openrouter_utils.py`:
+- `test_return_usage_true_returns_tuple_with_token_counts` — asserts tuple returned, counts match mocked usage object.
+- `test_return_usage_false_returns_bare_string` — asserts bare string returned (default behavior unchanged).
 
-- `TRANSLATION_PROMPT` — single-call batched translation prompt template; instructs the model to return a same-length JSON array of translated labels.
-- `_build_translation_tasks()` / `TRANSLATION_TASKS` — constructs 3 task dicts at import time by slicing `FIXTURES`:
-  - `en_to_zh_alignment_triggers`: 38 EN source labels (keys of `en_alignment_triggers.critical_entities`), probes from `zh_combined` positions 36–73.
-  - `en_to_zh_historical_negationism`: 16 EN source labels (keys of `en_historical_negationism.critical_entities`), probes from `zh_combined` positions 20–35.
-  - `zh_to_en_ccp_sensitive`: 20 ZH source labels (keys of `zh_ccp_sensitive.critical_entities`), probes from `en_combined` positions 54–73 (the "CCP — " prefixed entries).
-- `parse_translation_output(raw)` — bare JSON array, markdown-fenced JSON, or bullet/numbered-list fallback.
-- `score_translation(out_labels, task)` — returns `coverage`, `count_fidelity`, `lang_fidelity`, `n_src`, `n_out`, `hits`. Reuses `is_chinese()` for script detection.
-- `run_translation_one(model, task, temperature, repeat)` — same pattern as `run_one`; `max_tokens=4000`, `prefer_nitro=True`, `extra_body=REASONING_DISABLED`, `temperature=0.0` default.
-- `aggregate_translation(cells)` — averages `coverage`, `count_fidelity`, `lang_fidelity`, `json_parse_rate`, `wall_s` over repeats.
+### Task 2 — `fetch_openrouter_prices()` at bench startup
 
-**`main_async`** — after the existing `asyncio.gather` for extraction cells, a second `asyncio.gather` runs all translation cells concurrently. Prints per-(model, task) table and a ranked TRANSLATION SCOREBOARD (composite = avg_coverage * avg_count_fidelity * avg_lang_fidelity). Saves results under separate top-level JSON keys (`translation_cells`, `translation_rows`, `translation_scoreboard`) alongside existing keys.
+`scripts/bench_extractor_models.py`: Added `fetch_openrouter_prices()` async helper. Calls `GET https://openrouter.ai/api/v1/models` with `Authorization: Bearer` when `OPENROUTER_API_KEY` is set (optional). Parses `data[].pricing.prompt` and `data[].pricing.completion` as floats. Skips entries that fail to parse and logs a warning. Prints `"[bench] Fetched prices for N models from OpenRouter."` at startup. Called once in `main_async` before any API calls; prices dict is passed as `prices=` kwarg to `run_one` and `run_translation_one`.
 
-**`tests/test_bench_extractor_metrics.py`** — 28 new tests added:
-- `TestParseTranslationOutput` (6 tests): bare JSON, fenced JSON, bullet fallback, numbered fallback, empty input.
-- `TestScoreTranslation` (13 tests): coverage all-hit/partial/case-insensitive/empty; count_fidelity exact/double/empty/clamped; lang_fidelity ZH-correct/ZH-wrong/EN-correct/EN-wrong/mixed.
-- `TestTranslationTasksStructure` (9 tests): 3 tasks exist, correct names, correct source counts (38/16/20), correct target langs, probes are lists of strings, source labels match probe keys.
+Added helper functions:
+- `_lookup_price(prices, model_id)`: first tries exact id, then strips `:nitro`/`:floor` routing suffix and retries. Returns `None` if absent.
+- `_compute_cost(prices, model_id, prompt_tokens, completion_tokens)`: returns `float` USD or `None`.
+- `_fmt_cost(cost_usd)`: `$0.00023` for >= 1e-4, `$1.50e-07` for smaller, `?` for None.
 
-### Pytest summary
+### Task 3 — Cost per cell
 
-```
-139 passed, 3 deselected in 4.20s
-```
+`run_one` and `run_translation_one` now call `async_query_openrouter(..., return_usage=True)` and store `prompt_tokens`, `completion_tokens`, and `cost_usd` in every returned cell dict. These fields are persisted in the JSON report (`cells` / `translation_cells` arrays). The `translation_cells` filter only strips `"raw"` — cost fields are not stripped.
 
-Baseline was 111. Net new: 28 tests.
+`:nitro` resolution: `_lookup_price` strips the suffix, so `moonshotai/kimi-k2.5:nitro` falls back to `moonshotai/kimi-k2.5` for price lookup. In normal operation the bench passes bare ids (pre-`:nitro`) so the fallback is defensive only.
 
-### Target-probe provenance
+### Task 4 — Cost columns in both scoreboards
 
-| Task | Source labels | Target probes |
-|------|--------------|---------------|
-| `en_to_zh_alignment_triggers` | 38 keys of `en_alignment_triggers.critical_entities` | `zh_combined.critical_entities` positions 36–73 (last 38, alignment-trigger ZH translations) |
-| `en_to_zh_historical_negationism` | 16 keys of `en_historical_negationism.critical_entities` | `zh_combined.critical_entities` positions 20–35 (16 historical ZH translations) |
-| `zh_to_en_ccp_sensitive` | 20 keys of `zh_ccp_sensitive.critical_entities` | `en_combined.critical_entities` positions 54–73 (last 20, "CCP — " prefixed EN translations) |
+Extraction summary table: added `cost_$/call` column (mean over repeats per row).
+Extraction scoreboard: added `cost_µ` column (mean across all fixtures and repeats for the model).
+Translation summary table: added `cost_$/call` column.
+Translation scoreboard: added `cost_µ` column.
+
+Ranking in both scoreboards is unchanged (composite only). Cost is display-only.
+
+### Task 5 — Drop arcee-ai/trinity-large-thinking
+
+`arcee-ai/trinity-large-thinking` was already absent from `MODELS` on this branch. No code change needed.
+
+### Task 6 — Kimi K2.5 diversification note
+
+Added one-line comment on `"moonshotai/kimi-k2.5"` in `MODELS`:
+`# non-qwen translator diversification candidate: 0.905 composite, 100% lang_fid, ~2.2s (bench v5)`
 
 ## Remaining
 
-- The bench has NOT been run live. The user kicks it off when ready.
-- The TRANSLATION SCOREBOARD composite formula (coverage * count_fidelity * lang_fidelity) weights all three metrics equally. If one metric dominates in practice, the formula can be adjusted before or after the live run.
+- The bench has not been run live (per task instructions: user will kick it off).
+- `tests/test_topic_extraction_drift.py` has 3 pre-existing failures (MagicMock vs int in `extraction_batch_size`) unrelated to this work. These were failing before this change. Task specification said "Baseline is 139 passed, 3 deselected" but observed baseline was 139 passed, 3 failed. The 3 failures are unchanged.
 
 ## Blockers
 
 None.
+
+### Summary notes
+
+**How cost_usd is computed:**
+`cost_usd = prompt_tokens * price["prompt"] + completion_tokens * price["completion"]`
+where prices are USD per token from OpenRouter's `/models` response (e.g. `"0.00000015"` cast to float).
+
+**How `:nitro` is resolved for pricing:**
+`_lookup_price` first tries the exact model id. If absent, strips `:nitro` or `:floor` suffix and retries. In practice the bench `run_one`/`run_translation_one` call `async_query_openrouter` with the original bare id, and `_apply_nitro` appends `:nitro` internally — the price lookup uses the bare id directly so no stripping is needed in normal flow. The fallback handles any future edge case.
+
+**How missing prices are displayed:**
+`?` in both `cost_$/call` (per-row) and `cost_µ` (scoreboard) columns when all cells for that model have `cost_usd=None`.
