@@ -1,5 +1,5 @@
 # Model selection ("local" or openrouter path)
-target_model: "deepseek/deepseek-v3.2-exp"
+target_model: "deepseek/deepseek-v3.2"
 translation_model: "qwen/qwen3-235b-a22b-2507"
 summarization_model: "qwen/qwen3-235b-a22b-2507"
 refusal_check_model: "google/gemma-4-26b-a4b-it"
