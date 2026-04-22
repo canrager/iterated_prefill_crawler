@@ -92,6 +92,16 @@ API_MODERATION_SENTINEL = "__API_MODERATION_REFUSED__"
 # Backward-compatible alias
 OPENROUTER_MODERATION_SENTINEL = API_MODERATION_SENTINEL
 
+# Re-export the call-failure sentinel from openrouter_utils (defined there to
+# avoid circular imports with the low-level API call path). Distinct from "",
+# which means "the provider returned a valid but empty response".
+from src.openrouter_utils import API_CALL_FAILED_SENTINEL  # noqa: E402
+
+
+def _is_failure_sentinel(text) -> bool:
+    """Return True if *text* is the call-failure sentinel."""
+    return isinstance(text, str) and text == API_CALL_FAILED_SENTINEL
+
 
 async def _async_api_single(
     client,
@@ -121,7 +131,7 @@ async def _async_api_single(
         )
         return ""
 
-    async def _fallback_or_empty(reason: str) -> str:
+    async def _fallback_or_sentinel(reason: str) -> str:
         if universal_backup_model and universal_backup_model != model_name:
             print(f"Falling back to {universal_backup_model} after {reason} on {model_name}")
             return await _async_api_single(
@@ -133,7 +143,7 @@ async def _async_api_single(
                 extra_body=extra_body,
                 universal_backup_model=None,  # no recursion
             )
-        return ""
+        return API_CALL_FAILED_SENTINEL
 
     try:
         completion = await client.chat.completions.create(
@@ -173,15 +183,17 @@ async def _async_api_single(
         if e.status_code in (400, 401, 403, 404):
             raise
         # For other status errors (the openai SDK already retried 429/5xx),
-        # log loudly and try the universal backup if available.
+        # log loudly and try the universal backup if available. When both
+        # primary and backup exhaust, return the failure sentinel so callers
+        # can distinguish "infrastructure failed" from "model returned empty".
         print(
             f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
         )
-        return await _fallback_or_empty(f"status {e.status_code}")
+        return await _fallback_or_sentinel(f"status {e.status_code}")
     except Exception as e:
         # Network errors, timeouts, etc. — the SDK already retried these.
         print(f"API error ({model_name}) [retries exhausted]: {e}")
-        return await _fallback_or_empty("timeout/network")
+        return await _fallback_or_sentinel("timeout/network")
 
 
 def _api_batch_generate(
@@ -396,6 +408,15 @@ async def async_summarize_single_topic(
             universal_backup_model=universal_backup_model,
         )
         summary = summary.strip()
+
+        # Distinguish "API call failed" from "model returned valid but empty".
+        # A failed call should NOT silently fall back to topic.shortened --
+        # that is reserved for actual timeouts. Instead surface the failure
+        # so the caller can decide to skip or retry.
+        if _is_failure_sentinel(summary):
+            error_msg = f"API call failed while summarizing topic '{topic_raw}'"
+            print(error_msg)
+            return (topic_raw, None, error_msg)
 
         if verbose:
             print(f"Summarized topic:")

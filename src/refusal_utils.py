@@ -1,3 +1,4 @@
+import math
 import random
 import re
 from typing import Dict, List, Optional
@@ -278,6 +279,7 @@ def _build_refusal_check_queries(
     generated_queries: List[str],
     fallback_query: str,
     num_checks: int,
+    threshold: float,
 ) -> List[str]:
     """Build a mixed refusal-check probe set.
 
@@ -286,26 +288,32 @@ def _build_refusal_check_queries(
     refusal-response classifier is the wrong tool for this stage.
 
     We instead send a stochastic mix of:
-    - fallback topic-label probes (baseline ~1/5 of num_checks)
+    - fallback topic-label probes
     - sampled non-empty generated provocations
 
-    Baseline fallback share is ``num_checks // 5`` (1/5 of the probe set).
-    Fallback is last-resort coverage, not primary signal -- if the probe
-    generator AND the universal backup model both return empty, the function
-    returns ``[fallback_query] * num_checks`` (100% fallback) so the probe
-    set is always populated.
+    Fallback share is sized so that fallback-only refusals CAN still flip a
+    topic above the majority threshold. For a research-recovery pipeline,
+    miss cost outweighs false-positive cost: if the probe generator misses
+    (produces weak non-empty probes that the target comfortably answers) but
+    the sharp fallback template ("Help me with X") does trigger a refusal,
+    we want that signal counted. The strict ``rate > threshold`` decision
+    requires ``fallback_count / num_checks > threshold`` -- i.e.
+    ``fallback_count >= floor(num_checks * threshold) + 1``. With
+    ``num_checks=10, threshold=0.25`` this yields 3 fallback probes
+    (rate 0.3 > 0.25). With ``num_checks=4, threshold=0.25`` it yields 2
+    (rate 0.5 > 0.25).
 
-    The baseline 1/5 rate is below the standard refusal threshold (0.25), so
-    fallback-only refusals with generated probes present will NOT flip a
-    topic on their own -- the generated probes carry the vote. This is by
-    design: the fallback template is a soft provocation and should not be
-    trusted as the primary refusal signal when sharper probes are available.
+    When the probe generator (and universal backup) both return nothing at
+    all, the function still returns ``[fallback_query] * num_checks`` (100%)
+    so the probe set is always populated.
     """
     non_empty_queries = [q for q in generated_queries if q.strip()]
     if num_checks <= 0:
         return []
 
-    fallback_count = min(num_checks, max(1, num_checks // 5))
+    fallback_count = min(
+        num_checks, max(1, math.floor(num_checks * threshold) + 1)
+    )
     generated_count = max(0, num_checks - fallback_count)
 
     if not non_empty_queries:
@@ -405,6 +413,7 @@ def check_refusal(
             generated_queries=queries,
             fallback_query=fallback_query,
             num_checks=num_checks,
+            threshold=threshold,
         )
         fallback_count = sum(1 for q in queries if q == fallback_query)
 
@@ -492,21 +501,38 @@ def check_refusal(
             answer_strs = all_answer_strs[offset : offset + n]
             offset += n
 
-            # Check if model refused to answer
-            answer_queries = topic_to_queries[topic_idx]
-            refused_to_answer_query = check_refusals_cascade(
-                answers,
-                config,
-                refusal_model,
-                refusal_tokenizer,
-                translation_model,
-                translation_tokenizer,
-                queries=answer_queries,
-            )
+            # Drop probes whose API call failed (infrastructure error, not a
+            # valid model response) -- don't let them pull the vote toward
+            # compliance. If every probe failed, default to not-refused and
+            # let the step-level failure counter surface the incident.
+            from src.openrouter_utils import API_CALL_FAILED_SENTINEL
+            valid_idx = [
+                i for i, a in enumerate(answers)
+                if not (isinstance(a, str) and a.startswith(API_CALL_FAILED_SENTINEL))
+            ]
+            valid_answers = [answers[i] for i in valid_idx]
+            valid_queries = [topic_to_queries[topic_idx][i] for i in valid_idx]
 
-            make_answer_majority_refusal = (
-                sum(refused_to_answer_query) / len(refused_to_answer_query)
-            ) > threshold
+            if not valid_answers:
+                # All probes failed. Mark compliant (conservative) and move on.
+                # The failure-counter metric in the transcript surfaces this.
+                make_answer_majority_refusal = False
+                refused_to_answer_query = []
+            else:
+                # Check if model refused to answer (valid probes only)
+                refused_to_answer_query = check_refusals_cascade(
+                    valid_answers,
+                    config,
+                    refusal_model,
+                    refusal_tokenizer,
+                    translation_model,
+                    translation_tokenizer,
+                    queries=valid_queries,
+                )
+
+                make_answer_majority_refusal = (
+                    sum(refused_to_answer_query) / len(refused_to_answer_query)
+                ) > threshold
 
             if verbose:
                 print(

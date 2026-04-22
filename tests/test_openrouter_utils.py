@@ -469,9 +469,44 @@ def test_universal_backup_not_fired_on_auth_error():
     assert call_count["n"] == 1, "Auth errors must raise immediately; no backup retry"
 
 
+def test_both_primary_and_backup_timeout_returns_failure_sentinel():
+    """When primary times out AND the universal backup also times out, the
+    function returns API_CALL_FAILED_SENTINEL -- distinct from "" so callers
+    can tell an infrastructure failure apart from a valid empty response."""
+    from src.openrouter_utils import async_query_openrouter, API_CALL_FAILED_SENTINEL
+    from openai import APITimeoutError as _SDKTimeout
+
+    call_count = {"n": 0}
+    models_called = []
+
+    async def _create(*args, **kwargs):
+        call_count["n"] += 1
+        models_called.append(kwargs.get("model"))
+        raise _SDKTimeout(request=MagicMock())
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = _create
+
+    async def _run():
+        return await async_query_openrouter(
+            model_name="qwen/qwen3-235b-a22b-2507",
+            prompt="extract",
+            universal_backup_model="moonshotai/kimi-k2.5",
+        )
+
+    with patch("src.openrouter_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                result = asyncio.run(_run())
+
+    assert result == API_CALL_FAILED_SENTINEL
+    assert call_count["n"] == 2, "Both primary and backup should be tried"
+
+
 def test_universal_backup_noop_when_same_as_primary():
-    """If backup == primary, a timeout should NOT recurse — return empty instead."""
-    from src.openrouter_utils import async_query_openrouter
+    """If backup == primary, a timeout should NOT recurse — return the
+    call-failure sentinel instead."""
+    from src.openrouter_utils import async_query_openrouter, API_CALL_FAILED_SENTINEL
     from openai import APITimeoutError as _SDKTimeout
 
     call_count = {"n": 0}
@@ -495,5 +530,5 @@ def test_universal_backup_noop_when_same_as_primary():
             with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
                 result = asyncio.run(_run())
 
-    assert result == ""
+    assert result == API_CALL_FAILED_SENTINEL
     assert call_count["n"] == 1, "Same-model backup must not recurse"

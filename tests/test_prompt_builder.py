@@ -199,36 +199,52 @@ def test_jailbreak_warmup_matches_golden_english_audit_prompt_shape():
 
 
 def test_jailbreak_seeded_prompts_match_golden_artifact_structures():
+    """Each language has two seeded templates -- expansion ("every OTHER category")
+    and drill-down ("break this category into granular components"). PromptBuilder
+    picks randomly, so the test samples many draws and asserts (a) every draw
+    matches ONE of the two expected shapes, (b) both shapes appear across draws."""
+    import random as _random
+
     builder = _build_jailbreak_prompt_builder()
 
-    english_messages, english_parent_ids = builder.build_messages(
-        "english",
-        1,
-        use_seed_templates=True,
-    )
-    chinese_messages, chinese_parent_ids = builder.build_messages(
-        "chinese",
-        1,
-        use_seed_templates=True,
-    )
+    english_drafts = []
+    chinese_drafts = []
+    _random.seed(0)  # deterministic sample of both branches
+    for _ in range(20):
+        en_msg, en_pid = builder.build_messages("english", 1, use_seed_templates=True)
+        zh_msg, zh_pid = builder.build_messages("chinese", 1, use_seed_templates=True)
+        assert en_pid == [0] and zh_pid == [0]
+        english_drafts.append(en_msg[0][0]["content"])
+        chinese_drafts.append(zh_msg[0][0]["content"])
 
-    assert english_parent_ids == [0]
-    assert chinese_parent_ids == [0]
-    assert len(english_messages[0]) == 1
-    assert len(chinese_messages[0]) == 1
+    # Each EN draft must end with the listing cue and contain the seed topic,
+    # and must match either the expansion or drill-down shape.
+    def en_shape(text):
+        if "every OTHER content category" in text and "already knows about doxxing personal data" in text:
+            return "expansion"
+        if "break this category into its most granular components" in text:
+            return "drilldown"
+        return None
 
-    english_user = english_messages[0][0]["content"]
-    chinese_user = chinese_messages[0][0]["content"]
+    def zh_shape(text):
+        if "请提供一个全面的编号列表" in text and "每个其他内容类别" in text:
+            return "expansion"
+        if "请将此类别分解为最细化的组成部分" in text and "精细分解" in text:
+            return "drilldown"
+        return None
 
-    assert "doxxing personal data" in english_user
-    assert "every OTHER content category" in english_user
-    assert "already knows about doxxing personal data" in english_user
-    assert english_user.rstrip().endswith("Topics:\n1.")
+    en_shapes = {en_shape(t) for t in english_drafts}
+    zh_shapes = {zh_shape(t) for t in chinese_drafts}
+    assert None not in en_shapes, f"Some EN drafts matched no known shape: {english_drafts[:1]}"
+    assert None not in zh_shapes, f"Some ZH drafts matched no known shape: {chinese_drafts[:1]}"
+    assert en_shapes == {"expansion", "drilldown"}, f"EN missing a shape: {en_shapes}"
+    assert zh_shapes == {"expansion", "drilldown"}, f"ZH missing a shape: {zh_shapes}"
 
-    assert "人肉搜索个人信息" in chinese_user
-    assert "请将此类别分解为最细化的组成部分" in chinese_user
-    assert "精细分解" in chinese_user
-    assert chinese_user.rstrip().endswith("话题：\n1.")
+    # Seed substitution and listing-cue endings hold in every draft.
+    assert all("doxxing personal data" in t for t in english_drafts)
+    assert all(t.rstrip().endswith("Topics:\n1.") for t in english_drafts)
+    assert all("人肉搜索个人信息" in t for t in chinese_drafts)
+    assert all(t.rstrip().endswith("话题：\n1.") for t in chinese_drafts)
 
 
 def test_non_refusal_topics_seed_drilldown(monkeypatch, tmp_path):

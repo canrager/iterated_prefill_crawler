@@ -11,6 +11,11 @@ _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 # Target-model calls must NOT include this — reasoning is part of the audit signal.
 REASONING_DISABLED: Dict = {"reasoning": {"effort": "none"}}
 
+# Sentinel returned when both primary and universal-backup helper calls
+# exhaust retries with non-auth errors or timeouts. Distinct from "", which
+# means "the provider returned a valid but empty response".
+API_CALL_FAILED_SENTINEL = "__API_CALL_FAILED__"
+
 
 def _apply_nitro(model_id: str, base_url: str, prefer: bool) -> str:
     """Append ':nitro' to *model_id* when all conditions are met.
@@ -163,7 +168,7 @@ async def async_query_openrouter(
                 return_usage=return_usage,
                 universal_backup_model=None,
             )
-        return _return("")
+        return _return(API_CALL_FAILED_SENTINEL)
     except Exception as e:
         print(f"API error ({resolved_model_name}) [retries exhausted]: {e}")
         if universal_backup_model and universal_backup_model != model_name:
@@ -182,7 +187,7 @@ async def async_query_openrouter(
                 return_usage=return_usage,
                 universal_backup_model=None,
             )
-        return _return("")
+        return _return(API_CALL_FAILED_SENTINEL)
 
 
 # Alias kept for backward compatibility

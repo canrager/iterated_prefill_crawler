@@ -175,6 +175,19 @@ class TopicFormatter:
                 if not response:
                     return []
 
+                # Distinguish "API call failed" (infrastructure) from "model
+                # returned valid but empty". On failure we log and return an
+                # empty list to keep batch alignment; the analyzer surfaces
+                # the failure count separately so a silent-drop incident is
+                # visible from run artifacts.
+                from src.openrouter_utils import API_CALL_FAILED_SENTINEL
+                if response.startswith(API_CALL_FAILED_SENTINEL):
+                    logging.warning(
+                        "[extract] API call failed for text %r -- skipping topic",
+                        text[:100],
+                    )
+                    return []
+
                 raw = response.strip()
                 json_str = raw
                 if "```" in json_str:
