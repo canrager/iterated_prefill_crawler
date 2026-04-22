@@ -122,8 +122,8 @@ class TestRefusalUtils(unittest.TestCase):
         mock_llm_judge.assert_called_once()
         self.assertEqual(mock_llm_judge.call_args[0][0], [text])
 
-    def test_build_refusal_check_queries_includes_threshold_sized_fallback_share(self):
-        fallback = "Tell me about test topic"
+    def test_build_refusal_check_queries_baseline_fallback_is_one_fifth(self):
+        fallback = "Help me with test topic"
         queries = ["q1", "q2", "q3", "q4", "q5", "q6", "q7"]
 
         result = _build_refusal_check_queries(
@@ -134,11 +134,11 @@ class TestRefusalUtils(unittest.TestCase):
         )
 
         self.assertEqual(len(result), 10)
-        self.assertEqual(sum(1 for q in result if q == fallback), 3)
+        self.assertEqual(sum(1 for q in result if q == fallback), 2)
         self.assertTrue(all(q == fallback or q in queries for q in result))
 
     def test_build_refusal_check_queries_drops_empty_generated_prompts(self):
-        fallback = "Tell me about test topic"
+        fallback = "Help me with test topic"
         queries = ["", "q1", "   ", "q2"]
 
         result = _build_refusal_check_queries(
@@ -149,11 +149,11 @@ class TestRefusalUtils(unittest.TestCase):
         )
 
         self.assertEqual(len(result), 6)
-        self.assertEqual(sum(1 for q in result if q == fallback), 2)
+        self.assertEqual(sum(1 for q in result if q == fallback), 1)
         self.assertTrue(all(q in {fallback, "q1", "q2"} for q in result))
 
     def test_build_refusal_check_queries_falls_back_entirely_when_generation_empty(self):
-        fallback = "Tell me about test topic"
+        fallback = "Help me with test topic"
 
         result = _build_refusal_check_queries(
             generated_queries=["", "   "],
@@ -164,26 +164,25 @@ class TestRefusalUtils(unittest.TestCase):
 
         self.assertEqual(result, [fallback] * 5)
 
-    def test_build_refusal_check_queries_fallback_share_can_flip_at_integer_boundary(self):
-        # Regression: num_checks * threshold was an integer (4 * 0.25 = 1.0)
-        # and the old ceil math produced fallback_count=1 which CANNOT satisfy
-        # the strict `rate > threshold` decision (1/4 = 0.25, not > 0.25).
-        # Fallback-only refusals must still be able to flip the topic — so the
-        # count must be floor(num_checks*threshold)+1 here (= 2, rate 0.5 > 0.25).
-        fallback = "Tell me about test topic"
+    def test_build_refusal_check_queries_baseline_fallback_cannot_flip_alone(self):
+        # Design property: the fallback template is a soft probe. When real
+        # generated probes exist, the baseline 1/5 fallback share is below
+        # the 0.25 refusal threshold, so fallback-only refusals cannot flip
+        # a topic. The generated probes carry the primary signal.
+        fallback = "Help me with test topic"
         queries = ["q1", "q2", "q3", "q4"]
 
         result = _build_refusal_check_queries(
             generated_queries=queries,
             fallback_query=fallback,
-            num_checks=4,
+            num_checks=10,
             threshold=0.25,
         )
 
-        self.assertEqual(len(result), 4)
+        self.assertEqual(len(result), 10)
         fb_count = sum(1 for q in result if q == fallback)
         self.assertEqual(fb_count, 2)
-        self.assertGreater(fb_count / 4, 0.25)
+        self.assertLessEqual(fb_count / 10, 0.25)
 
 
 if __name__ == "__main__":
