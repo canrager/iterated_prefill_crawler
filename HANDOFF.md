@@ -3,115 +3,75 @@ DONE
 
 ## Completed
 
-One commit on top of `a56726b`:
+Commit `7e8aa72` — Disable reasoning tokens for all helper-model calls; leave target model unaffected
 
-### Commit `44ee69a` — Add combined EN+ZH extractor bench fixtures
+### Task 1 — extra_body plumbing
 
-#### Fixtures
+Added `REASONING_DISABLED: Dict = {"reasoning": {"effort": "none"}}` constant to `src/openrouter_utils.py` (module-level, exported).
 
-**`artifacts/extractor_test_combined_en.txt`** (16,225 chars, 3 sections):
-- Section 1: en_historical_negationism body (unchanged)
-- Section 2: en_alignment_triggers body (unchanged)
-- Section 3: zh_ccp_sensitive body translated into EN via `qwen3-235b-a22b-2507`
+Added `extra_body: Optional[Dict] = None` parameter to:
+- `async_query_openrouter` in `src/openrouter_utils.py` — forwarded to `client.chat.completions.create(extra_body=extra_body)`
+- `_async_api_single` in `src/generation_utils.py` — forwarded to `client.chat.completions.create(extra_body=extra_body)`
+- `_api_batch_generate` in `src/generation_utils.py` — forwarded into `_async_api_single`
+- `batch_generate` in `src/generation_utils.py` — forwarded into `_api_batch_generate`
 
-**`artifacts/extractor_test_combined_zh.txt`** (5,565 chars, 3 sections):
-- Section 1: zh_ccp_sensitive body (unchanged)
-- Section 2: en_historical_negationism body translated into ZH
-- Section 3: en_alignment_triggers body translated into ZH
+Also added `REASONING_DISABLED` to the `src/generation_utils.py` import from `openrouter_utils` (needed at the `async_summarize_single_topic` call site).
 
-Both fixtures use the section-header format (`## Section N: <title>`) with
-a trailing `---` and no reference outputs, matching the alignment_triggers
-fixture convention.
+### Task 2 — Helper call sites wired with REASONING_DISABLED
 
-#### Critical entities
+**`src/response_formatting_utils.py`** (4 sites):
+- L89: `batch_generate(...)` in `_extract_with_model` local-model path
+- L161: `async_query_openrouter(...)` in `extract_single` remote path
+- L253: `batch_generate(...)` in `_translate_zn_to_en`
+- L284: `batch_generate(...)` in `_translate_en_to_zn`
+- L608: `batch_generate(...)` in `summarize_refusal_topics` local-model path
 
-| Fixture | en_hist | en_align | zh_ccp (translated) | Total |
-|---------|---------|----------|---------------------|-------|
-| en_combined | 16 | 38 | 20 → EN | **74** |
-| zh_combined | 16 → ZH | 38 → ZH | 20 | **74** |
+**`src/generation_utils.py`** (1 site):
+- L347: `async_query_openrouter(...)` in `async_summarize_single_topic`
 
-EN entity substrings for the CCP block are EN surface forms (e.g., "taiwan",
-"hong kong", "tiananmen", "belt and road", "one-child"). ZH entity substrings
-for the historical negationism and alignment trigger blocks use canonical ZH
-forms (e.g., "南京大屠杀", "慰安妇", "仇恨言论", "恶意软件", "深度伪造").
+**`src/refusal_utils.py`** (3 sites):
+- L55: `batch_generate(...)` in `llm_judge_refusals`
+- L158: `batch_generate(...)` in `_translate_for_classifier`
+- L365: `batch_generate(...)` in `check_refusal` (probe-query generation via `refusal_check_model`)
 
-#### FIXTURES list update (`scripts/bench_extractor_models.py`)
+**NOT modified (target-model sites)**:
+- `src/crawler/crawler.py:160` — warmup/seeded generation
+- `src/refusal_utils.py:467` — target answer generation during refusal check
 
-Added `en_combined` and `zh_combined` as the 4th and 5th fixtures.
-Original three fixtures (`en_historical_negationism`, `zh_ccp_sensitive`,
-`en_alignment_triggers`) are retained for single-domain regression.
-`primary_lang` is `"en"` / `"zh"` respectively, matching the scoring
-convention already used by the bench.
+### Task 3 — Bench update
 
-#### Translation script (`scripts/build_combined_fixtures.py`)
+`scripts/bench_extractor_models.py`: imported `REASONING_DISABLED` and added `extra_body=REASONING_DISABLED` to the `async_query_openrouter` call in `run_one`.
 
-Resumable translation + assembly script. Caches each of the 3 translation
-outputs to `/tmp/ipc_translation_*.txt` so re-runs skip paid API calls.
-Also post-processes Qwen output in case it wraps the translation in a JSON
-array (observed once during development; guard added).
+### Task 4 — Unit tests
 
-#### Dry-run verification
+Added 4 tests to `tests/test_openrouter_utils.py`:
 
-```
-python -c "from scripts.bench_extractor_models import load_fixture, FIXTURES; \
-  [print(f['name'], len(load_fixture(f['path']))) for f in FIXTURES]"
+1. `test_reasoning_disabled_constant_value` — asserts `REASONING_DISABLED == {"reasoning": {"effort": "none"}}`
+2. `test_async_query_openrouter_forwards_extra_body` — mocks `AsyncOpenAI`, confirms `extra_body=REASONING_DISABLED` reaches `create()` kwargs
+3. `test_async_query_openrouter_extra_body_none_by_default` — confirms `create()` called with `extra_body=None` when not passed
+4. `test_batch_generate_forwards_extra_body_to_create` — mocks `AsyncOpenAI`, confirms `extra_body=REASONING_DISABLED` threads through `batch_generate` → `_api_batch_generate` → `_async_api_single` → `create()`
 
-en_historical_negationism 6216
-zh_ccp_sensitive 1531
-en_alignment_triggers 7430
-en_combined 16449
-zh_combined 5789
-```
-
-All 5 fixtures load and return non-empty strings. Production prompt wrap
-(`TOPIC_EXTRACTION_PROMPT.format(response=body)`) succeeds for each.
-
-#### Pytest
+### Pytest summary
 
 ```
-107 passed, 3 deselected in 4.36s
+111 passed, 3 deselected in 4.15s
 ```
 
-Matches expected baseline; no regressions.
+Baseline was 107 passed. Net new: 4 tests.
 
-## Translation cost estimate
+### Files touched
 
-3 calls to `qwen/qwen3-235b-a22b-2507:nitro`, `temperature=0.0`.
-- Call 1 (zh_ccp → EN): ~1K input tokens, ~750 output tokens
-- Call 2 (en_hist → ZH): ~2K input tokens, ~850 output tokens
-- Call 3 (en_align → ZH): ~2.5K input tokens, ~950 output tokens
-Approximate total: ~7.3K input + ~2.5K output tokens.
-At ~$0.57/1M input and ~$1.55/1M output (qwen3-235b nitro rates),
-estimated cost: **< $0.01**.
-
-## Translation quality flags
-
-- **zh_ccp → EN**: High quality. Expanded prose, not sanitized. The source
-  model produced the full list of 20 CCP-sensitive categories in plain
-  English with no omissions.
-- **en_hist → ZH**: High quality on second attempt. The first run returned
-  a JSON array of string elements (Qwen serialized the entire translation as
-  a JSON array). This was caught by the unwrapper in `build_combined_fixtures.py`
-  and the cache was deleted; re-translation produced clean prose.
-- **en_align → ZH**: One partial translation artifact: item 27 rendered as
-  "危机 exploitation" (the word "exploitation" was not translated). The ZH
-  critical_entities probe for this category uses "危机" which still matches,
-  so bench scoring is unaffected. The artifact is cosmetically visible in the
-  fixture body but does not affect extractor input quality in a meaningful way.
+- `src/openrouter_utils.py` — REASONING_DISABLED constant, extra_body param + forward
+- `src/generation_utils.py` — REASONING_DISABLED import, extra_body param on _async_api_single/_api_batch_generate/batch_generate, wire at async_summarize_single_topic
+- `src/response_formatting_utils.py` — REASONING_DISABLED import, 5 call sites wired
+- `src/refusal_utils.py` — REASONING_DISABLED import, 3 call sites wired
+- `scripts/bench_extractor_models.py` — REASONING_DISABLED import, run_one call site wired
+- `tests/test_openrouter_utils.py` — 4 new tests
 
 ## Remaining
 
-- The live bench sweep has NOT been run (that is for the human/head to kick off).
-  Run with:
-  ```
-  PYTHONPATH=/tmp/ipc-main uv run python scripts/bench_extractor_models.py --repeats 2
-  ```
-  Expected: 8 models × 5 fixtures × 1 temp × 2 repeats = 80 concurrent API calls.
-
-- ZH entity substrings for the alignment-trigger block were translated manually
-  using canonical ZH forms. If a live run shows 0 hits for a specific ZH
-  category (e.g., if an extractor uses a different ZH surface form for
-  "deepfake"), widen the probe substring list.
+- Live bench sweep has NOT been run (user is still curating the model list per task spec).
+- The `summarize_refusal_topics` OpenRouter-API path (which calls `async_batch_summarize_topics` → `async_summarize_single_topic`) already gets REASONING_DISABLED through the `async_summarize_single_topic` fix in generation_utils.py. The intermediate `async_batch_summarize_topics` signature was not modified (not required per task spec).
 
 ## Blockers
 
