@@ -26,3 +26,4 @@ CLAUDE.md
 .trio/
 trio-agents/
 agents/
+bench.sh

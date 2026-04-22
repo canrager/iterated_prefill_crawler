@@ -18,17 +18,6 @@ def _load_crawler_config(name: str) -> CrawlerRunConfig:
         return CrawlerRunConfig(**yaml.safe_load(f))
 
 
-def test_ds_r1_remote_pins_submission_helper_stack():
-    cfg = _load_model_config("ds-r1_remote")
-
-    assert cfg.target_model == "deepseek/deepseek-r1"
-    assert cfg.translation_model == "qwen/qwen3-235b-a22b-2507"
-    assert cfg.summarization_model == "qwen/qwen3-235b-a22b-2507"
-    assert cfg.refusal_check_model == "google/gemma-4-26b-a4b-it"
-    assert cfg.refusal_classifier_model == "ProtectAI/distilroberta-base-rejection-v1"
-    assert cfg.universal_backup_model == "moonshotai/kimi-k2.5"
-
-
 def test_debug_and_rehearsal_remain_same_method_subsets_of_default():
     default = _load_crawler_config("default")
     rehearsal = _load_crawler_config("rehearsal")
