@@ -100,7 +100,7 @@ crawler.num_crawl_steps=10
 
 ```bash
 ./scripts/run.sh model=haiku crawler=default
-./scripts/run.sh model=ds-r1_remote crawler=rehearsal prompts=jailbreak
+./scripts/run.sh model=ds-v32_remote crawler=rehearsal prompts=jailbreak
 ./scripts/run.sh model=haiku crawler=debug
 ./scripts/run.sh --tmux model=local_tulu8b crawler=default crawler.num_crawl_steps=20
 ```
