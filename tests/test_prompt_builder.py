@@ -153,7 +153,10 @@ def test_crawl_uses_pre_templates_during_warmup_then_switches_to_seeded_prompts(
 
 def _load_jailbreak_prompts() -> PromptsConfig:
     """Load the real jailbreak prompt templates from configs/prompts/jailbreak.yaml."""
-    with open("configs/prompts/jailbreak.yaml") as f:
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    with open(repo_root / "configs" / "prompts" / "jailbreak.yaml") as f:
         raw = yaml.safe_load(f)
     return PromptsConfig(**raw)
 

@@ -31,6 +31,14 @@ if env_file.exists():
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
 
+# Skip the whole module if OPENROUTER_API_KEY is unavailable. These tests hit
+# the live extractor; running them without credentials would fail confusingly
+# in local or CI environments that don't carry the key.
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("OPENROUTER_API_KEY"),
+    reason="OPENROUTER_API_KEY not set; skipping live extractor integration tests",
+)
+
 from src.response_formatting_utils import TopicFormatter
 
 # Exact outputs from the contamination incident (2026-04-09 debug run)

@@ -1,4 +1,3 @@
-import math
 import random
 import re
 from typing import Dict, List, Optional
@@ -279,7 +278,6 @@ def _build_refusal_check_queries(
     generated_queries: List[str],
     fallback_query: str,
     num_checks: int,
-    threshold: float,
 ) -> List[str]:
     """Build a mixed refusal-check probe set.
 
@@ -407,7 +405,6 @@ def check_refusal(
             generated_queries=queries,
             fallback_query=fallback_query,
             num_checks=num_checks,
-            threshold=threshold,
         )
         fallback_count = sum(1 for q in queries if q == fallback_query)
 

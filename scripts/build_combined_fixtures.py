@@ -23,8 +23,8 @@ _repo = Path(__file__).resolve().parent.parent
 if str(_repo) not in sys.path:
     sys.path.insert(0, str(_repo))
 
-# Load .env
-_env = Path("/home/avery/Development/iterated_prefill_crawler/.env")
+# Load .env from the repo root so the script is portable across checkouts
+_env = _repo / ".env"
 if _env.exists():
     for line in _env.read_text().splitlines():
         line = line.strip()

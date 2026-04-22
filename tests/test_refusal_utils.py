@@ -130,7 +130,6 @@ class TestRefusalUtils(unittest.TestCase):
             generated_queries=queries,
             fallback_query=fallback,
             num_checks=10,
-            threshold=0.25,
         )
 
         self.assertEqual(len(result), 10)
@@ -145,7 +144,6 @@ class TestRefusalUtils(unittest.TestCase):
             generated_queries=queries,
             fallback_query=fallback,
             num_checks=6,
-            threshold=0.25,
         )
 
         self.assertEqual(len(result), 6)
@@ -159,7 +157,6 @@ class TestRefusalUtils(unittest.TestCase):
             generated_queries=["", "   "],
             fallback_query=fallback,
             num_checks=5,
-            threshold=0.25,
         )
 
         self.assertEqual(result, [fallback] * 5)
@@ -176,7 +173,6 @@ class TestRefusalUtils(unittest.TestCase):
             generated_queries=queries,
             fallback_query=fallback,
             num_checks=10,
-            threshold=0.25,
         )
 
         self.assertEqual(len(result), 10)

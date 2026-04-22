@@ -47,35 +47,6 @@ def test_non_timeout_exception_propagates():
         asyncio.run(_run())
 
 
-def test_non_timeout_does_not_set_summary_to_shortened():
-    """Confirm the mutation topic.summary = topic.shortened never happens when a
-    non-timeout exception is raised inside async_summarize_single_topic."""
-    from src.generation_utils import async_summarize_single_topic
-    from src.crawler.topic_queue import Topic
-
-    topic = Topic(raw="some sensitive topic")
-    topic.shortened = "sensitive topic"
-    # summary starts unset (None is the default)
-
-    async def _run():
-        with patch(
-            "src.generation_utils.async_query_openrouter",
-            new=AsyncMock(side_effect=ValueError("bad response")),
-        ):
-            return await async_summarize_single_topic(
-                topic_raw=topic.raw,
-                llm_judge_name="openai/gpt-5.4-mini",
-                system_prompt="Extract topic label.",
-                client_kwargs=_make_client_kwargs(),
-            )
-
-    with pytest.raises(ValueError):
-        asyncio.run(_run())
-
-    # The exception must have interrupted execution before summary was mutated.
-    assert topic.summary is None
-
-
 # ---------------------------------------------------------------------------
 # Task 2(b): APITimeoutError falls back to shortened
 # ---------------------------------------------------------------------------

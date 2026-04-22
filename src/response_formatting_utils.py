@@ -99,16 +99,6 @@ class TopicFormatter:
                     extra_body=REASONING_DISABLED,
                     universal_backup_model=self.config.model.universal_backup_model,
                 )
-            except json.JSONDecodeError as e:
-                # Recoverable: batch_generate returned malformed JSON.
-                # Log with full traceback and return empties — callers rely
-                # on list alignment with texts.
-                logging.exception(
-                    "[extract] local-model JSONDecodeError for batch of %d: %s",
-                    len(texts),
-                    e,
-                )
-                return [[] for _ in texts]
             except Exception:
                 logging.exception(
                     "[extract] local-model extraction failed with unexpected exception "
