@@ -21,7 +21,3 @@ multirun
 AGENTS.md
 CLAUDE.md
 .trio/
-agents/
-
-# local dev wrappers (user-specific shell helpers, not portable)
-bench.sh

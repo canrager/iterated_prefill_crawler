@@ -1,7 +1,9 @@
-"""Unit tests for the refusal-detection metric helpers in bench_extractor_models.
+"""Unit tests for the refusal-detection metric helpers in
+bench_extractor_translator_models.
 
-Tests cover: is_full_refusal, is_mid_generation_refusal, is_json_parseable.
-These are pure-function tests — no network calls.
+Tests cover: is_full_refusal, is_mid_generation_refusal, is_json_parseable,
+plus the translation-task scoring helpers.  All pure-function tests — no
+network calls.
 """
 from __future__ import annotations
 
@@ -18,8 +20,8 @@ if str(_repo) not in sys.path:
 
 # Import the helpers via importlib so we don't execute main()
 _spec = importlib.util.spec_from_file_location(
-    "bench_extractor_models",
-    _repo / "scripts" / "bench_extractor_models.py",
+    "bench_extractor_translator_models",
+    _repo / "scripts" / "bench_extractor_translator_models.py",
 )
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)

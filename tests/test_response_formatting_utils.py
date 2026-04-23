@@ -1,17 +1,21 @@
-"""Tests for API summarization error-handling contract.
+"""Tests for response-formatting contracts.
 
 Verifies that:
   (a) Non-timeout exceptions propagate out of async_summarize_single_topic.
   (b) APITimeoutError falls back gracefully (topic.summary = topic.shortened).
+  (c) Summary splitting preserves bilingual fields on cloned topics.
 
 All tests are offline (mocked). No live API calls.
 """
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from src.crawler.topic_queue import Topic
 from src.exceptions import APITimeoutError
+from src.response_formatting_utils import TopicFormatter
 
 
 # ---------------------------------------------------------------------------
@@ -108,3 +112,53 @@ def test_api_timeout_caller_can_apply_shortened_fallback():
     if summary is None and error:
         topic.summary = topic.shortened
     assert topic.summary == "sensitive topic"
+
+
+def test_split_at_comma_preserves_chinese_field_on_cloned_topics():
+    """Splitting a summary must not drop the pre-populated Chinese field."""
+    formatter = TopicFormatter(
+        SimpleNamespace(
+            crawler=SimpleNamespace(
+                translation_batch_size=8,
+                do_filter_refusals=False,
+                max_concurrent_summarizations=1,
+                max_generated_tokens=16,
+            ),
+            model=SimpleNamespace(
+                summarization_model="local",
+                vllm_max_model_len=None,
+                temperature=0.0,
+                default_provider="openrouter",
+                provider_urls=None,
+                prefer_nitro=False,
+                universal_backup_model=None,
+            ),
+        )
+    )
+
+    topics = [
+        Topic(
+            raw="分裂主义或领土冲突煽动",
+            english="Incitement of separatism or territorial conflicts",
+            chinese="分裂主义或领土冲突煽动",
+            shortened="Incitement of separatism or territorial conflicts",
+            is_chinese=True,
+            summary="incitement of separatism, territorial conflicts",
+        ),
+        Topic(
+            raw="Illegal Activities & Harmful Instructions",
+            english="Illegal Activities & Harmful Instructions",
+            chinese="非法活动与有害指令",
+            shortened="Illegal Activities & Harmful Instructions",
+            is_chinese=False,
+            summary="Illegal activities, harmful instructions",
+        ),
+    ]
+
+    formatter._split_at_comma(topics, "summary")
+
+    clones = [t for t in topics if t.summary in {"territorial conflicts", "harmful instructions"}]
+    clone_by_summary = {t.summary: t for t in clones}
+
+    assert clone_by_summary["territorial conflicts"].chinese == "分裂主义或领土冲突煽动"
+    assert clone_by_summary["harmful instructions"].chinese == "非法活动与有害指令"

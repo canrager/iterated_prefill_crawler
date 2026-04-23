@@ -191,6 +191,60 @@ def test_seed_language_balance_any_samples_uniformly():
     assert zh_drafts == {"SEED ZH EN only (zh)", "SEED ZH ZH only"}, zh_drafts
 
 
+def test_seed_sampler_skips_topics_missing_target_language_field():
+    """DEFENSIVE INVARIANT: a Topic whose target-language field is None must
+    never be eligible as a seed for that language, regardless of is_chinese.
+
+    Observed failure (run 3, 2026-04-23): `_split_at_comma` in
+    response_formatting_utils clones topics from split summaries, populating
+    .english but leaving .chinese=None. 119/772 head_refusal_topics landed in
+    that state. When one of those was sampled for a ZH drill-down prompt,
+    ``"...{}...".format(None)`` rendered the literal string "None" into the
+    seed slot and V3.2 got asked about "None", producing useless output.
+
+    This test locks the contract: _get_user_seed_candidates must filter out
+    topics whose getattr(t, lang) is None/empty even when is_chinese happens
+    to match the requested language AND even in the ``any`` balance mode
+    where match-filtering is off.
+
+    Currently EXPECTED TO FAIL -- the defensive guard isn't in
+    _get_user_seed_candidates yet. Leaving as a falsifiable baseline."""
+    queue = TopicQueue()
+    queue.incoming_batch([
+        # Two topics with is_chinese=True but .chinese=None -- the shape a
+        # split-at-comma clone produces if it was a ZH-origin parent.
+        Topic(raw="ZH null 1", english="ZH null 1 en", chinese=None,
+              summary="n1", is_head=True, is_refusal=True, is_chinese=True),
+        Topic(raw="ZH null 2", english="ZH null 2 en", chinese=None,
+              summary="n2", is_head=True, is_refusal=True, is_chinese=True),
+        # One topic with .chinese populated -- the only valid ZH seed.
+        Topic(raw="ZH valid", english="ZH valid (en)", chinese="ZH valid",
+              summary="v", is_head=True, is_refusal=True, is_chinese=True),
+    ])
+
+    for balance in ("match", "any"):
+        builder = PromptBuilder(
+            user_seed_templates={"english": ["SEED EN {}"], "chinese": ["SEED ZH {}"]},
+            user_seed_topics=queue,
+            languages=["english", "chinese"],
+            seed_language_balance=balance,
+        )
+        # Over many draws, no ZH prompt should render "None" as the seed.
+        rendered = set()
+        for _ in range(60):
+            msgs, _ = builder.build_messages("chinese", 1, use_seed_templates=True)
+            rendered.add(msgs[0][0]["content"])
+        assert "SEED ZH None" not in rendered, (
+            f"[{balance}] sampler leaked None-chinese topic into ZH seed slot: {rendered}"
+        )
+        # And the valid ZH-populated topic must be the seed in every draw
+        # when the pool has that as the only valid option under match balance.
+        if balance == "match":
+            assert rendered == {"SEED ZH ZH valid"}, (
+                f"[{balance}] expected only valid ZH seed, got: {rendered}"
+            )
+
+
 def test_crawl_uses_pre_templates_during_warmup_then_switches_to_seeded_prompts(
     monkeypatch,
     tmp_path,

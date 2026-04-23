@@ -81,7 +81,7 @@ async def fetch_openrouter_prices() -> Dict[str, Dict[str, float]]:
     """
     import httpx
 
-    headers = {"User-Agent": "bench_extractor_models/1.0"}
+    headers = {"User-Agent": "bench_extractor_translator_models/1.0"}
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
