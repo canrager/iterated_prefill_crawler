@@ -117,6 +117,15 @@ class PromptBuilder:
         unexplored = [t for t in candidates if t.id not in drilled_ids]
         pool = unexplored if unexplored else candidates
 
+        if lang is not None:
+            pool = [
+                t
+                for t in pool
+                if getattr(t, lang) is not None and str(getattr(t, lang)).strip()
+            ]
+            if not pool:
+                return []
+
         if self.seed_language_balance == "match" and lang is not None:
             want_zh = lang == "chinese"
             matched = [t for t in pool if bool(t.is_chinese) == want_zh]
