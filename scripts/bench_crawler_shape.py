@@ -5,7 +5,11 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.crawler_shape_bench import format_scoreboard_diff, run_bench
+from src.crawler_shape_bench import (
+    build_hyperparameter_grid,
+    format_scoreboard_diff,
+    run_bench,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,6 +30,14 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional scoreboard output path. Defaults to artifacts/bench/crawler_shape_<timestamp>.json.",
     )
+    parser.add_argument(
+        "--sweep-mode",
+        choices=("ofat", "factorial", "baseline"),
+        default="ofat",
+        help="ofat: baseline + one-factor-at-a-time (~9 cells, default). "
+             "factorial: full Cartesian product (144 cells, multi-hour). "
+             "baseline: single paper-2025 baseline cell.",
+    )
     return parser.parse_args()
 
 
@@ -44,7 +56,9 @@ def main() -> None:
         else Path("artifacts/bench")
         / f"crawler_shape_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json"
     )
-    scoreboard = run_bench(fixture_dir=fixture_dir, output_path=output_path)
+    grid = build_hyperparameter_grid(mode=args.sweep_mode)
+    print(f"Sweep mode: {args.sweep_mode} ({len(grid)} cells)")
+    scoreboard = run_bench(fixture_dir=fixture_dir, output_path=output_path, grid=grid)
     valid = sum(1 for cell in scoreboard["cells"] if cell["valid"])
     invalid = len(scoreboard["cells"]) - valid
     print(f"Bench scoreboard: {output_path}")

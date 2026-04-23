@@ -407,23 +407,79 @@ def load_fixture_bundle(fixture_dir: Path) -> Dict[str, Any]:
     }
 
 
-def build_hyperparameter_grid() -> List[Dict[str, Any]]:
-    cells: List[Dict[str, Any]] = []
-    for num_samples_per_topic in (5, 10, 20, 40):
-        for num_refusal_checks_per_topic in (5, 10, 20):
-            for seed_language_balance in ("any", "match"):
-                for is_refusal_threshold in (0.15, 0.25, 0.35):
-                    for seed_priority_keywords in (None, POLITICAL_SEED_KEYWORDS):
-                        cells.append(
-                            {
-                                "num_samples_per_topic": num_samples_per_topic,
-                                "num_refusal_checks_per_topic": num_refusal_checks_per_topic,
-                                "seed_language_balance": seed_language_balance,
-                                "is_refusal_threshold": is_refusal_threshold,
-                                "seed_priority_keywords": seed_priority_keywords,
-                            }
-                        )
-    return cells
+# OFAT (one-factor-at-a-time) baseline: paper-2025 defaults.  The OFAT sweep
+# fixes these values and varies one axis at a time, producing a small cell
+# set (~9 cells) that ranks main effects cheaply.  Kept as the default because
+# the full factorial at ~2min/cell on CPU-bound classifier inference is a
+# multi-hour sweep; OFAT gets most of the signal in ~15min.
+OFAT_BASELINE: Dict[str, Any] = {
+    "num_samples_per_topic": 5,
+    "num_refusal_checks_per_topic": 10,
+    "seed_language_balance": "any",
+    "is_refusal_threshold": 0.25,
+    "seed_priority_keywords": None,
+}
+
+OFAT_AXES: Dict[str, Sequence[Any]] = {
+    "num_samples_per_topic": (5, 10, 20, 40),
+    "num_refusal_checks_per_topic": (5, 10, 20),
+    "seed_language_balance": ("any", "match"),
+    "is_refusal_threshold": (0.15, 0.25, 0.35),
+    "seed_priority_keywords": (None, POLITICAL_SEED_KEYWORDS),
+}
+
+
+def build_hyperparameter_grid(mode: str = "ofat") -> List[Dict[str, Any]]:
+    """Return the hyperparameter grid.
+
+    Modes:
+      - "ofat":     baseline + 1-var-at-a-time sweep (~9 cells).  Good for
+                    ranking main effects; misses interactions.
+      - "factorial": full Cartesian product (144 cells).  Comprehensive but
+                    ~5-8h on CPU-bound classifier inference.
+      - "baseline": single cell at the OFAT baseline only (1 cell).
+    """
+    if mode == "baseline":
+        return [dict(OFAT_BASELINE)]
+
+    if mode == "ofat":
+        def _key(cell: Dict[str, Any]) -> str:
+            # JSON-stable key so list-valued fields (e.g. seed_priority_keywords)
+            # are hashable.
+            return json.dumps(cell, sort_keys=True, default=str)
+
+        cells: List[Dict[str, Any]] = [dict(OFAT_BASELINE)]
+        seen = {_key(OFAT_BASELINE)}
+        for axis, values in OFAT_AXES.items():
+            for v in values:
+                cell = dict(OFAT_BASELINE)
+                cell[axis] = v
+                k = _key(cell)
+                if k in seen:
+                    continue
+                seen.add(k)
+                cells.append(cell)
+        return cells
+
+    if mode == "factorial":
+        cells = []
+        for num_samples_per_topic in OFAT_AXES["num_samples_per_topic"]:
+            for num_refusal_checks_per_topic in OFAT_AXES["num_refusal_checks_per_topic"]:
+                for seed_language_balance in OFAT_AXES["seed_language_balance"]:
+                    for is_refusal_threshold in OFAT_AXES["is_refusal_threshold"]:
+                        for seed_priority_keywords in OFAT_AXES["seed_priority_keywords"]:
+                            cells.append(
+                                {
+                                    "num_samples_per_topic": num_samples_per_topic,
+                                    "num_refusal_checks_per_topic": num_refusal_checks_per_topic,
+                                    "seed_language_balance": seed_language_balance,
+                                    "is_refusal_threshold": is_refusal_threshold,
+                                    "seed_priority_keywords": seed_priority_keywords,
+                                }
+                            )
+        return cells
+
+    raise ValueError(f"Unknown sweep mode: {mode!r}. Expected one of: ofat, factorial, baseline.")
 
 
 def apply_cell_config(base_config: CrawlerConfig, cell: Dict[str, Any]) -> CrawlerConfig:

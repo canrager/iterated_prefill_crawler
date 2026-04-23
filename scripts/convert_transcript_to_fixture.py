@@ -55,12 +55,26 @@ def main() -> int:
     if responses_path.exists():
         responses_path.unlink()
 
-    # Copy the run's config if the sibling .json summary exists.
+    # Write a config.json matching the shape FixtureCaptureWriter.finalize
+    # produces, so load_fixture_bundle can consume it.  The crawler's own
+    # output JSON carries the live CrawlerConfig under "config" -- reuse it.
     sibling = args.transcript.with_suffix(".json")
+    crawler_config = None
     if sibling.exists():
         data = json.loads(sibling.read_text())
-        config = data.get("config") or data
-        (out_dir / "config.json").write_text(json.dumps(config, indent=2))
+        crawler_config = data.get("config") or data
+    payload = {
+        "schema_version": 1,
+        "captured_at": None,
+        "responses_path": str(responses_path),
+        "records_written": 0,  # filled in below after writing
+        "hydra_overrides": [],
+        "crawler_config": crawler_config,
+        "live_summary": {
+            "source": "converted from transcript",
+            "transcript": str(args.transcript),
+        },
+    }
 
     total_lines = 0
     skipped_call_type = 0
@@ -93,8 +107,14 @@ def main() -> int:
                 continue
             written += write_fixture_records(responses_path, records)
 
+    payload["records_written"] = written
+    (out_dir / "config.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2)
+    )
+
     print(f"Input:    {args.transcript} ({total_lines} lines)")
     print(f"Output:   {responses_path}")
+    print(f"Config:   {out_dir / 'config.json'}")
     print(f"Wrote:    {written} fixture records")
     print(f"Skipped:  {skipped_call_type} other-call-type, {skipped_shape} malformed")
     return 0
