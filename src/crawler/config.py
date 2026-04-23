@@ -251,6 +251,16 @@ class CrawlerRunConfig:
     # Bench result (2026-04-18): K=1 extracts ~2x more topics than K=3 on the
     # same corpus; Kimi K2 is attention-limited per response. Keep K=1 unless
     # a larger corpus shifts the knee; re-run scripts/bench_batch_sizes.py.
+    seed_language_balance: str = "match"
+    # When building a seeded drill-down prompt for a given language, filter
+    # seed candidates to topics whose language of origin matches (Topic.is_chinese
+    # True for Chinese, False for English). Preserves politically-framed seeds
+    # on the correct language leg: without this, a uniform sampler over ~80% ZH
+    # refusal topics can land EN-translated labels into ZH drill-down calls,
+    # diluting the ZH political axis signal. Set to "any" to disable filtering
+    # and sample uniformly from all head topics. When no candidates match the
+    # requested language the filter falls back to the full pool so no language
+    # starves.
     prompt_languages: List[str] = field(default_factory=lambda: ["english", "chinese"])
     verbose: bool = False
     output_dir: Optional[str] = None

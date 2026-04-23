@@ -36,6 +36,7 @@ class Crawler:
             assistant_post_templates=crawler_config.prompts.assistant_post_templates,
             user_seed_topics=self.queue,
             languages=crawler_config.crawler.prompt_languages,
+            seed_language_balance=crawler_config.crawler.seed_language_balance,
         )
 
         self.save_filename = save_filename

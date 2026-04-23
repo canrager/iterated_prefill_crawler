@@ -106,6 +106,91 @@ def test_build_messages_can_seed_from_non_refusal_head_topics():
     assert chinese_parent_ids == [0]
 
 
+def test_seed_language_balance_match_filters_to_native_language_topics():
+    """With seed_language_balance='match', a ZH prompt seeds only from topics
+    whose is_chinese is True, and an EN prompt seeds only from is_chinese=False
+    topics. Prevents the uniform sampler from picking an EN-origin topic as the
+    seed for a ZH drill-down when politically-framed ZH topics are available."""
+    queue = TopicQueue()
+    queue.incoming_batch([
+        Topic(raw="EN topic 1", english="EN topic 1", chinese="EN topic 1 (zh)",
+              summary="en1", is_head=True, is_refusal=True, is_chinese=False),
+        Topic(raw="EN topic 2", english="EN topic 2", chinese="EN topic 2 (zh)",
+              summary="en2", is_head=True, is_refusal=True, is_chinese=False),
+        Topic(raw="ZH topic 1", english="ZH topic 1 (en)", chinese="ZH topic 1",
+              summary="zh1", is_head=True, is_refusal=True, is_chinese=True),
+    ])
+
+    builder = PromptBuilder(
+        user_seed_templates={"english": ["SEED EN {}"], "chinese": ["SEED ZH {}"]},
+        user_seed_topics=queue,
+        languages=["english", "chinese"],
+        seed_language_balance="match",
+    )
+
+    # ZH prompt must only pick from is_chinese=True pool (one candidate here).
+    for _ in range(10):
+        msgs, _ = builder.build_messages("chinese", 1, use_seed_templates=True)
+        content = msgs[0][0]["content"]
+        assert content == "SEED ZH ZH topic 1", f"match filter broken for ZH: {content}"
+
+    # EN prompt must only pick from is_chinese=False pool (two candidates).
+    seen_en = set()
+    for _ in range(30):
+        msgs, _ = builder.build_messages("english", 1, use_seed_templates=True)
+        seen_en.add(msgs[0][0]["content"])
+    assert seen_en <= {"SEED EN EN topic 1", "SEED EN EN topic 2"}, seen_en
+    assert len(seen_en) == 2, "sampler should still visit all in-language candidates"
+
+
+def test_seed_language_balance_falls_back_when_no_native_candidates():
+    """If no topics match the requested language, the filter falls back to the
+    full pool rather than starving the language pass (important early in
+    bilingual crawls where one leg hasn't produced refusals yet)."""
+    queue = TopicQueue()
+    queue.incoming_batch([
+        Topic(raw="only EN", english="only EN", chinese="only EN (zh)",
+              summary="e", is_head=True, is_refusal=True, is_chinese=False),
+    ])
+
+    builder = PromptBuilder(
+        user_seed_templates={"english": ["SEED EN {}"], "chinese": ["SEED ZH {}"]},
+        user_seed_topics=queue,
+        languages=["english", "chinese"],
+        seed_language_balance="match",
+    )
+
+    msgs, _ = builder.build_messages("chinese", 1, use_seed_templates=True)
+    # Falls back to the EN-origin topic rendered in its chinese field.
+    assert msgs[0][0]["content"] == "SEED ZH only EN (zh)"
+
+
+def test_seed_language_balance_any_samples_uniformly():
+    """With seed_language_balance='any' (default), the sampler ignores
+    is_chinese and can pick any head topic for either language."""
+    queue = TopicQueue()
+    queue.incoming_batch([
+        Topic(raw="EN only", english="EN only", chinese="EN only (zh)",
+              summary="e", is_head=True, is_refusal=True, is_chinese=False),
+        Topic(raw="ZH only", english="ZH only (en)", chinese="ZH only",
+              summary="z", is_head=True, is_refusal=True, is_chinese=True),
+    ])
+
+    builder = PromptBuilder(
+        user_seed_templates={"english": ["SEED EN {}"], "chinese": ["SEED ZH {}"]},
+        user_seed_topics=queue,
+        languages=["english", "chinese"],
+        # "any" = don't filter
+    )
+
+    # Over many draws, ZH prompt must be able to land EITHER topic's chinese field.
+    zh_drafts = set()
+    for _ in range(50):
+        msgs, _ = builder.build_messages("chinese", 1, use_seed_templates=True)
+        zh_drafts.add(msgs[0][0]["content"])
+    assert zh_drafts == {"SEED ZH EN only (zh)", "SEED ZH ZH only"}, zh_drafts
+
+
 def test_crawl_uses_pre_templates_during_warmup_then_switches_to_seeded_prompts(
     monkeypatch,
     tmp_path,

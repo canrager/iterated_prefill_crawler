@@ -41,6 +41,7 @@ class PromptBuilder:
         user_seed_topics: TopicQueue | None = None,
         assistant_seed_topics: TopicQueue | None = None,
         languages: List[str] = ["english", "chinese"],
+        seed_language_balance: str = "any",
     ):
 
         assert user_pre_templates or user_seed_templates or user_post_templates, (
@@ -68,7 +69,13 @@ class PromptBuilder:
         self.assistant_seed_topics = assistant_seed_topics
         self.languages = languages
 
-    def _get_user_seed_candidates(self) -> List[Topic]:
+        if seed_language_balance not in ("any", "match"):
+            raise ValueError(
+                f"seed_language_balance must be 'any' or 'match', got {seed_language_balance!r}"
+            )
+        self.seed_language_balance = seed_language_balance
+
+    def _get_user_seed_candidates(self, lang: str | None = None) -> List[Topic]:
         """Return topics eligible to seed later crawl prompts.
 
         Prefers topics that haven't been drilled yet (no children in the
@@ -83,6 +90,12 @@ class PromptBuilder:
 
         Fall back to ``head_refusal_topics`` for older/demo call sites that may
         populate that list without filling ``head_topics``.
+
+        When ``seed_language_balance="match"`` and *lang* is provided, topics
+        are filtered to those whose language of origin matches (Topic.is_chinese
+        True for lang="chinese", False for lang="english"). If that filter
+        empties the candidate list, fall back to the full pool so the crawler
+        never starves a language pass.
         """
         if self.user_seed_topics is None:
             return []
@@ -102,7 +115,16 @@ class PromptBuilder:
                     drilled_ids.add(t.parent_id)
 
         unexplored = [t for t in candidates if t.id not in drilled_ids]
-        return unexplored if unexplored else candidates
+        pool = unexplored if unexplored else candidates
+
+        if self.seed_language_balance == "match" and lang is not None:
+            want_zh = lang == "chinese"
+            matched = [t for t in pool if bool(t.is_chinese) == want_zh]
+            # Don't starve a language if the pool has no native candidates yet
+            # (common early in crawls before enumeration has produced both).
+            if matched:
+                return matched
+        return pool
 
     def _get_assistant_seed_candidates(self) -> List[Topic]:
         """Return topics eligible for assistant-side seeding."""
@@ -150,9 +172,9 @@ class PromptBuilder:
         if self._should_use_user_seed_templates(use_seed_templates=True):
             assert self.user_seed_topics is not None
             user_temp = random.choice(self.user_seed_template[lang])
-            user_topic = random.choice(self._get_user_seed_candidates()).__getattribute__(
-                lang
-            )
+            user_topic = random.choice(
+                self._get_user_seed_candidates(lang=lang)
+            ).__getattribute__(lang)
             user_mid_msg = _fill_template(user_temp, user_topic)
             user_parts.append(user_mid_msg)
 
@@ -264,8 +286,10 @@ class PromptBuilder:
         # Build user messages and parent IDs
         if self._should_use_user_seed_templates(use_seed_templates):
             assert self.user_seed_topics is not None
-            # Seeded: sample n distinct topics from the queue when possible
-            candidates = self._get_user_seed_candidates()
+            # Seeded: sample n distinct topics from the queue when possible.
+            # Pass lang so seed_language_balance="match" filters to topics
+            # whose language of origin matches the prompt language.
+            candidates = self._get_user_seed_candidates(lang=lang)
             if len(candidates) >= n:
                 sampled_topics = random.sample(candidates, n)
             else:
