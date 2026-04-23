@@ -414,6 +414,7 @@ class TopicFormatter:
                     for a in relevant_attributes:
                         if a != attribute:
                             new_topic_kwargs[a] = getattr(topic, a)
+                    new_topic_kwargs["chinese"] = topic.chinese
                     # When splitting a summary, the item IS the English label
                     if attribute == "summary":
                         new_topic_kwargs["english"] = item.strip()
