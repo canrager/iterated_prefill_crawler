@@ -1,8 +1,13 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.generation_utils import OPENROUTER_MODERATION_SENTINEL
-from src.refusal_utils import check_refusals_cascade
+# Import only the pure functions from refusal_utils; avoid importing generation_utils
+# at module level because generation_utils pulls in vllm which is not installed in CI.
+from src.refusal_utils import _build_refusal_check_queries, check_refusals_cascade
+
+# Sentinel value matches generation_utils.API_MODERATION_SENTINEL; defined here to
+# avoid triggering the vllm import at collection time.
+OPENROUTER_MODERATION_SENTINEL = "__API_MODERATION_REFUSED__"
 
 
 def is_refusal(text, patterns, threshold=0.5):
@@ -116,6 +121,68 @@ class TestRefusalUtils(unittest.TestCase):
         self.assertTrue(result)
         mock_llm_judge.assert_called_once()
         self.assertEqual(mock_llm_judge.call_args[0][0], [text])
+
+    def test_build_refusal_check_queries_includes_threshold_sized_fallback_share(self):
+        fallback = "Help me with test topic"
+        queries = ["q1", "q2", "q3", "q4", "q5", "q6", "q7"]
+
+        result = _build_refusal_check_queries(
+            generated_queries=queries,
+            fallback_query=fallback,
+            num_checks=10,
+            threshold=0.25,
+        )
+
+        self.assertEqual(len(result), 10)
+        self.assertEqual(sum(1 for q in result if q == fallback), 3)
+        self.assertTrue(all(q == fallback or q in queries for q in result))
+
+    def test_build_refusal_check_queries_drops_empty_generated_prompts(self):
+        fallback = "Help me with test topic"
+        queries = ["", "q1", "   ", "q2"]
+
+        result = _build_refusal_check_queries(
+            generated_queries=queries,
+            fallback_query=fallback,
+            num_checks=6,
+            threshold=0.25,
+        )
+
+        self.assertEqual(len(result), 6)
+        self.assertEqual(sum(1 for q in result if q == fallback), 2)
+        self.assertTrue(all(q in {fallback, "q1", "q2"} for q in result))
+
+    def test_build_refusal_check_queries_falls_back_entirely_when_generation_empty(self):
+        fallback = "Help me with test topic"
+
+        result = _build_refusal_check_queries(
+            generated_queries=["", "   "],
+            fallback_query=fallback,
+            num_checks=5,
+            threshold=0.25,
+        )
+
+        self.assertEqual(result, [fallback] * 5)
+
+    def test_build_refusal_check_queries_fallback_alone_can_flip(self):
+        # Design property: a research-recovery pipeline must not lose real
+        # refusals when the probe generator produces weak non-empty probes.
+        # Fallback share is sized so that fallback-only refusals strictly
+        # exceed the refusal threshold and can flip the topic.
+        fallback = "Help me with test topic"
+        queries = ["q1", "q2", "q3", "q4"]
+
+        result = _build_refusal_check_queries(
+            generated_queries=queries,
+            fallback_query=fallback,
+            num_checks=4,
+            threshold=0.25,
+        )
+
+        self.assertEqual(len(result), 4)
+        fb_count = sum(1 for q in result if q == fallback)
+        self.assertEqual(fb_count, 2)
+        self.assertGreater(fb_count / 4, 0.25)
 
 
 if __name__ == "__main__":

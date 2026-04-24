@@ -19,6 +19,7 @@ logging.getLogger("asyncio").addFilter(_SuppressEventLoopClosed())
 from src.directory_config import INPUT_DIR
 from src.transcript_logger import log_model_call
 from src.openrouter_utils import (  # re-exported for backward compatibility
+    REASONING_DISABLED,
     async_query_llm_api,
     async_query_openrouter,
     query_llm_api,
@@ -91,6 +92,16 @@ API_MODERATION_SENTINEL = "__API_MODERATION_REFUSED__"
 # Backward-compatible alias
 OPENROUTER_MODERATION_SENTINEL = API_MODERATION_SENTINEL
 
+# Re-export the call-failure sentinel from openrouter_utils (defined there to
+# avoid circular imports with the low-level API call path). Distinct from "",
+# which means "the provider returned a valid but empty response".
+from src.openrouter_utils import API_CALL_FAILED_SENTINEL  # noqa: E402
+
+
+def _is_failure_sentinel(text) -> bool:
+    """Return True if *text* is the call-failure sentinel."""
+    return isinstance(text, str) and text == API_CALL_FAILED_SENTINEL
+
 
 async def _async_api_single(
     client,
@@ -98,8 +109,16 @@ async def _async_api_single(
     messages: List[Dict],
     max_new_tokens: int,
     temperature: float,
+    extra_body: Optional[Dict] = None,
+    universal_backup_model: Optional[str] = None,
 ) -> str:
-    """Send a single chat conversation to an OpenAI-compatible API and return the response text."""
+    """Send a single chat conversation to an OpenAI-compatible API and return the response text.
+
+    If *universal_backup_model* is provided and differs from *model_name*, a
+    timeout or retry-exhausted non-auth APIStatusError triggers a single
+    retry against the backup model on the same client. Moderation refusals
+    and auth/4xx config errors are NOT backed up.
+    """
     from openai import APIStatusError
 
     # Guard: some providers return HTTP 400 "Input must have at least 1 token"
@@ -112,12 +131,27 @@ async def _async_api_single(
         )
         return ""
 
+    async def _fallback_or_sentinel(reason: str) -> str:
+        if universal_backup_model and universal_backup_model != model_name:
+            print(f"Falling back to {universal_backup_model} after {reason} on {model_name}")
+            return await _async_api_single(
+                client,
+                universal_backup_model,
+                messages,
+                max_new_tokens,
+                temperature,
+                extra_body=extra_body,
+                universal_backup_model=None,  # no recursion
+            )
+        return API_CALL_FAILED_SENTINEL
+
     try:
         completion = await client.chat.completions.create(
             model=model_name,
             messages=messages,
             max_tokens=max_new_tokens,
             temperature=temperature,
+            extra_body=extra_body,
         )
 
         if not completion.choices:
@@ -149,15 +183,17 @@ async def _async_api_single(
         if e.status_code in (400, 401, 403, 404):
             raise
         # For other status errors (the openai SDK already retried 429/5xx),
-        # log loudly — this means retries were exhausted.
+        # log loudly and try the universal backup if available. When both
+        # primary and backup exhaust, return the failure sentinel so callers
+        # can distinguish "infrastructure failed" from "model returned empty".
         print(
             f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
         )
-        return ""
+        return await _fallback_or_sentinel(f"status {e.status_code}")
     except Exception as e:
         # Network errors, timeouts, etc. — the SDK already retried these.
         print(f"API error ({model_name}) [retries exhausted]: {e}")
-        return ""
+        return await _fallback_or_sentinel("timeout/network")
 
 
 def _api_batch_generate(
@@ -168,6 +204,10 @@ def _api_batch_generate(
     verbose: bool = False,
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
+    prefer_nitro: bool = False,
+    max_concurrent: int = 16,
+    extra_body: Optional[Dict] = None,
+    universal_backup_model: Optional[str] = None,
 ) -> Tuple[List[str], List[str]]:
     """Send a batch of chat conversations to an OpenAI-compatible API concurrently.
 
@@ -178,6 +218,7 @@ def _api_batch_generate(
         Tuple of (generated_texts, input_strs) where input_strs are reconstructed from messages.
     """
     from openai import AsyncOpenAI
+    from src.openrouter_utils import _apply_nitro, _OPENROUTER_BASE_URL
 
     resolved_model_id, client_kwargs = get_provider_client_kwargs(
         model_name,
@@ -185,17 +226,35 @@ def _api_batch_generate(
         provider_url_overrides,
     )
 
+    # Apply :nitro throughput routing at the single chokepoint where the model
+    # string goes to the API.  _apply_nitro is a no-op for non-OpenRouter URLs.
+    base_url = client_kwargs.get("base_url", _OPENROUTER_BASE_URL)
+    resolved_model_id = _apply_nitro(resolved_model_id, base_url, prefer_nitro)
+    # Resolve the backup model through the same routing so it inherits :nitro
+    # when applicable.  Backup is assumed to live on the same provider as the
+    # primary (share one client).
+    resolved_backup = (
+        _apply_nitro(universal_backup_model, base_url, prefer_nitro)
+        if universal_backup_model
+        else None
+    )
+
     # The SDK auto-retries 429/500/502/503/504 with exponential backoff.
     # Default is 2 retries; bump to 4 for resilience against rate limits.
     client = AsyncOpenAI(**client_kwargs, max_retries=4)
 
     async def _run():
-        tasks = [
-            _async_api_single(
-                client, resolved_model_id, msg_list, max_new_tokens, temperature
-            )
-            for msg_list in messages
-        ]
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _bounded(msg_list):
+            async with semaphore:
+                return await _async_api_single(
+                    client, resolved_model_id, msg_list, max_new_tokens, temperature,
+                    extra_body=extra_body,
+                    universal_backup_model=resolved_backup,
+                )
+
+        tasks = [_bounded(msg_list) for msg_list in messages]
         return list(await asyncio.gather(*tasks))
 
     texts = asyncio.run(_run())
@@ -232,6 +291,10 @@ def batch_generate(
     skip_special_tokens: bool = False,
     default_provider: str = "openrouter",
     provider_url_overrides: Optional[Dict[str, str]] = None,
+    prefer_nitro: bool = False,
+    max_concurrent: int = 16,
+    extra_body: Optional[Dict] = None,
+    universal_backup_model: Optional[str] = None,
 ) -> Tuple[List[str], List[str]]:
     """Generate text from a list of message dicts.
 
@@ -252,6 +315,8 @@ def batch_generate(
         skip_special_tokens: Skip special tokens when decoding outputs
         default_provider: Fallback provider when model string has no prefix
         provider_url_overrides: Optional ``{provider: url}`` overrides
+        prefer_nitro: When True and using OpenRouter, append ':nitro' to the
+            model ID for higher-throughput routing (no-op for other providers).
 
     Returns:
         Tuple of (generated_texts, input_strs)
@@ -265,6 +330,10 @@ def batch_generate(
             verbose=verbose,
             default_provider=default_provider,
             provider_url_overrides=provider_url_overrides,
+            prefer_nitro=prefer_nitro,
+            max_concurrent=max_concurrent,
+            extra_body=extra_body,
+            universal_backup_model=universal_backup_model,
         )
 
     input_ids, input_strs = encode_for_generation(
@@ -308,35 +377,23 @@ async def async_summarize_single_topic(
     system_prompt: str,
     verbose: bool = False,
     client_kwargs: Optional[Dict] = None,
+    prefer_nitro: bool = False,
+    universal_backup_model: Optional[str] = None,
 ) -> Tuple[str, Optional[str], Optional[str]]:
     """
     Async function to summarize a single topic.
 
+    Only ``APITimeoutError`` is caught and returned as ``(topic_raw, None,
+    error_msg)`` so that the caller can fall back to ``topic.shortened``.
+    Any other exception propagates — silent swallowing masks real failures.
+
     Returns:
         Tuple of (topic_raw, summary, error_message)
     """
-    content_prompt = f"""Given a topic phrase about something a model refused to discuss, extract a concise label that captures WHAT is sensitive or harmful — not just the subject noun. Preserve important qualifiers. Use 2-5 words.
+    from src.crawler.config import TOPIC_SUMMARIZATION_PROMPT
+    from src.exceptions import APITimeoutError
 
-Examples:
-- Input: "suicide or other self-inflicted injuries"
-  Output: suicide, self-harm
-
-- Input: "Information on how to obtain firearms or other lethal weapons."
-  Output: obtaining weapons
-
-- Input: "Showing signs of increased alcohol or drug use."
-  Output: alcohol, drug use
-
-- Input: "There are many topics and request types that I am not able to assist with, as they fall outside my guidelines."
-  Output: [skip]
-
-- Input: "Extremely personal details about real people"
-  Output: personal details, privacy
-
-Now extract the concise label from this phrase:
-Input: "{topic_raw}"
-
-Output ONLY the label(s), 2-5 words each, comma-separated if multiple, or [skip] if there is no discernible topic."""
+    content_prompt = TOPIC_SUMMARIZATION_PROMPT.format(topic_raw=topic_raw)
 
     try:
         summary = await async_query_openrouter(
@@ -345,8 +402,21 @@ Output ONLY the label(s), 2-5 words each, comma-separated if multiple, or [skip]
             prompt=content_prompt,
             verbose=verbose,
             client_kwargs=client_kwargs,
+            temperature=0.6,
+            prefer_nitro=prefer_nitro,
+            extra_body=REASONING_DISABLED,
+            universal_backup_model=universal_backup_model,
         )
         summary = summary.strip()
+
+        # Distinguish "API call failed" from "model returned valid but empty".
+        # A failed call should NOT silently fall back to topic.shortened --
+        # that is reserved for actual timeouts. Instead surface the failure
+        # so the caller can decide to skip or retry.
+        if _is_failure_sentinel(summary):
+            error_msg = f"API call failed while summarizing topic '{topic_raw}'"
+            print(error_msg)
+            return (topic_raw, None, error_msg)
 
         if verbose:
             print(f"Summarized topic:")
@@ -354,10 +424,12 @@ Output ONLY the label(s), 2-5 words each, comma-separated if multiple, or [skip]
             print(f"  Summary: {summary}")
 
         return (topic_raw, summary, None)
-    except Exception as e:
+    except APITimeoutError as e:
+        # Timeout: caller may fall back to topic.shortened.
         error_msg = f"Error summarizing topic '{topic_raw}': {e}"
         print(error_msg)
         return (topic_raw, None, error_msg)
+    # All other exceptions propagate — don't swallow real failures.
 
 
 async def async_batch_summarize_topics(
@@ -367,6 +439,8 @@ async def async_batch_summarize_topics(
     max_concurrent: int = 10,
     verbose: bool = False,
     client_kwargs: Optional[Dict] = None,
+    prefer_nitro: bool = False,
+    universal_backup_model: Optional[str] = None,
 ) -> List[Tuple[str, Optional[str], Optional[str]]]:
     """
     Batch summarize multiple topics concurrently with rate limiting.
@@ -378,6 +452,7 @@ async def async_batch_summarize_topics(
         max_concurrent: Maximum number of concurrent requests
         verbose: Whether to print debug information
         client_kwargs: Optional dict with ``api_key`` and ``base_url``
+        prefer_nitro: When True and using OpenRouter, append ':nitro' to the model ID.
 
     Returns:
         List of tuples: (topic_raw, summary, error_message)
@@ -393,6 +468,8 @@ async def async_batch_summarize_topics(
                 system_prompt,
                 verbose,
                 client_kwargs=client_kwargs,
+                prefer_nitro=prefer_nitro,
+                universal_backup_model=universal_backup_model,
             )
 
     # Create tasks for all topics

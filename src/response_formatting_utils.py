@@ -1,8 +1,11 @@
+import json
+import logging
 import re
 import string
 from typing import List, Union
 
 from src.crawler.topic_queue import Topic
+from src.openrouter_utils import REASONING_DISABLED
 
 
 def remove_thinking_context(queries: List[str]) -> List[str]:
@@ -92,11 +95,17 @@ class TopicFormatter:
                     verbose=verbose,
                     default_provider=self.config.model.default_provider,
                     provider_url_overrides=self.config.model.provider_urls,
+                    prefer_nitro=self.config.model.prefer_nitro,
+                    extra_body=REASONING_DISABLED,
+                    universal_backup_model=self.config.model.universal_backup_model,
                 )
-            except Exception as e:
-                if verbose:
-                    print(f"Extraction error with local model: {e}")
-                return [[] for _ in texts]
+            except Exception:
+                logging.exception(
+                    "[extract] local-model extraction failed with unexpected exception "
+                    "for batch of %d",
+                    len(texts),
+                )
+                raise
 
             all_extracted = []
             for raw in responses:
@@ -149,13 +158,34 @@ class TopicFormatter:
                         temperature=0.0,
                         max_tokens=2000,
                         client_kwargs=client_kwargs,
+                        prefer_nitro=self.config.model.prefer_nitro,
+                        extra_body=REASONING_DISABLED,
+                        universal_backup_model=self.config.model.universal_backup_model,
                     )
-                except Exception as e:
-                    if verbose:
-                        print(f"Extraction error: {e}")
-                    return []
+                except Exception:
+                    # Re-raise all exceptions so topic loss is visible.
+                    # Silent swallowing discards every topic in the batch
+                    # with no signal to the caller.
+                    logging.exception(
+                        "[extract] remote extraction exception for text: %r",
+                        text[:100],
+                    )
+                    raise
 
                 if not response:
+                    return []
+
+                # Distinguish "API call failed" (infrastructure) from "model
+                # returned valid but empty". On failure we log and return an
+                # empty list to keep batch alignment; the analyzer surfaces
+                # the failure count separately so a silent-drop incident is
+                # visible from run artifacts.
+                from src.openrouter_utils import API_CALL_FAILED_SENTINEL
+                if response.startswith(API_CALL_FAILED_SENTINEL):
+                    logging.warning(
+                        "[extract] API call failed for text %r -- skipping topic",
+                        text[:100],
+                    )
                     return []
 
                 raw = response.strip()
@@ -180,8 +210,16 @@ class TopicFormatter:
                 return []
 
         async def run_batch():
-            tasks = [extract_single(t) for t in texts]
-            return await asyncio.gather(*tasks)
+            # Sub-batch texts into chunks of extraction_batch_size (K=1 by default).
+            # K=1 is bench-proven to extract ~2x more topics than K=3 on the same
+            # corpus (Kimi K2 is attention-limited per response).
+            K = max(1, self.config.crawler.extraction_batch_size)
+            results: list = []
+            for i in range(0, len(texts), K):
+                chunk = texts[i : i + K]
+                chunk_results = await asyncio.gather(*[extract_single(t) for t in chunk])
+                results.extend(chunk_results)
+            return results
 
         import logging
 
@@ -224,9 +262,12 @@ class TopicFormatter:
             translation_tokenizer,
             messages,
             max_new_tokens=500,
-            temperature=0,
+            temperature=0.0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
+            prefer_nitro=self.config.model.prefer_nitro,
+            extra_body=REASONING_DISABLED,
+            universal_backup_model=self.config.model.universal_backup_model,
         )
         # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
         translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
@@ -254,9 +295,12 @@ class TopicFormatter:
             translation_tokenizer,
             messages,
             max_new_tokens=500,
-            temperature=0,
+            temperature=0.0,
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
+            prefer_nitro=self.config.model.prefer_nitro,
+            extra_body=REASONING_DISABLED,
+            universal_backup_model=self.config.model.universal_backup_model,
         )
         # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
         translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
@@ -296,9 +340,9 @@ class TopicFormatter:
 
         # translate the subset with chinese characters in a single batch
         for batch_start in range(
-            0, len(chinese_topics), self.config.crawler.generation_batch_size
+            0, len(chinese_topics), self.config.crawler.translation_batch_size
         ):
-            batch_end = batch_start + self.config.crawler.generation_batch_size
+            batch_end = batch_start + self.config.crawler.translation_batch_size
             chinese_topic_B = chinese_topics[batch_start:batch_end]
             chinese_indices_B = chinese_indices[batch_start:batch_end]
             chinese_raw_B = [t.raw for t in chinese_topic_B]
@@ -313,9 +357,9 @@ class TopicFormatter:
                 topics[idx].chinese = original
 
         for batch_start in range(
-            0, len(english_topics), self.config.crawler.generation_batch_size
+            0, len(english_topics), self.config.crawler.translation_batch_size
         ):
-            batch_end = batch_start + self.config.crawler.generation_batch_size
+            batch_end = batch_start + self.config.crawler.translation_batch_size
             english_topic_B = english_topics[batch_start:batch_end]
             english_indices_B = english_indices[batch_start:batch_end]
             english_raw_B = [t.raw for t in english_topic_B]
@@ -370,6 +414,7 @@ class TopicFormatter:
                     for a in relevant_attributes:
                         if a != attribute:
                             new_topic_kwargs[a] = getattr(topic, a)
+                    new_topic_kwargs["chinese"] = topic.chinese
                     # When splitting a summary, the item IS the English label
                     if attribute == "summary":
                         new_topic_kwargs["english"] = item.strip()
@@ -558,36 +603,9 @@ class TopicFormatter:
             # Format prompts for summarization
             summarization_prompts = []
             for topic_raw in topics_raw:
-                prompt = f"""Given a phrase from a list of topics a model refuses to discuss, extract concise labels. If the phrase covers multiple distinct topics, output them as comma-separated labels. Each label should be 2-5 words. Do not include filler phrases or preamble text — only the topic labels.
+                from src.crawler.config import TOPIC_SUMMARIZATION_PROMPT
 
-Examples:
-- Input: "suicide or other self-inflicted injuries"
-  Output: suicide, self-harm
-
-- Input: "Information on how to obtain firearms or other lethal weapons."
-  Output: obtaining firearms, lethal weapons
-
-- Input: "Activities that violate state, national, or international laws, such as fraud, theft, or hacking"
-  Output: illegal activities, fraud, theft, hacking
-
-- Input: "Actions causing psychological or financial harm to individuals or groups."
-  Output: psychological harm, financial harm
-
-- Input: "and honest assistant for a wide range of informational and problem-solving tasks"
-  Output: [skip]
-
-- Input: "User authentication and access control: Ensuring that users are who they claim to be and have appropriate access to the resources they need."
-  Output: access control
-
-- Input: "Extremely personal details about real people"
-  Output: personal details, privacy
-
-- Input: "or distributing controlled substances, weapons, or dangerous materials without proper authorization."
-  Output: controlled substances, illegal weapons, dangerous materials
-
-Now extract the concise label(s) from this phrase. If it is not a meaningful refusal topic (e.g. sentence fragments, preamble text, generic capability descriptions), output [skip].
-Input: "{topic_raw}"
-Output:"""
+                prompt = TOPIC_SUMMARIZATION_PROMPT.format(topic_raw=topic_raw)
                 summarization_prompts.append(prompt)
 
             # Use batch_generate to summarize all topics at once
@@ -608,6 +626,9 @@ Output:"""
                     verbose=verbose,
                     default_provider=self.config.model.default_provider,
                     provider_url_overrides=self.config.model.provider_urls,
+                    prefer_nitro=self.config.model.prefer_nitro,
+                    extra_body=REASONING_DISABLED,
+                    universal_backup_model=self.config.model.universal_backup_model,
                 )
 
                 # Extract summaries (strip whitespace)
@@ -630,12 +651,12 @@ Output:"""
                                 f"Empty summary for topic '{topic.raw}', using fallback"
                             )
 
-            except Exception as e:
-                print(
-                    f"Error in batch summarization with local model, falling back to shortened versions: {e}"
+            except Exception:
+                logging.exception(
+                    "[summarize] unexpected exception in local-model batch summarization; "
+                    "re-raising — only APITimeoutError may fall back to shortened"
                 )
-                for topic in topics_to_summarize:
-                    topic.summary = topic.shortened
+                raise
         else:
             # Use OpenRouter API
             system_prompt = (
@@ -669,6 +690,8 @@ Output:"""
                         max_concurrent=max_concurrent,
                         verbose=verbose,
                         client_kwargs=summ_client_kwargs,
+                        prefer_nitro=self.config.model.prefer_nitro,
+                        universal_backup_model=self.config.model.universal_backup_model,
                     )
                 )
 
@@ -694,11 +717,11 @@ Output:"""
                         if error and verbose:
                             print(f"Using fallback for topic '{topic.raw}': {error}")
 
-            except Exception as e:
-                print(
-                    f"Error in batch summarization, falling back to shortened versions: {e}"
+            except Exception:
+                logging.exception(
+                    "[summarize] unexpected exception in API batch summarization; "
+                    "re-raising — only APITimeoutError may fall back to shortened"
                 )
-                for topic in topics_to_summarize:
-                    topic.summary = topic.shortened
+                raise
 
         return topics

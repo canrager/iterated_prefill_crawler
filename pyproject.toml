@@ -45,6 +45,11 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: live API tests that call external models (require OPENROUTER_API_KEY)",
+]
+
 [tool.uv]
 package = true
 

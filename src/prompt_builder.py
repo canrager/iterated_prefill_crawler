@@ -41,6 +41,7 @@ class PromptBuilder:
         user_seed_topics: TopicQueue | None = None,
         assistant_seed_topics: TopicQueue | None = None,
         languages: List[str] = ["english", "chinese"],
+        seed_language_balance: str = "any",
     ):
 
         assert user_pre_templates or user_seed_templates or user_post_templates, (
@@ -68,6 +69,80 @@ class PromptBuilder:
         self.assistant_seed_topics = assistant_seed_topics
         self.languages = languages
 
+        if seed_language_balance not in ("any", "match"):
+            raise ValueError(
+                f"seed_language_balance must be 'any' or 'match', got {seed_language_balance!r}"
+            )
+        self.seed_language_balance = seed_language_balance
+
+    def _get_user_seed_candidates(self, lang: str | None = None) -> List[Topic]:
+        """Return topics eligible to seed later crawl prompts.
+
+        Prefers topics that haven't been drilled yet (no children in the
+        queue) so that every discovered branch gets explored before any
+        branch is revisited. Falls back to the full list once all topics
+        have been drilled at least once.
+
+        We seed from all discovered head topics, not just head refusals. This
+        lets the crawler drill down into broad categories that may answer
+        safely at the coarse label (for example, a high-level political topic)
+        but still yield narrower refusal subtopics once expanded.
+
+        Fall back to ``head_refusal_topics`` for older/demo call sites that may
+        populate that list without filling ``head_topics``.
+
+        When ``seed_language_balance="match"`` and *lang* is provided, topics
+        are filtered to those whose language of origin matches (Topic.is_chinese
+        True for lang="chinese", False for lang="english"). If that filter
+        empties the candidate list, fall back to the full pool so the crawler
+        never starves a language pass.
+        """
+        if self.user_seed_topics is None:
+            return []
+        candidates = (
+            self.user_seed_topics.head_topics
+            or self.user_seed_topics.head_refusal_topics
+        )
+        if not candidates:
+            return []
+
+        # Build set of topic IDs that have already been drilled (appear as
+        # a parent_id of some other topic in the queue).
+        drilled_ids: set[int] = set()
+        for cluster in self.user_seed_topics.cluster_topics:
+            for t in cluster:
+                if t.parent_id is not None and t.parent_id >= 0:
+                    drilled_ids.add(t.parent_id)
+
+        unexplored = [t for t in candidates if t.id not in drilled_ids]
+        pool = unexplored if unexplored else candidates
+
+        if lang is not None:
+            pool = [
+                t
+                for t in pool
+                if getattr(t, lang) is not None and str(getattr(t, lang)).strip()
+            ]
+            if not pool:
+                return []
+
+        if self.seed_language_balance == "match" and lang is not None:
+            want_zh = lang == "chinese"
+            matched = [t for t in pool if bool(t.is_chinese) == want_zh]
+            # Don't starve a language if the pool has no native candidates yet
+            # (common early in crawls before enumeration has produced both).
+            if matched:
+                return matched
+        return pool
+
+    def _get_assistant_seed_candidates(self) -> List[Topic]:
+        """Return topics eligible for assistant-side seeding."""
+        if self.assistant_seed_topics is None:
+            return []
+        if self.assistant_seed_topics.head_topics:
+            return self.assistant_seed_topics.head_topics
+        return self.assistant_seed_topics.head_refusal_topics
+
     def _should_use_user_seed_templates(self, use_seed_templates: bool) -> bool:
         """Return whether seeded user prompts should be used.
 
@@ -77,7 +152,7 @@ class PromptBuilder:
         """
         if self.user_seed_template is None or self.user_seed_topics is None:
             return False
-        if len(self.user_seed_topics.head_refusal_topics) == 0:
+        if len(self._get_user_seed_candidates()) == 0:
             return False
         return use_seed_templates or self.user_pre is None
 
@@ -85,7 +160,7 @@ class PromptBuilder:
         """Return whether seeded assistant prompts should be used."""
         if self.assistant_seed_template is None or self.assistant_seed_topics is None:
             return False
-        if len(self.assistant_seed_topics.head_refusal_topics) == 0:
+        if len(self._get_assistant_seed_candidates()) == 0:
             return False
         return use_seed_templates or self.assistant_pre is None
 
@@ -107,7 +182,7 @@ class PromptBuilder:
             assert self.user_seed_topics is not None
             user_temp = random.choice(self.user_seed_template[lang])
             user_topic = random.choice(
-                self.user_seed_topics.head_refusal_topics
+                self._get_user_seed_candidates(lang=lang)
             ).__getattribute__(lang)
             user_mid_msg = _fill_template(user_temp, user_topic)
             user_parts.append(user_mid_msg)
@@ -124,7 +199,7 @@ class PromptBuilder:
             assert self.assistant_seed_topics is not None
             assistant_temp = random.choice(self.assistant_seed_template[lang])
             assistant_topic = random.choice(
-                self.assistant_seed_topics.head_refusal_topics
+                self._get_assistant_seed_candidates()
             ).__getattribute__(lang)
             assistant_mid_msg = assistant_temp.format(assistant_topic)
             assistant_parts.append(assistant_mid_msg)
@@ -220,11 +295,14 @@ class PromptBuilder:
         # Build user messages and parent IDs
         if self._should_use_user_seed_templates(use_seed_templates):
             assert self.user_seed_topics is not None
-            # Seeded: sample n topics from the queue and format with seed template
-            sampled_topics = [
-                random.choice(self.user_seed_topics.head_refusal_topics)
-                for _ in range(n)
-            ]
+            # Seeded: sample n distinct topics from the queue when possible.
+            # Pass lang so seed_language_balance="match" filters to topics
+            # whose language of origin matches the prompt language.
+            candidates = self._get_user_seed_candidates(lang=lang)
+            if len(candidates) >= n:
+                sampled_topics = random.sample(candidates, n)
+            else:
+                sampled_topics = random.choices(candidates, k=n)
             parent_ids = [t.id for t in sampled_topics]
             user_msgs = [
                 _fill_template(

@@ -4,6 +4,39 @@ from typing import Dict, List, Optional, Union
 
 from src.transcript_logger import log_model_call
 
+# OpenRouter base URL (canonical form, without trailing slash).
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+# Pass as extra_body to disable reasoning tokens on helper-model calls.
+# Target-model calls must NOT include this — reasoning is part of the audit signal.
+REASONING_DISABLED: Dict = {"reasoning": {"effort": "none"}}
+
+# Sentinel returned when both primary and universal-backup helper calls
+# exhaust retries with non-auth errors or timeouts. Distinct from "", which
+# means "the provider returned a valid but empty response".
+API_CALL_FAILED_SENTINEL = "__API_CALL_FAILED__"
+
+
+def _apply_nitro(model_id: str, base_url: str, prefer: bool) -> str:
+    """Append ':nitro' to *model_id* when all conditions are met.
+
+    Returns *model_id* unchanged when:
+    - *prefer* is False, OR
+    - *base_url* is not the OpenRouter API endpoint, OR
+    - *model_id* already ends in ':nitro' or ':floor'.
+
+    Otherwise returns ``f"{model_id}:nitro"``.
+    """
+    if not prefer:
+        return model_id
+    # Normalise trailing slash for comparison
+    normalised_url = base_url.rstrip("/")
+    if normalised_url != _OPENROUTER_BASE_URL.rstrip("/"):
+        return model_id
+    if model_id.endswith(":nitro") or model_id.endswith(":floor"):
+        return model_id
+    return f"{model_id}:nitro"
+
 
 async def async_query_openrouter(
     model_name: str,
@@ -14,24 +47,44 @@ async def async_query_openrouter(
     max_tokens: int = 10000,
     temperature: float = 1.0,
     client_kwargs: Optional[Dict] = None,
-) -> str:
+    prefer_nitro: bool = False,
+    extra_body: Optional[Dict] = None,
+    return_usage: bool = False,
+    universal_backup_model: Optional[str] = None,
+) -> Union[str, tuple]:
     """Query any model via an OpenAI-compatible API.
 
     By default routes to OpenRouter.  Pass *client_kwargs* (with ``api_key``
     and ``base_url``) to target a different provider.
+
+    When *return_usage* is True, returns a tuple ``(response_str,
+    {"prompt_tokens": int, "completion_tokens": int})`` instead of a bare
+    string.  The token counts are zero if ``completion.usage`` is None or if
+    the call fails.  All prod call sites leave *return_usage* at its default
+    (False) so there are no breaking changes.
+
+    When *universal_backup_model* is provided and differs from *model_name*,
+    a timeout or retry-exhausted non-auth APIStatusError triggers a single
+    retry against the backup on the same client.  Auth/4xx config errors
+    and moderation refusals are NOT backed up.
     """
     from openai import APIStatusError, AsyncOpenAI
 
     # Let the SDK handle retries (429/5xx) with exponential backoff.
     if client_kwargs is not None:
         client = AsyncOpenAI(**client_kwargs, max_retries=4)
+        effective_base_url = client_kwargs.get("base_url", _OPENROUTER_BASE_URL)
     else:
         api_key = os.environ.get("OPENROUTER_API_KEY")
         client = AsyncOpenAI(
             api_key=api_key,
-            base_url="https://openrouter.ai/api/v1",
+            base_url=_OPENROUTER_BASE_URL,
             max_retries=4,
         )
+        effective_base_url = _OPENROUTER_BASE_URL
+
+    # Apply :nitro throughput routing for OpenRouter when requested.
+    resolved_model_name = _apply_nitro(model_name, effective_base_url, prefer_nitro)
 
     messages = []
     if system_prompt:
@@ -41,48 +94,100 @@ async def async_query_openrouter(
         messages.append({"role": "assistant", "content": assistant_prefill.strip()})
 
     if verbose:
-        print(f"API request: model={model_name}, messages={messages}")
+        print(f"API request: model={resolved_model_name}, messages={messages}")
+
+    _empty_usage: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
+
+    def _return(text: str, usage: Optional[Dict] = None):
+        """Return text (or (text, usage) tuple) depending on return_usage flag."""
+        if return_usage:
+            return (text, usage if usage is not None else _empty_usage)
+        return text
 
     try:
         completion = await client.chat.completions.create(
-            model=model_name,
+            model=resolved_model_name,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
+            extra_body=extra_body,
         )
         if not completion.choices:
-            print(f"API returned no choices ({model_name})")
-            return ""
+            print(f"API returned no choices ({resolved_model_name})")
+            return _return("")
         choice = completion.choices[0]
         if choice.message is None:
             finish_reason = getattr(choice, "finish_reason", "unknown")
             print(
-                f"API returned choice with no message ({model_name}). Finish reason: {finish_reason}"
+                f"API returned choice with no message ({resolved_model_name}). Finish reason: {finish_reason}"
             )
-            return ""
+            return _return("")
 
         response = choice.message.content or ""
         log_model_call(
             call_type="async_query_openrouter",
-            model=model_name,
+            model=resolved_model_name,
             inputs=messages,
             outputs=response,
             temperature=temperature,
             max_tokens=max_tokens,
         )
         if verbose:
-            print(f"API response ({model_name}):\n{response}")
+            print(f"API response ({resolved_model_name}):\n{response}")
+
+        if return_usage:
+            usage_obj = completion.usage
+            if usage_obj is not None:
+                usage = {
+                    "prompt_tokens": getattr(usage_obj, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(usage_obj, "completion_tokens", 0) or 0,
+                }
+            else:
+                usage = _empty_usage
+            return (response, usage)
         return response
     except APIStatusError as e:
         if e.status_code in (400, 401, 403, 404):
             raise
         print(
-            f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
+            f"API error ({resolved_model_name}) [status {e.status_code}, retries exhausted]: {e}"
         )
-        return ""
+        if universal_backup_model and universal_backup_model != model_name:
+            print(f"Falling back to {universal_backup_model} after status {e.status_code}")
+            return await async_query_openrouter(
+                model_name=universal_backup_model,
+                prompt=prompt,
+                assistant_prefill=assistant_prefill,
+                system_prompt=system_prompt,
+                verbose=verbose,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                client_kwargs=client_kwargs,
+                prefer_nitro=prefer_nitro,
+                extra_body=extra_body,
+                return_usage=return_usage,
+                universal_backup_model=None,
+            )
+        return _return(API_CALL_FAILED_SENTINEL)
     except Exception as e:
-        print(f"API error ({model_name}) [retries exhausted]: {e}")
-        return ""
+        print(f"API error ({resolved_model_name}) [retries exhausted]: {e}")
+        if universal_backup_model and universal_backup_model != model_name:
+            print(f"Falling back to {universal_backup_model} after timeout/network")
+            return await async_query_openrouter(
+                model_name=universal_backup_model,
+                prompt=prompt,
+                assistant_prefill=assistant_prefill,
+                system_prompt=system_prompt,
+                verbose=verbose,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                client_kwargs=client_kwargs,
+                prefer_nitro=prefer_nitro,
+                extra_body=extra_body,
+                return_usage=return_usage,
+                universal_backup_model=None,
+            )
+        return _return(API_CALL_FAILED_SENTINEL)
 
 
 # Alias kept for backward compatibility
