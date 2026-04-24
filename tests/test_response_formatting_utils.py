@@ -162,3 +162,228 @@ def test_split_at_comma_preserves_chinese_field_on_cloned_topics():
 
     assert clone_by_summary["territorial conflicts"].chinese == "分裂主义或领土冲突煽动"
     assert clone_by_summary["harmful instructions"].chinese == "非法活动与有害指令"
+
+
+def test_cleanup_summary_labels_drops_generic_and_mixed_script_labels():
+    formatter = TopicFormatter(
+        SimpleNamespace(
+            crawler=SimpleNamespace(),
+            model=SimpleNamespace(),
+        )
+    )
+
+    topics = [
+        Topic(raw="etc", shortened="etc", summary="etc"),
+        Topic(
+            raw="Histor游戏副本 revisionism",
+            shortened="Histor游戏副本 revisionism",
+            summary="Histor游戏副本 revisionism",
+        ),
+        Topic(
+            raw="Taiwan status",
+            shortened="Taiwan status",
+            summary=" Taiwan status. ",
+        ),
+    ]
+
+    cleaned = formatter._cleanup_summary_labels(topics)
+
+    assert [topic.summary for topic in cleaned] == ["Taiwan status"]
+
+
+def test_cleanup_summary_labels_preserves_chinese_labels_and_strips_punctuation():
+    formatter = TopicFormatter(
+        SimpleNamespace(
+            crawler=SimpleNamespace(),
+            model=SimpleNamespace(),
+        )
+    )
+
+    topics = [
+        Topic(raw="台湾地位", shortened="台湾地位", summary=" 台湾地位。 "),
+        Topic(raw="历史虚无主义", shortened="历史虚无主义", summary="「历史虚无主义」"),
+    ]
+
+    cleaned = formatter._cleanup_summary_labels(topics)
+
+    assert [topic.summary for topic in cleaned] == ["台湾地位", "历史虚无主义"]
+
+
+def test_cleanup_summary_labels_makes_dedup_keys_stable():
+    formatter = TopicFormatter(
+        SimpleNamespace(
+            crawler=SimpleNamespace(),
+            model=SimpleNamespace(),
+        )
+    )
+
+    topics = [
+        Topic(raw="Cyber Abuse", shortened="Cyber Abuse", summary=" Cyber Abuse! "),
+        Topic(raw="cyber abuse", shortened="cyber abuse", summary="cyber abuse"),
+    ]
+
+    cleaned = formatter._cleanup_summary_labels(topics)
+    deduped = formatter.deduplicate_exact(cleaned, head_topics=[])
+
+    assert [topic.summary for topic in deduped] == ["Cyber Abuse", "cyber abuse"]
+    assert [topic.is_head for topic in deduped] == [True, False]
+
+
+def test_split_at_comma_drops_generic_translation_tail_after_regex_filter():
+    """Regression for the real `etc` artifact root cause.
+
+    Historical path:
+    Chinese raw topic -> comma-separated English translation ending in `etc.`
+    -> _regex_filter removes the period -> short-topic summary copies shortened
+    -> _split_at_comma must not promote `etc` into a standalone topic.
+    """
+    formatter = TopicFormatter(
+        SimpleNamespace(
+            crawler=SimpleNamespace(),
+            model=SimpleNamespace(),
+        )
+    )
+    topics = [
+        Topic(
+            raw="示例类别甲",
+            english="example category, audit boundary, request pattern, etc.",
+            chinese="示例类别甲",
+            shortened="example category, audit boundary, request pattern, etc.",
+            is_chinese=True,
+        )
+    ]
+
+    formatter._regex_filter(topics)
+    topics[0].summary = topics[0].shortened
+    formatter._split_at_comma(topics, "summary")
+
+    assert [topic.summary for topic in topics] == [
+        "example category",
+        "audit boundary",
+        "request pattern",
+    ]
+
+
+def test_split_at_comma_does_not_clone_chinese_raw_onto_generic_tail():
+    """A generic split fragment must not inherit the source Chinese raw text."""
+    formatter = TopicFormatter(
+        SimpleNamespace(
+            crawler=SimpleNamespace(),
+            model=SimpleNamespace(),
+        )
+    )
+    topics = [
+        Topic(
+            raw="示例类别甲",
+            english="example category, audit boundary, request pattern, etc.",
+            chinese="示例类别甲",
+            shortened="example category, audit boundary, request pattern, etc.",
+            is_chinese=True,
+        )
+    ]
+
+    formatter._regex_filter(topics)
+    topics[0].summary = topics[0].shortened
+    formatter._split_at_comma(topics, "summary")
+
+    assert not any(
+        topic.raw == "示例类别甲" and topic.summary == "etc"
+        for topic in topics
+    )
+
+
+def test_extract_and_format_drops_generic_translation_tail_end_to_end(monkeypatch):
+    """Mock the extracted Chinese raw plus translated `etc.` tail path."""
+    cfg = SimpleNamespace(
+        crawler=SimpleNamespace(
+            do_filter_refusals=True,
+            max_extracted_topics_per_generation=10,
+            translation_batch_size=50,
+            max_concurrent_summarizations=1,
+            max_generated_tokens=16,
+            extraction_batch_size=1,
+        ),
+        model=SimpleNamespace(
+            summarization_model="local",
+            vllm_max_model_len=None,
+            temperature=0.0,
+            default_provider="openrouter",
+            provider_urls=None,
+            prefer_nitro=False,
+            universal_backup_model=None,
+        ),
+    )
+    formatter = TopicFormatter(cfg)
+
+    monkeypatch.setattr(
+        formatter,
+        "_extract_with_model",
+        lambda generations, local_model=None, local_tokenizer=None, verbose=False: [
+            ["示例类别甲"]
+        ],
+    )
+
+    def fake_translate(local_model, local_tokenizer, topics):
+        topics[0].is_chinese = True
+        topics[0].english = "example category, audit boundary, request pattern, etc."
+        topics[0].shortened = topics[0].english
+        topics[0].chinese = topics[0].raw
+        return topics
+
+    monkeypatch.setattr(
+        formatter,
+        "_batch_translate_chinese_english_both_ways",
+        fake_translate,
+    )
+
+    topics = formatter.extract_and_format(
+        local_model=None,
+        local_tokenizer=None,
+        input_strs=["prompt"],
+        generations=["generation"],
+        parent_ids=[-1],
+    )
+
+    assert [topic.summary for topic in topics] == [
+        "example category",
+        "audit boundary",
+        "request pattern",
+    ]
+
+
+def test_translation_batch_offset_contract_for_comma_translation(monkeypatch):
+    """The comma translation must stay attached to its source batch offset."""
+    cfg = SimpleNamespace(
+        crawler=SimpleNamespace(translation_batch_size=50),
+        model=SimpleNamespace(),
+    )
+    formatter = TopicFormatter(cfg)
+    topics = [
+        Topic(raw="示例类别甲"),
+        Topic(raw="示例类别乙"),
+        Topic(raw="示例类别丙"),
+    ]
+
+    monkeypatch.setattr(formatter, "_has_chinese", lambda text: True)
+    monkeypatch.setattr(
+        formatter,
+        "_translate_zn_to_en",
+        lambda local_model, local_tokenizer, inputs: [
+            "alpha label",
+            "example category, audit boundary, request pattern, etc.",
+            "gamma label",
+        ],
+    )
+
+    translated = formatter._batch_translate_chinese_english_both_ways(
+        local_model=None,
+        local_tokenizer=None,
+        topics=topics,
+    )
+
+    assert translated[0].raw == "示例类别甲"
+    assert translated[0].english == "alpha label"
+    assert translated[1].raw == "示例类别乙"
+    assert translated[1].english == "example category, audit boundary, request pattern, etc."
+    assert translated[2].raw == "示例类别丙"
+    assert translated[2].english == "gamma label"

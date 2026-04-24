@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+from src.aggregation.topic_normalization import normalize_topic_key
 from src.crawler.config import CrawlerConfig, ExperimentsConfig
 from src.generation_utils import batch_generate
 
@@ -191,7 +192,7 @@ class TopicAggregator:
         seen: Dict[str, set] = {}
         deduped = []
         for t, run_idx in all_topics:
-            t_norm = t.strip().lower()
+            t_norm = normalize_topic_key(t)
             if not t_norm:
                 continue
             if t_norm not in seen:
@@ -301,10 +302,10 @@ class TopicAggregator:
         """Compute source sets for output topics by unioning children's sources."""
         new_sources: Dict[str, set] = {}
         for out_topic, in_topics in mapping.items():
-            out_key = out_topic.strip().lower()
+            out_key = normalize_topic_key(out_topic)
             merged = set()
             for child in in_topics:
-                merged |= current_sources.get(child.strip().lower(), set())
+                merged |= current_sources.get(normalize_topic_key(child), set())
             if out_key in new_sources:
                 new_sources[out_key] |= merged
             else:

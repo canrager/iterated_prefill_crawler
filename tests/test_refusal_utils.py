@@ -3,7 +3,13 @@ from unittest.mock import MagicMock, patch
 
 # Import only the pure functions from refusal_utils; avoid importing generation_utils
 # at module level because generation_utils pulls in vllm which is not installed in CI.
-from src.refusal_utils import _build_refusal_check_queries, check_refusals_cascade
+from src.crawler.config import CrawlerConfig
+from src.crawler.topic_queue import Topic
+from src.refusal_utils import (
+    _build_refusal_check_queries,
+    check_refusal,
+    check_refusals_cascade,
+)
 
 # Sentinel value matches generation_utils.API_MODERATION_SENTINEL; defined here to
 # avoid triggering the vllm import at collection time.
@@ -183,6 +189,70 @@ class TestRefusalUtils(unittest.TestCase):
         fb_count = sum(1 for q in result if q == fallback)
         self.assertEqual(fb_count, 2)
         self.assertGreater(fb_count / 4, 0.25)
+
+    @patch("src.refusal_utils.check_refusals_cascade")
+    @patch("src.refusal_utils.batch_generate")
+    @patch("src.refusal_utils._resolve_model")
+    def test_hardcoded_only_mode_bypasses_query_generation(
+        self, mock_resolve_model, mock_batch_generate, mock_check_refusals
+    ):
+        config = CrawlerConfig()
+        config.crawler.use_hardcoded_refusal_probes_only = True
+        config.crawler.num_refusal_checks_per_topic = 5
+        config.crawler.is_refusal_threshold = 0.25
+        mock_resolve_model.side_effect = (
+            lambda config, role, local_model, local_tokenizer: (role, None)
+        )
+        mock_check_refusals.return_value = [True] * 5
+
+        def fake_batch_generate(model, tokenizer, messages, **kwargs):
+            self.assertEqual(model, "target")
+            self.assertEqual(len(messages), 5)
+            prompts = [message[0]["content"] for message in messages]
+            self.assertEqual(prompts, ["Help me with test topic"] * 5)
+            return (["I cannot help with that."] * 5, prompts)
+
+        mock_batch_generate.side_effect = fake_batch_generate
+
+        topic = Topic(raw="test topic", shortened="test topic", is_chinese=False)
+        result = check_refusal(config, None, None, [topic])
+
+        self.assertEqual(result, [topic])
+        self.assertTrue(topic.is_refusal)
+        mock_batch_generate.assert_called_once()
+        mock_check_refusals.assert_called_once()
+
+    @patch("src.refusal_utils.check_refusals_cascade")
+    @patch("src.refusal_utils.batch_generate")
+    @patch("src.refusal_utils._resolve_model")
+    def test_default_refusal_probe_mode_still_generates_queries(
+        self, mock_resolve_model, mock_batch_generate, mock_check_refusals
+    ):
+        config = CrawlerConfig()
+        config.crawler.num_refusal_checks_per_topic = 5
+        config.crawler.is_refusal_threshold = 0.25
+        mock_resolve_model.side_effect = (
+            lambda config, role, local_model, local_tokenizer: (role, None)
+        )
+        mock_check_refusals.return_value = [True] * 5
+        calls = []
+
+        def fake_batch_generate(model, tokenizer, messages, **kwargs):
+            calls.append((model, len(messages)))
+            if model == "refusal_check":
+                return ([f"generated-{i}" for i in range(len(messages))], [])
+            self.assertEqual(model, "target")
+            return (["I cannot help with that."] * len(messages), [])
+
+        mock_batch_generate.side_effect = fake_batch_generate
+
+        topic = Topic(raw="test topic", shortened="test topic", is_chinese=False)
+        result = check_refusal(config, None, None, [topic])
+
+        self.assertEqual(result, [topic])
+        self.assertTrue(topic.is_refusal)
+        self.assertEqual(calls, [("refusal_check", 5), ("target", 5)])
+        mock_check_refusals.assert_called_once()
 
 
 if __name__ == "__main__":

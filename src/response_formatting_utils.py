@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-import string
+import unicodedata
 from typing import List, Union
 
 from src.crawler.topic_queue import Topic
@@ -44,10 +44,22 @@ def remove_thinking_context(queries: List[str]) -> List[str]:
 
 
 class TopicFormatter:
+    GENERIC_SUMMARY_LABELS = {
+        "etc",
+        "etcetera",
+        "other",
+        "others",
+        "misc",
+        "miscellaneous",
+        "various",
+        "various topics",
+    }
+
     def __init__(self, config):
         self.config = config
         self.numbered_list_pattern = re.compile(r"(?m)^\d+\.\s*(.*?)$")
         self.chinese_pattern = re.compile(r"[\u4e00-\u9fff]")
+        self.ascii_letter_pattern = re.compile(r"[A-Za-z]")
 
     def _extract_from_numbered_list(self, text: str) -> List[str]:
         """Extract topics from a text that contains a numbered list."""
@@ -386,6 +398,58 @@ class TopicFormatter:
             topic.shortened = item
         return topics
 
+    def _summary_dedup_key(self, text) -> str:
+        if text is None:
+            return ""
+        if isinstance(text, list):
+            text = " ".join(str(item) for item in text if item)
+        if not isinstance(text, str):
+            text = str(text)
+
+        text = text.lower()
+        chars = [
+            ch
+            for ch in text
+            if not unicodedata.category(ch).startswith("P")
+        ]
+        normalized = " ".join("".join(chars).split())
+        return normalized
+
+    def _clean_summary_label(self, summary) -> str | None:
+        if summary is None:
+            return None
+        if isinstance(summary, list):
+            summary = " ".join(str(item) for item in summary if item)
+        if not isinstance(summary, str):
+            summary = str(summary)
+
+        label = " ".join(summary.strip().split())
+        while label and unicodedata.category(label[0]).startswith("P"):
+            label = label[1:].lstrip()
+        while label and unicodedata.category(label[-1]).startswith("P"):
+            label = label[:-1].rstrip()
+        if not label:
+            return None
+
+        if self.ascii_letter_pattern.search(label) and self.chinese_pattern.search(label):
+            return None
+
+        key = self._summary_dedup_key(label)
+        if not key or key in self.GENERIC_SUMMARY_LABELS or len(key) <= 1:
+            return None
+
+        return label
+
+    def _cleanup_summary_labels(self, topics: List[Topic]) -> List[Topic]:
+        cleaned_topics = []
+        for topic in topics:
+            cleaned_summary = self._clean_summary_label(topic.summary)
+            if cleaned_summary is None:
+                topic.summary = None
+                continue
+            topic.summary = cleaned_summary
+            cleaned_topics.append(topic)
+        return cleaned_topics
 
     def _split_at_comma(
         self,
@@ -401,10 +465,17 @@ class TopicFormatter:
             if topic_attr and ("," in topic_attr or " or " in topic_attr):
                 splitted_text = re.split(r",\s*|\s+or\s+", topic_attr)
                 # Update the original topic with the first part
-                setattr(topic, attribute, splitted_text[0].strip())
+                first_item = splitted_text[0].strip()
+                if attribute == "summary":
+                    first_item = self._clean_summary_label(first_item)
+                setattr(topic, attribute, first_item)
                 # Create new topics for the remaining parts
                 for item in splitted_text[1:]:
                     item = re.sub(r"^(?:or|and)\s+", "", item.strip())
+                    if attribute == "summary":
+                        item = self._clean_summary_label(item)
+                        if item is None:
+                            continue
                     new_topic_kwargs = {
                         "parent_id": topic.parent_id,
                         attribute: item.strip(),
@@ -448,28 +519,16 @@ class TopicFormatter:
         if formatted_topics == []:
             return formatted_topics
 
-        def normalize_summary(text) -> str:
-            if text is None:
-                return ""
-            if isinstance(text, list):
-                text = " ".join(str(item) for item in text if item)
-            if not isinstance(text, str):
-                text = str(text)
-            text_lower = text.lower()
-            translator = str.maketrans("", "", string.punctuation)
-            normalized = text_lower.translate(translator)
-            return normalized
-
         # Build lookup dictionary: normalized_summary -> cluster_idx
         normalized_to_cluster_idx = {}
         for idx, head_topic in enumerate(head_topics):
-            normalized_summary = normalize_summary(head_topic.summary)
+            normalized_summary = self._summary_dedup_key(head_topic.summary)
             if normalized_summary:
                 normalized_to_cluster_idx[normalized_summary] = idx
 
         # Process each topic
         for topic in formatted_topics:
-            normalized_summary = normalize_summary(topic.summary)
+            normalized_summary = self._summary_dedup_key(topic.summary)
 
             if normalized_summary and normalized_summary in normalized_to_cluster_idx:
                 cluster_idx = normalized_to_cluster_idx[normalized_summary]
@@ -535,8 +594,8 @@ class TopicFormatter:
                 verbose=verbose,
             )
             self._split_at_comma(formatted_topics, "summary")
-            # Drop topics the summarizer flagged as non-meaningful
-            formatted_topics = [t for t in formatted_topics if t.summary is not None]
+            # Drop topics the summarizer or deterministic cleanup flagged as non-meaningful.
+            formatted_topics = self._cleanup_summary_labels(formatted_topics)
 
         if verbose:
             print(f"formatted topics:\n{formatted_topics}\n\n")

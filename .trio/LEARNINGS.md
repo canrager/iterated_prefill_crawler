@@ -90,3 +90,27 @@ DeepSeek occasionally hallucinates training data into a generation slot (textboo
 When an LLM prompt is changed to fix a contamination or extraction bug, the cheapest and most targeted validation is an integration test that feeds the exact bad inputs from the incident as fixtures and asserts the expected output. A full debug run is expensive and stochastic — the contaminating sample may not reproduce. Reserve debug runs for validating overall pipeline noise reduction, not individual prompt correctness.
 
 *Evidence: 2026-04-10 Kimi extraction prompt fix validated in `tests/test_topic_extraction_drift.py` with textbook + LeetCode fixtures before launching the verification debug run.*
+
+### Offline replay must patch provider resolution as well as model calls
+
+Fixture replay monkeypatches target/helper calls, but helper code may resolve provider client kwargs before the patched async call is reached. Offline benchmark replay must stub `get_provider_client_kwargs` inside the replay context so missing API keys do not block fixture lookup. A fixture hit rate below the validity gate is a fixture coverage problem, not a provider setup problem.
+
+*Evidence: 2026-04-24 Slice 1: `uv run pytest tests/test_bench_crawler_shape.py::test_run_bench_replays_single_cell_offline -q` failed without `OPENROUTER_API_KEY` before patching provider resolution; after patch it passed. `run3_ds_v32` replay then completed offline but remained invalid at `fixture_hit_rate=0.878`.*
+
+### Topic summary cleanup needs language preservation tests, not just drop tests
+
+Filtering bad labels like `etc` or mixed-script corruption is not enough; the cleanup must prove it preserves useful Chinese-only and English-only labels. Export cleanup and dedup keys should share the same Unicode punctuation definition so labels like `台湾地位。` export as `台湾地位` and dedupe with punctuation variants.
+
+*Evidence: 2026-04-24 Slice 2 was rejected until `test_cleanup_summary_labels_preserves_chinese_labels_and_strips_punctuation` covered Chinese preservation and `_clean_summary_label()` stripped Unicode punctuation using `unicodedata.category(...).startswith("P")`.*
+
+### Aggregation and coverage loaders must share the same topic key
+
+If aggregation pre-consolidates punctuation/case variants but coverage scoring keeps the older `strip().lower()` key, the aggregator and analyzer score different topic surfaces. Put deterministic topic-key normalization in a shared helper and require both loaders to use it.
+
+*Evidence: 2026-04-24 Slice 3 was rejected until `normalize_topic_key()` moved to `src/aggregation/topic_normalization.py` and both `TopicAggregator.load_topics()` and `coverage.load_crawl_topics()` used it. The compatibility test includes ASCII punctuation/case variants and a full-width `。` variant.*
+
+### Refusal probe generator bypass must stay opt-in until live-compared
+
+The hardcoded fallback probes can eliminate the refusal-check query-generation call, but that only proves a cost-saving mechanism, not live sufficiency. Keep hardcoded-only mode default-off, prove call behavior offline, and require a separate budgeted live comparison before treating it as a replacement for generated probes.
+
+*Evidence: 2026-04-24 Slice 4 added `crawler.use_hardcoded_refusal_probes_only=false` by default. Offline tests prove default mode still calls `refusal_check` then `target`, while opt-in hardcoded-only mode calls only `target` with five fallback probes.*

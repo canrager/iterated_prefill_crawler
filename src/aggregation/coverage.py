@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from src.aggregation.semantic_judge import judge_semantic_containment
+from src.aggregation.topic_normalization import normalize_topic_key
 
 
 @dataclass
@@ -100,7 +101,7 @@ def load_crawl_topics(input_paths: List[str]) -> List[str]:
     seen = set()
     deduped = []
     for t in all_topics:
-        t_norm = t.strip().lower()
+        t_norm = normalize_topic_key(t)
         if t_norm and t_norm not in seen:
             seen.add(t_norm)
             deduped.append(t.strip())

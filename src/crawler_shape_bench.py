@@ -513,12 +513,32 @@ def _messages_to_input_strings(messages: List[List[Dict[str, str]]]) -> List[str
 def replay_fixture(store: FixtureReplayStore):
     import src.generation_utils as generation_utils
     import src.openrouter_utils as openrouter_utils
+    import src.provider_config as provider_config
 
     original_api_batch_generate = generation_utils._api_batch_generate
     original_generation_async = generation_utils.async_query_openrouter
     original_generation_async_alias = generation_utils.async_query_llm_api
+    original_generation_provider_kwargs = generation_utils.get_provider_client_kwargs
     original_openrouter_async = openrouter_utils.async_query_openrouter
     original_openrouter_async_alias = openrouter_utils.async_query_llm_api
+    original_provider_kwargs = provider_config.get_provider_client_kwargs
+
+    def fake_provider_client_kwargs(
+        model_name: str,
+        default_provider: str = "openrouter",
+        provider_url_overrides: Optional[Dict[str, str]] = None,
+    ):
+        if ":" in model_name:
+            provider_name, resolved_model_id = model_name.split(":", 1)
+        else:
+            provider_name, resolved_model_id = default_provider, model_name
+        return (
+            resolved_model_id,
+            {
+                "api_key": "fixture-replay-not-used",
+                "base_url": f"fixture://{provider_name}",
+            },
+        )
 
     def fake_api_batch_generate(
         model_name: str,
@@ -597,16 +617,20 @@ def replay_fixture(store: FixtureReplayStore):
     generation_utils._api_batch_generate = fake_api_batch_generate
     generation_utils.async_query_openrouter = fake_async_query_openrouter
     generation_utils.async_query_llm_api = fake_async_query_openrouter
+    generation_utils.get_provider_client_kwargs = fake_provider_client_kwargs
     openrouter_utils.async_query_openrouter = fake_async_query_openrouter
     openrouter_utils.async_query_llm_api = fake_async_query_openrouter
+    provider_config.get_provider_client_kwargs = fake_provider_client_kwargs
     try:
         yield
     finally:
         generation_utils._api_batch_generate = original_api_batch_generate
         generation_utils.async_query_openrouter = original_generation_async
         generation_utils.async_query_llm_api = original_generation_async_alias
+        generation_utils.get_provider_client_kwargs = original_generation_provider_kwargs
         openrouter_utils.async_query_openrouter = original_openrouter_async
         openrouter_utils.async_query_llm_api = original_openrouter_async_alias
+        provider_config.get_provider_client_kwargs = original_provider_kwargs
 
 
 @contextmanager

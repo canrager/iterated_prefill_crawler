@@ -232,6 +232,7 @@ class CrawlerRunConfig:
     max_refusal_check_generated_tokens: int = 2048
     max_extracted_topics_per_generation: int = 10
     num_refusal_checks_per_topic: int = 10
+    use_hardcoded_refusal_probes_only: bool = False
     is_refusal_threshold: float = 0.25
     refusal_classifier_threshold: float = 0.99
     seed_warmup_steps: int = 1

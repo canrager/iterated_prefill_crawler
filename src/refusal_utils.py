@@ -358,44 +358,53 @@ def check_refusal(
 
     num_checks = config.crawler.num_refusal_checks_per_topic
     threshold = config.crawler.is_refusal_threshold
+    use_hardcoded_refusal_probes_only = (
+        config.crawler.use_hardcoded_refusal_probes_only
+    )
 
     # Step 1: Generate queries for ALL topics in parallel
     all_query_prompts = []
     topic_indices = []  # Track which prompts belong to which topic
 
-    for topic_idx, topic in enumerate(selected_topics):
-        instructions = (
-            config.refusal_provocation_generation_prompts["chinese"]
-            if topic.is_chinese
-            else config.refusal_provocation_generation_prompts["english"]
+    if use_hardcoded_refusal_probes_only:
+        all_queries = [""] * (len(selected_topics) * num_checks)
+        all_query_input_strs = [""] * (len(selected_topics) * num_checks)
+    else:
+        for topic_idx, topic in enumerate(selected_topics):
+            instructions = (
+                config.refusal_provocation_generation_prompts["chinese"]
+                if topic.is_chinese
+                else config.refusal_provocation_generation_prompts["english"]
+            )
+            # Add num_checks prompts for this topic
+            all_query_prompts.extend([instructions.format(topic.raw)] * num_checks)
+            topic_indices.extend([topic_idx] * num_checks)
+
+        # Generate all queries at once
+        query_messages = [
+            [{"role": "user", "content": p}] for p in all_query_prompts
+        ]
+        all_queries, all_query_input_strs = batch_generate(
+            refusal_model,
+            refusal_tokenizer,
+            query_messages,
+            max_new_tokens=(
+                config.model.vllm_max_model_len
+                if config.model.vllm_max_model_len is not None
+                else config.crawler.max_refusal_check_generated_tokens
+            ),
+            temperature=1,
+            verbose=verbose,
+            default_provider=default_provider,
+            provider_url_overrides=provider_url_overrides,
+            prefer_nitro=prefer_nitro,
+            max_concurrent=config.crawler.max_concurrent_api_calls,
+            extra_body=REASONING_DISABLED,
+            universal_backup_model=universal_backup_model,
         )
-        # Add num_checks prompts for this topic
-        all_query_prompts.extend([instructions.format(topic.raw)] * num_checks)
-        topic_indices.extend([topic_idx] * num_checks)
 
-    # Generate all queries at once
-    query_messages = [[{"role": "user", "content": p}] for p in all_query_prompts]
-    all_queries, all_query_input_strs = batch_generate(
-        refusal_model,
-        refusal_tokenizer,
-        query_messages,
-        max_new_tokens=(
-            config.model.vllm_max_model_len
-            if config.model.vllm_max_model_len is not None
-            else config.crawler.max_refusal_check_generated_tokens
-        ),
-        temperature=1,
-        verbose=verbose,
-        default_provider=default_provider,
-        provider_url_overrides=provider_url_overrides,
-        prefer_nitro=prefer_nitro,
-        max_concurrent=config.crawler.max_concurrent_api_calls,
-        extra_body=REASONING_DISABLED,
-        universal_backup_model=universal_backup_model,
-    )
-
-    # Remove thinking context from queries if present
-    all_queries = remove_thinking_context(all_queries)
+        # Remove thinking context from queries if present
+        all_queries = remove_thinking_context(all_queries)
 
     # Step 2: Build mixed query probes and collect topics that need answer checks
     topics_needing_answers = []
