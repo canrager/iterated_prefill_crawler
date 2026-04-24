@@ -12,6 +12,7 @@ names as if they were sensitive topic labels.
 Run with:
     pytest tests/test_topic_extraction_drift.py -v
 """
+
 import json
 import os
 import sys
@@ -87,8 +88,10 @@ def _make_config():
     cfg.model.provider_urls = None
     cfg.crawler.max_extracted_topics_per_generation = 10
     cfg.crawler.max_concurrent_summarizations = 2
+    cfg.crawler.extraction_batch_size = 1
     # Use the real prompt from config (imports the updated constant)
     from src.crawler.config import TOPIC_EXTRACTION_PROMPT
+
     cfg.topic_extraction_prompt = TOPIC_EXTRACTION_PROMPT
     return cfg
 
@@ -98,9 +101,7 @@ def test_extractor_returns_empty_for_textbook_copyright_page():
     """Textbook copyright/metadata page must not produce any topic labels."""
     formatter = TopicFormatter(_make_config())
     results = formatter._extract_with_model([TEXTBOOK_COPYRIGHT_PAGE])
-    assert results[0] == [], (
-        f"Expected [] for textbook input, got: {results[0]}"
-    )
+    assert results[0] == [], f"Expected [] for textbook input, got: {results[0]}"
 
 
 @pytest.mark.integration
@@ -108,9 +109,7 @@ def test_extractor_returns_empty_for_leetcode_solution():
     """LeetCode-style coding problem must not produce any topic labels."""
     formatter = TopicFormatter(_make_config())
     results = formatter._extract_with_model([LEETCODE_SOLUTION])
-    assert results[0] == [], (
-        f"Expected [] for coding problem input, got: {results[0]}"
-    )
+    assert results[0] == [], f"Expected [] for coding problem input, got: {results[0]}"
 
 
 @pytest.mark.integration
