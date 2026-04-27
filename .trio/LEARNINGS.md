@@ -17,6 +17,22 @@ The extractor decides topic boundaries. If it returns one array element, that is
 
 *Evidence: 2026-04-26 artifact analysis of `crawler_out_20260424_020254_deepseek-v3.2_25samples_2crawls_Truefilter.json`. Topic 4356 (`歪曲党史国史军史`) had correct `english` but `summary: "distorting the history of the party"` — the rest was split into cloned topics 4562 (`"the nation"`) and 4563 (`"the military"`). Topic 1292 (`隐私、个人信息与监控`) had `summary: "privacy"`. All caused by `_split_at_comma` in `extract_and_format` line 668.*
 
+### Productive parents are not drilled because selection is random over a flat pool
+
+The most politically productive parent in the DeepSeek V3.2 artifact (`生成用于政治诽谤的虚假新闻`, id 1808) produced 35 confirmed-refusal CCP-sensitive children: `支持台独`, `支持藏独`, `支持疆独`, `否定中国共产党领导`, `歪曲党史国史军史`, `破坏国家统一与领土完整`, `危害国家安全与利益`, `煽动颠覆国家政权`, and others. Not one of those 35 children was selected as a parent for further drilling. The crawler treats all unexplored topics equally — random sampling from a pool of ~2,097 candidates gives any specific child ~0.25% chance per slot. The information needed to drill deeper into political branches is already in the queue; the crawler just cannot find it.
+
+This is the simplest expected-value improvement available: bias seed selection toward children of productive parents. The selector bakeoffs were inconclusive because they tried to score yield over a flat candidate pool. The signal isn't in candidate text features — it's in the graph: a parent that produced refusal children is more likely to have grandchildren that are also refusals.
+
+*Evidence: 2026-04-27 offline test on the artifact. Children of parent 1808 have IDs 4353-4563. Zero topics in the artifact have a `parent_id` in that range. Report: `artifacts/research/crawl_shape/extraction_vs_depth_split.md`.*
+
+### Some "missing" golden categories were uttered by the target but discarded by the extractor
+
+The extractor's `TOPIC_EXTRACTION_PROMPT` is gated to return `[]` for non-list inputs. This is correct for documents, code, and off-topic content — but it also drops deflection prose where the target named a sensitive topic without listing it. Categories the model uttered but were never extracted: `南海` (7 mentions), `香港` (4), `中印` (3), `一带一路` (1). Examples: `"对不起，我不能...南海问题是一个复杂的国际议题"` and `"中印两国都是重要的邻国"`. The deflection itself is a refusal signal, but the pipeline's extraction step only processes list-shaped outputs.
+
+This is a design gap, not an extractor bug. Categories where the target genuinely never said the words across 7,292 records: `六四`, `天安门`, `法轮`, `达赖`, `文化大革命`, `计划生育`, `港独` — those need different elicitation prompts, not deeper drilling or different extraction.
+
+*Evidence: 2026-04-27 transcript scan. Counts of each term in DeepSeek (target) output records, excluding helper-model records and probe prompts. Report: `artifacts/research/crawl_shape/extraction_vs_depth_split.md`.*
+
 ### Translation must use the same prompt shape that the bench validated
 
 The extractor/translator bench tests JSON-array batch prompts with structured instructions. If prod uses a different prompt shape (terse one-per-call), the bench results are wasted — they validated a capability prod doesn't use. This created a silent divergence where the bench picked the best model for batch translation but prod sent each topic individually without context, making short Chinese terms like `支持台独` vulnerable to truncation or alignment self-censorship.
