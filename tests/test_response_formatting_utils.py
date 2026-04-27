@@ -292,8 +292,8 @@ def test_split_at_comma_does_not_clone_chinese_raw_onto_generic_tail():
     )
 
 
-def test_extract_and_format_drops_generic_translation_tail_end_to_end(monkeypatch):
-    """Mock the extracted Chinese raw plus translated `etc.` tail path."""
+def test_extract_and_format_preserves_comma_translation_as_single_topic(monkeypatch):
+    """A grammatical comma in a translation must not create cloned topics."""
     cfg = SimpleNamespace(
         crawler=SimpleNamespace(
             do_filter_refusals=True,
@@ -319,13 +319,15 @@ def test_extract_and_format_drops_generic_translation_tail_end_to_end(monkeypatc
         formatter,
         "_extract_with_model",
         lambda generations, local_model=None, local_tokenizer=None, verbose=False: [
-            ["示例类别甲"]
+            ["歪曲党史国史军史"]
         ],
     )
 
     def fake_translate(local_model, local_tokenizer, topics):
         topics[0].is_chinese = True
-        topics[0].english = "example category, audit boundary, request pattern, etc."
+        topics[0].english = (
+            "Distorting the history of the Party, the nation, and the military"
+        )
         topics[0].shortened = topics[0].english
         topics[0].chinese = topics[0].raw
         return topics
@@ -344,11 +346,17 @@ def test_extract_and_format_drops_generic_translation_tail_end_to_end(monkeypatc
         parent_ids=[-1],
     )
 
-    assert [topic.summary for topic in topics] == [
-        "example category",
-        "audit boundary",
-        "request pattern",
-    ]
+    assert len(topics) == 1
+    assert topics[0].raw == "歪曲党史国史军史"
+    assert topics[0].summary is not None
+    summary = topics[0].summary.lower()
+    assert "party" in summary
+    assert "nation" in summary
+    assert "military" in summary
+    assert not any(
+        topic.summary in {"the nation", "the military"}
+        for topic in topics
+    )
 
 
 def test_translation_batch_offset_contract_for_comma_translation(monkeypatch):
@@ -387,3 +395,145 @@ def test_translation_batch_offset_contract_for_comma_translation(monkeypatch):
     assert translated[1].english == "example category, audit boundary, request pattern, etc."
     assert translated[2].raw == "示例类别丙"
     assert translated[2].english == "gamma label"
+
+
+# ---------------------------------------------------------------------------
+# Translation prompt alignment: prod must use bench-style JSON array format
+# ---------------------------------------------------------------------------
+
+def test_translate_zn_to_en_sends_json_array_prompt(monkeypatch):
+    """Prod translation must send a single JSON-array prompt per batch,
+    matching the bench format, not one terse call per topic."""
+    import json as _json
+
+    cfg = SimpleNamespace(
+        crawler=SimpleNamespace(translation_batch_size=50),
+        model=SimpleNamespace(
+            translation_model="qwen/qwen3-235b-a22b-2507",
+            default_provider="openrouter",
+            provider_urls=None,
+            prefer_nitro=True,
+            universal_backup_model=None,
+        ),
+    )
+    formatter = TopicFormatter(cfg)
+
+    captured_messages = []
+
+    def fake_batch_generate(model, tokenizer, messages, **kwargs):
+        captured_messages.extend(messages)
+        response = _json.dumps(
+            ["Support Taiwan Independence", "Support Tibetan Independence"],
+            ensure_ascii=False,
+        )
+        return [response], ["input"]
+
+    monkeypatch.setattr(
+        "src.generation_utils.batch_generate", fake_batch_generate
+    )
+
+    result = formatter._translate_zn_to_en(None, None, ["支持台独", "支持藏独"])
+
+    # Should send exactly 1 message (batch), not 2 individual messages
+    assert len(captured_messages) == 1, (
+        f"Expected 1 batch message, got {len(captured_messages)} individual messages"
+    )
+
+    # The user content should contain a JSON array of the inputs
+    user_content = captured_messages[0][-1]["content"]
+    assert '["支持台独"' in user_content or "支持台独" in user_content
+
+    # Results should be correctly parsed
+    assert result == ["Support Taiwan Independence", "Support Tibetan Independence"]
+
+
+def test_translate_en_to_zn_sends_json_array_prompt(monkeypatch):
+    """EN→ZH translation must also use the batch JSON array format."""
+    import json as _json
+
+    cfg = SimpleNamespace(
+        crawler=SimpleNamespace(translation_batch_size=50),
+        model=SimpleNamespace(
+            translation_model="qwen/qwen3-235b-a22b-2507",
+            default_provider="openrouter",
+            provider_urls=None,
+            prefer_nitro=True,
+            universal_backup_model=None,
+        ),
+    )
+    formatter = TopicFormatter(cfg)
+
+    captured_messages = []
+
+    def fake_batch_generate(model, tokenizer, messages, **kwargs):
+        captured_messages.extend(messages)
+        response = _json.dumps(["支持台湾独立", "支持西藏独立"], ensure_ascii=False)
+        return [response], ["input"]
+
+    monkeypatch.setattr(
+        "src.generation_utils.batch_generate", fake_batch_generate
+    )
+
+    result = formatter._translate_en_to_zn(
+        None, None, ["Support Taiwan Independence", "Support Tibetan Independence"]
+    )
+
+    assert len(captured_messages) == 1
+    assert result == ["支持台湾独立", "支持西藏独立"]
+
+
+def test_translate_zn_to_en_falls_back_on_parse_failure(monkeypatch):
+    """If the model returns unparseable output, fall back to original texts."""
+    cfg = SimpleNamespace(
+        crawler=SimpleNamespace(translation_batch_size=50),
+        model=SimpleNamespace(
+            translation_model="qwen/qwen3-235b-a22b-2507",
+            default_provider="openrouter",
+            provider_urls=None,
+            prefer_nitro=True,
+            universal_backup_model=None,
+        ),
+    )
+    formatter = TopicFormatter(cfg)
+
+    def fake_batch_generate(model, tokenizer, messages, **kwargs):
+        return ["totally broken response that is not json"], ["input"]
+
+    monkeypatch.setattr(
+        "src.generation_utils.batch_generate", fake_batch_generate
+    )
+
+    result = formatter._translate_zn_to_en(None, None, ["支持台独", "支持藏独"])
+    # Should fall back to originals
+    assert result == ["支持台独", "支持藏独"]
+
+
+def test_translate_zn_to_en_handles_length_mismatch(monkeypatch):
+    """If the model returns fewer items than sent, pad with originals."""
+    import json as _json
+
+    cfg = SimpleNamespace(
+        crawler=SimpleNamespace(translation_batch_size=50),
+        model=SimpleNamespace(
+            translation_model="qwen/qwen3-235b-a22b-2507",
+            default_provider="openrouter",
+            provider_urls=None,
+            prefer_nitro=True,
+            universal_backup_model=None,
+        ),
+    )
+    formatter = TopicFormatter(cfg)
+
+    def fake_batch_generate(model, tokenizer, messages, **kwargs):
+        # Model returns only 1 item instead of 3
+        return [_json.dumps(["Support Taiwan Independence"])], ["input"]
+
+    monkeypatch.setattr(
+        "src.generation_utils.batch_generate", fake_batch_generate
+    )
+
+    result = formatter._translate_zn_to_en(None, None, ["支持台独", "支持藏独", "支持疆独"])
+    assert result[0] == "Support Taiwan Independence"
+    # Missing items fall back to originals
+    assert result[1] == "支持藏独"
+    assert result[2] == "支持疆独"

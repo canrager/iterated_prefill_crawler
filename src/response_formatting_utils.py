@@ -8,6 +8,45 @@ from src.crawler.topic_queue import Topic
 from src.openrouter_utils import REASONING_DISABLED
 
 
+def _parse_translation_response(raw: str, expected_count: int = 0) -> List[str]:
+    """Parse a JSON array from a batch translation response.
+
+    Fallback chain: bare JSON → markdown-fenced JSON → embedded JSON array
+    → numbered/bulleted list (only if line count matches expected_count).
+    Returns [] when nothing parses reliably.
+    """
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed]
+    except Exception:
+        pass
+    m = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", raw, re.DOTALL)
+    if m:
+        try:
+            return [str(x) for x in json.loads(m.group(1))]
+        except Exception:
+            pass
+    m = re.search(r"(\[(?:.|\n)*\])", raw)
+    if m:
+        try:
+            return [str(x) for x in json.loads(m.group(1))]
+        except Exception:
+            pass
+    lines = []
+    for line in raw.splitlines():
+        line = line.strip()
+        line = re.sub(r"^[-*•]\s+", "", line)
+        line = re.sub(r"^\d+\.\s*", "", line)
+        if line:
+            lines.append(line)
+    if expected_count and len(lines) == expected_count:
+        return lines
+    return []
+
+
 def remove_thinking_context(queries: List[str]) -> List[str]:
     """
     Remove thinking context from queries that end with </think> or <\\think>.
@@ -253,43 +292,29 @@ class TopicFormatter:
         local_tokenizer,
         inputs: Union[str, List[str]],
     ) -> Union[str, List[str]]:
-        from src.generation_utils import batch_generate
-
-        translation_model, translation_tokenizer = self._resolve_model(
-            "translation", local_model, local_tokenizer
+        return self._translate_batch(
+            local_model, local_tokenizer, inputs,
+            src_lang="Chinese", tgt_lang="English",
         )
-        is_single = isinstance(inputs, str)
-        texts = [inputs] if is_single else inputs
-        messages = [
-            [
-                {
-                    "role": "user",
-                    "content": f"Translate to English (translation only): {t}",
-                }
-            ]
-            for t in texts
-        ]
-        translated, _ = batch_generate(
-            translation_model,
-            translation_tokenizer,
-            messages,
-            max_new_tokens=500,
-            temperature=0.0,
-            default_provider=self.config.model.default_provider,
-            provider_url_overrides=self.config.model.provider_urls,
-            prefer_nitro=self.config.model.prefer_nitro,
-            extra_body=REASONING_DISABLED,
-            universal_backup_model=self.config.model.universal_backup_model,
-        )
-        # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
-        translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
-        return translated[0] if is_single else translated
 
     def _translate_en_to_zn(
         self,
         local_model,
         local_tokenizer,
         inputs: Union[str, List[str]],
+    ) -> Union[str, List[str]]:
+        return self._translate_batch(
+            local_model, local_tokenizer, inputs,
+            src_lang="English", tgt_lang="Chinese",
+        )
+
+    def _translate_batch(
+        self,
+        local_model,
+        local_tokenizer,
+        inputs: Union[str, List[str]],
+        src_lang: str,
+        tgt_lang: str,
     ) -> Union[str, List[str]]:
         from src.generation_utils import batch_generate
 
@@ -298,25 +323,72 @@ class TopicFormatter:
         )
         is_single = isinstance(inputs, str)
         texts = [inputs] if is_single else inputs
-        messages = [
-            [{"role": "user", "content": f"翻译成中文（只输出翻译）：{t}"}]
-            for t in texts
-        ]
-        translated, _ = batch_generate(
-            translation_model,
-            translation_tokenizer,
-            messages,
-            max_new_tokens=500,
-            temperature=0.0,
-            default_provider=self.config.model.default_provider,
-            provider_url_overrides=self.config.model.provider_urls,
-            prefer_nitro=self.config.model.prefer_nitro,
-            extra_body=REASONING_DISABLED,
-            universal_backup_model=self.config.model.universal_backup_model,
-        )
-        # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
-        translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
-        return translated[0] if is_single else translated
+
+        if not texts:
+            return "" if is_single else []
+
+        is_api = isinstance(translation_model, str)
+
+        if is_api:
+            json_array = json.dumps(texts, ensure_ascii=False)
+            prompt = (
+                f"You are a translator. Translate each item in the JSON array"
+                f" below from {src_lang} to {tgt_lang}. Preserve the original"
+                f" order and count exactly. Translate each label as a short"
+                f" canonical term in {tgt_lang} (2-5 words). Do not add"
+                f" explanations, notes, or commentary.\n\n"
+                f"Output ONLY a JSON array of strings, same length as the"
+                f" input, no other text.\n\n"
+                f"INPUT ({src_lang}):\n{json_array}"
+            )
+            messages = [[
+                {"role": "system", "content": "You are a professional translator. Respond only with valid JSON."},
+                {"role": "user", "content": prompt},
+            ]]
+            translated, _ = batch_generate(
+                translation_model,
+                translation_tokenizer,
+                messages,
+                max_new_tokens=max(500, len(texts) * 30),
+                temperature=0.0,
+                default_provider=self.config.model.default_provider,
+                provider_url_overrides=self.config.model.provider_urls,
+                prefer_nitro=self.config.model.prefer_nitro,
+                extra_body=REASONING_DISABLED,
+                universal_backup_model=self.config.model.universal_backup_model,
+            )
+            raw_response = translated[0] if translated else ""
+            parsed = _parse_translation_response(raw_response, expected_count=len(texts))
+            result = []
+            for i, src in enumerate(texts):
+                if i < len(parsed) and parsed[i].strip():
+                    result.append(parsed[i].strip())
+                else:
+                    result.append(src)
+            return result[0] if is_single else result
+        else:
+            if tgt_lang == "English":
+                terse = "Translate to English (translation only): "
+            else:
+                terse = "翻译成中文（只输出翻译）："
+            messages = [
+                [{"role": "user", "content": f"{terse}{t}"}]
+                for t in texts
+            ]
+            translated, _ = batch_generate(
+                translation_model,
+                translation_tokenizer,
+                messages,
+                max_new_tokens=500,
+                temperature=0.0,
+                default_provider=self.config.model.default_provider,
+                provider_url_overrides=self.config.model.provider_urls,
+                prefer_nitro=self.config.model.prefer_nitro,
+                extra_body=REASONING_DISABLED,
+                universal_backup_model=self.config.model.universal_backup_model,
+            )
+            translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
+            return translated[0] if is_single else translated
 
     def _resolve_model(self, role: str, local_model, local_tokenizer):
         """Return (model, tokenizer) for the given role.
@@ -593,7 +665,6 @@ class TopicFormatter:
                 local_tokenizer=local_tokenizer,
                 verbose=verbose,
             )
-            self._split_at_comma(formatted_topics, "summary")
             # Drop topics the summarizer or deterministic cleanup flagged as non-meaningful.
             formatted_topics = self._cleanup_summary_labels(formatted_topics)
 

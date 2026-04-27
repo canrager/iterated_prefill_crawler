@@ -124,8 +124,20 @@ def test_run_bench_replays_single_cell_offline(tmp_path: Path):
     writer.record_model_call(
         call_type="batch_generate_api",
         model="openrouter/demo-translation",
-        inputs=[[{"role": "user", "content": "翻译成中文（只输出翻译）：Political dissent"}]],
-        outputs=["政治异见"],
+        inputs=[[
+            {"role": "system", "content": "You are a professional translator. Respond only with valid JSON."},
+            {"role": "user", "content": (
+                "You are a translator. Translate each item in the JSON array"
+                " below from English to Chinese. Preserve the original"
+                " order and count exactly. Translate each label as a short"
+                " canonical term in Chinese (2-5 words). Do not add"
+                " explanations, notes, or commentary.\n\n"
+                "Output ONLY a JSON array of strings, same length as the"
+                " input, no other text.\n\n"
+                'INPUT (English):\n["Political dissent"]'
+            )},
+        ]],
+        outputs=['["政治异见"]'],
         temperature=0.0,
         max_tokens=500,
     )
