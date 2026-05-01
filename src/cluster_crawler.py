@@ -224,8 +224,20 @@ def select_broad_topics_head_and_tail(
     return head, tail
 
 
-def _select_drill_template(templates: Sequence[str], language: str) -> str:
-    """Pick the configured drill-down template from a seed-template list."""
+def _select_drill_template(
+    templates: Sequence[str],
+    language: str,
+    *,
+    drill_templates: Sequence[str] | None = None,
+) -> str:
+    """Pick the configured drill-down template.
+
+    Prefers an explicit drill_templates list (from PromptsConfig.user_drill_templates)
+    when provided. Falls back to marker-matching against the seed-template list
+    for backward compatibility with configs that haven't been migrated.
+    """
+    if drill_templates:
+        return drill_templates[0]
     return _select_seed_template(templates, language, mode="drill")
 
 
@@ -262,12 +274,16 @@ def build_drill_messages(
 ) -> List[List[Dict[str, str]]]:
     """Build seeded drill-down prompts from model-emitted labels."""
     user_seed_templates = config.prompts.user_seed_templates or {}
+    user_drill_templates = config.prompts.user_drill_templates or {}
     messages: List[List[Dict[str, str]]] = []
     for idx in seed_indices:
         topic = topics[idx]
         language = "chinese" if topic.is_chinese else "english"
         templates = user_seed_templates.get(language) or []
-        template = _select_drill_template(templates, language)
+        drill_templates = user_drill_templates.get(language) or []
+        template = _select_drill_template(
+            templates, language, drill_templates=drill_templates
+        )
         seed_text = (
             topic.chinese
             if language == "chinese"
@@ -301,6 +317,7 @@ def build_bilingual_seed_messages(
 ) -> tuple[List[List[Dict[str, str]]], List[int]]:
     """Build EN/ZH seed prompts for drill-down or lateral crawl."""
     user_seed_templates = config.prompts.user_seed_templates or {}
+    user_drill_templates = config.prompts.user_drill_templates or {}
     messages: List[List[Dict[str, str]]] = []
     parent_ids: List[int] = []
     for idx in seed_indices:
@@ -318,7 +335,13 @@ def build_bilingual_seed_messages(
             if key in used_surface:
                 continue
             templates = user_seed_templates.get(language) or []
-            template = _select_seed_template(templates, language, mode=mode)
+            if mode == "drill":
+                drill_templates = user_drill_templates.get(language) or []
+                template = _select_drill_template(
+                    templates, language, drill_templates=drill_templates
+                )
+            else:
+                template = _select_seed_template(templates, language, mode=mode)
             messages.append([{"role": "user", "content": _fill_template(template, seed_text)}])
             parent_ids.append(idx)
             used_surface.add(key)

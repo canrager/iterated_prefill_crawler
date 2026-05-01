@@ -278,6 +278,11 @@ class PromptsConfig:
     user_seed_templates: Optional[Dict[str, List[str]]] = field(
         default_factory=lambda: USER_SEED_TEMPLATES
     )
+    # Explicit drill-down templates for the cluster-first crawler's tail-drill phase.
+    # When set, the crawler reads from this field directly and skips the
+    # marker-matching heuristic over user_seed_templates. Optional; if null, the
+    # crawler falls back to scanning user_seed_templates for drill-style content.
+    user_drill_templates: Optional[Dict[str, List[str]]] = None
     user_post_templates: Optional[Dict[str, List[str]]] = None
     system_templates: Optional[Dict[str, List[str]]] = None
     assistant_pre_templates: Optional[Dict[str, List[str]]] = field(
