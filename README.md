@@ -41,6 +41,54 @@ The `haiku` config also uses a local auxiliary model (`allenai/Olmo-3-7B-Instruc
 for translation, summarization, and refusal checking. It downloads automatically on first run
 to `hf_models/` inside the repo. Override the location with `model.cache_dir=/your/path`.
 
+## Cluster-first pipeline (low-cost wordcloud audits)
+
+An alternative to the recursive crawler above when you want a paper-style refusal-topic
+wordcloud at a bounded API cost. Three commands end-to-end against any provider-hosted target
+via OpenRouter, roughly $5 per run on DeepSeek V3.2 scale:
+
+```bash
+# 1. Crawl: fixed-budget jailbreak pass with broad head-crawl + tail-drill, then clustering.
+uv run python scripts/cluster_crawler.py \
+    --cluster-crawler-config rehearsal \
+    --method jailbreak \
+    --target-model deepseek/deepseek-v3.2 \
+    --output-dir artifacts/out/my_run \
+    --run-name my_run
+
+# 2. Group: helper LLM assigns each extracted topic to a display family label.
+uv run python scripts/aggregate_families.py \
+    artifacts/out/my_run/my_run.json \
+    --aggregator-model qwen/qwen3-235b-a22b-2507 \
+    --output-dir artifacts/out/my_run/families \
+    --output-json artifacts/out/my_run/families/summary.json
+
+# 3. Rank: target compares its own families pairwise ("which is more taboo?")
+#    via OpenRouter; Elo ratings size the rendered wordcloud.
+uv run python scripts/self_rank_families.py \
+    --families-json artifacts/out/my_run/families/qwen_qwen3-235b-a22b-2507.families.json \
+    --judge-model deepseek/deepseek-v3.2 \
+    --output-json artifacts/out/my_run/elo_ranked.json \
+    --output-png artifacts/out/my_run/cloud.png
+```
+
+The crawler in step 1 supports the same three jailbreak surfaces as the recursive crawler
+(`--method jailbreak`, `assistant-prefix`, `thought-prefix`). New behavior: instead of recursively
+re-seeding every extracted topic, it asks the target for the broadest categories of forbidden
+content first, then expands head categories laterally and drills tail categories vertically.
+Tunable via `--broad-head-crawl-seeds`, `--broad-tail-drill-seeds`, `--broad-iterations`. Named
+profiles in `configs/cluster_crawler/{debug,rehearsal,default}.yaml` set sensible defaults.
+
+The self-rank step in 3 is the same target-as-judge Elo design from `src/evaluation/ranking.py`,
+ported to OpenRouter so it runs against hosted targets without a local GPU.
+
+**When to use this vs `./scripts/run.sh`:** the recursive crawler at `./scripts/run.sh` produces
+denser coverage at higher cost — the published clouds at https://forbidden.baulab.info/ used
+`num_crawl_steps = 100,000`. The cluster-first pipeline produces a comparable wordcloud at
+roughly one to two orders of magnitude fewer target API calls. See
+`artifacts/out/rehearsal_pair_20260501_141350/deepseek_v32_jailbreak_rehearsal.{json,png}` for
+a worked example (44 target generations → 727 unique head topics → 232 clusters).
+
 ## Configuration
 
 All crawler variables live in `src/crawler/config.py`, which defines three dataclasses:
