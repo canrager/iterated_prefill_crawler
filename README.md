@@ -73,11 +73,14 @@ uv run python scripts/self_rank_families.py \
 ```
 
 The crawler in step 1 supports the same three jailbreak surfaces as the recursive crawler
-(`--method jailbreak`, `assistant-prefix`, `thought-prefix`). New behavior: instead of recursively
-re-seeding every extracted topic, it asks the target for the broadest categories of forbidden
-content first, then expands head categories laterally and drills tail categories vertically.
-Tunable via `--broad-head-crawl-seeds`, `--broad-tail-drill-seeds`, `--broad-iterations`. Named
-profiles in `configs/cluster_crawler/{debug,rehearsal,default}.yaml` set sensible defaults.
+(`--method jailbreak`, `assistant-prefix`, `thought-prefix`). New behavior: after the initial
+target generations, a helper "broad extractor" LLM (default `moonshotai/kimi-k2.5`, configurable
+via `--broad-extractor-model`) reads the target's emitted taxonomy and sorts the topics from
+broadest to narrowest. The crawler then expands the broadest *head* categories laterally
+("what else is in this neighborhood?") and drills the narrowest *tail* categories vertically
+("break this down into specific items"). Tunable via `--broad-head-crawl-seeds`,
+`--broad-tail-drill-seeds`, `--broad-iterations`. Named profiles in
+`configs/cluster_crawler/{debug,rehearsal,default}.yaml` set sensible defaults.
 
 The self-rank step in 3 is the same target-as-judge Elo design from `src/evaluation/ranking.py`,
 ported to OpenRouter so it runs against hosted targets without a local GPU.
