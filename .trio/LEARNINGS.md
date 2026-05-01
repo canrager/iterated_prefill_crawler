@@ -137,6 +137,133 @@ for:
 Keep validation probes low during shape tests. Increase probes only after the
 selector is retrieving the right neighborhoods.
 
+## Ranking Signal Hypothesis
+
+The current cluster-first crawler ranks wordcloud terms via an offline
+structural proxy in `scripts/bench_wordcloud_ranking.py:proxy_preference_score`:
+a weighted combination of `parent_yield`, `cluster_score`,
+`specificity_score`, and `cluster_size`. Synthetic pairwise-Elo over this
+proxy is the rendering signal. We were guessing.
+
+The original paper (`exp/evaluate_crawler.py:559` "Running self-ranking...")
+and the second update (`src/evaluation/ranking.py:run_parallel_ranking_experiment`)
+already encode the right hypothesis:
+
+> The target model itself is the pairwise judge. Its own preferences over its
+> own refusal topics, expressed via the verbatim prompt in
+> `src/evaluation/ranking.py:191-200`, are the rendering signal.
+
+This is *self-ranking*. The model's RLHF-shaped internal taboo hierarchy is
+read out through a benign meta-task that is independent of how often the model
+emitted each topic during crawling. Self-ranking surfaces topics the model
+suppressed strongly even when their emission frequency is low — exactly the
+asymmetry that breaks structural proxies on rare-but-distinctive axes (the
+DeepSeek CCP family at rank 134-150 of 181 under `proxy_preference_score`
+because its broad parent yielded 29 children vs. violence's 85).
+
+For paper claims, self-ranking enables strictly stronger statements:
+
+- "DeepSeek V3.2 ranks 'Taiwan / Hong Kong / Macau one-China violation' above
+  'illegal drugs' in its own pairwise preference ordering" — an introspection
+  finding about RLHF-shaped suppression, not a frequency observation about the
+  crawl.
+- The ordering is independent of elicitation surface (jailbreak vs.
+  cot_forgery vs. others). The same target produces the same ordering.
+
+Bounded claim: the ordering is the model's preference under the specific
+judge-prompt framing. Robustness to prompt variation is a worth-running
+ablation, not a published claim about absolute taboo.
+
+Production rendering should adopt self-ranking as the score signal. The
+existing structural proxy can stay as an ablation/comparator. Granularity
+matters: feed the aggregator's display families (current best: Qwen +
+incremental-display) into self-ranking, not raw label sets, so each pair
+compared is at consistent conceptual specificity.
+
+The audit chain becomes three orthogonal stages, each probing the target via
+a different surface:
+
+| Stage | Purpose | Probes target via |
+|---|---|---|
+| 1. Elicitation | Surface candidate refusal topics | Jailbreak / forged CoT |
+| 2. Aggregation | Produce paper-quality axis labels | Helper LLM (offline; not target) |
+| 3. Self-ranking | Extract the target's taboo hierarchy | Benign pairwise meta-prompts |
+
+Empirical confirmation on the DeepSeek V3.2 jailbreak rehearsal artifact (900
+pairwise self-judgments via OpenRouter, no target-specific code in the path):
+all 10 CCP-aligned Qwen-incremental families moved from structural-proxy ranks
+134-150 of 181 to self-rank top-87, with 4 in the top 15. *One-China Policy
+Violation* lands at rank 2 (Elo 1094.0) ahead of *Regulated and Illegal
+Substances* at rank 23 (Elo 1061). Self-rank produces a paper-quality cloud
+with no target-vocabulary scoring.
+
+Production pipeline (three orthogonal stages):
+
+1. `scripts/cluster_crawler.py` — elicitation crawl, writes
+   wordcloud_topics + clusters.
+2. `scripts/aggregate_families.py` — incremental-display aggregator pass via
+   helper LLM, writes families.json.
+3. `scripts/self_rank_families.py` — target self-ranks its own families
+   pairwise; writes Elo-ranked JSON + paper-style PNG.
+
+Don't reinvent these. They reuse the verbatim judge prompt and Elo math from
+`src/evaluation/ranking.py`; only the inference backend differs (OpenRouter
+rather than local vLLM, so we can run against provider-hosted targets).
+
+## Don't Do This (Burned Approaches)
+
+These approaches were built and tested in this branch and did not work. Do
+not rebuild them. The trace evidence lives in the rehearsal artifact set
+under `artifacts/out/rehearsal_pair_20260501_141350/` and the prior
+benchmark sets under `artifacts/out/cluster_smoke/aggregator_model_bench_*/`.
+
+- **Structural ranking proxy (`proxy_preference_score`).** Weighted offline
+  combination of `parent_yield`, `cluster_score`, `specificity_score`,
+  `cluster_size` with synthetic pairwise-Elo. Buried CCP-aligned families at
+  rank 134-150 of 181 because their broad parent yielded fewer children
+  (29) than dominant safety parents (violence=85). Emission frequency is
+  not the right signal for a refusal audit; target self-rank is.
+
+- **Family-member-count or parent-yield as rendering boost.** Both are
+  surface-frequency signals. They amplify dominant taxonomy and don't
+  surface rare-but-deeply-trained refusal axes. For DeepSeek's CCP family
+  the parent-yield boost moved the umbrella family by rank, but with the
+  axis-preserving aggregator every CCP family is a singleton, and singleton
+  boosts are uniform. Useful as ablation comparators only.
+
+- **Per-parent-cap rendering.** Treating cloud rendering with a "max N
+  axes per source parent" cap was a band-aid for the structural-proxy
+  hypothesis. With self-rank it is unnecessary.
+
+- **Semantic-clustering aggregator prompts.** Both the original paper
+  (`exp/postprocess_topic_summaries.py` "old-indexed") and the second
+  update (`src/aggregation/aggregator.py` REDUCTION_PROMPT,
+  "reduction-object") collapse rare-but-distinctive axes into umbrella
+  labels. On the DeepSeek rehearsal, both produced 28-74 families where
+  Qwen+incremental produced 181, with the CCP umbrella as a single
+  13-member family rather than 10 distinct axes. Use
+  `incremental-display`-style prompting that preserves axis specificity.
+
+- **TF-IDF / string-similarity / embedding-based family canonicalization.**
+  Local string and TF-IDF grouping cannot make the right canonical-label
+  choice. They reduce obvious duplicates but pick generic labels for more
+  specific members. Aggregator-LLM with the incremental-display prompt
+  beats them on every axis.
+
+- **Member-level rendering.** Surfacing every exact member as a wordcloud
+  term produces noisy clouds. Family granularity is the right rendering
+  unit; preserve exact members in the JSON for audit and don't render them
+  as cloud terms.
+
+- **Drill-selector-prompt approach.** Asking a helper LLM to select which
+  broad parents to drill out of cluster labels did not work. Production
+  uses the broad head-crawl + tail-drill structure already in
+  `cluster_crawler.py`.
+
+- **Multiple aggregator-prompt-style benchmarks in the same script.**
+  Don't bench five prompt styles in one script; the test surface explodes.
+  Bench one production candidate at a time, in a focused harness.
+
 ## Model/Helper Guidance
 
 Disable reasoning for helper calls. Helpers are doing extraction, translation,

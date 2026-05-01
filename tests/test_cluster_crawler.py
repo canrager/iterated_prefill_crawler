@@ -4,16 +4,12 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from scripts.bench_wordcloud_aggregator_models import (
+from scripts.aggregate_families import (
+    Family,
     merge_family_batches,
-    normalize_model_overrides,
     repair_families,
-    repair_indexed_families,
-    repair_object_families,
 )
-from scripts.bench_wordcloud_family_variants import Family
-from scripts.bench_wordcloud_family_variants import string_families
-from scripts.bench_wordcloud_ranking import Candidate, collect_ranking_by_cluster
+from src.wordcloud_topic_loader import Candidate, collect_ranking_by_cluster
 from src.cluster_crawler import (
     TopicCluster,
     build_bilingual_drill_messages,
@@ -412,57 +408,6 @@ def test_collect_ranking_by_cluster_limits_redundant_display_terms():
     ]
 
 
-def test_string_families_preserve_exact_members_and_collapse_wording_variants():
-    ranking = [
-        (
-            Candidate(
-                label="territorial dispute",
-                index=1,
-                parent_id=1,
-                cluster_id=1,
-                cluster_score=1.0,
-                cluster_size=1,
-                parent_yield=1,
-            ),
-            10.0,
-        ),
-        (
-            Candidate(
-                label="disputed territory",
-                index=2,
-                parent_id=1,
-                cluster_id=1,
-                cluster_score=1.0,
-                cluster_size=1,
-                parent_yield=1,
-            ),
-            9.0,
-        ),
-        (
-            Candidate(
-                label="specific policy dispute",
-                index=3,
-                parent_id=1,
-                cluster_id=2,
-                cluster_score=1.0,
-                cluster_size=1,
-                parent_yield=1,
-            ),
-            8.0,
-        ),
-    ]
-
-    families = string_families(ranking, threshold=0.65)
-
-    assert families[0].label == "territorial dispute"
-    assert families[0].members == ("territorial dispute", "disputed territory")
-    assert sorted(member for family in families for member in family.members) == [
-        "disputed territory",
-        "specific policy dispute",
-        "territorial dispute",
-    ]
-
-
 def test_aggregator_repair_allows_readable_display_label_and_exact_members():
     ranking = [
         (
@@ -509,95 +454,6 @@ def test_aggregator_repair_allows_readable_display_label_and_exact_members():
     )
     assert repair_counts["label_fallbacks"] == 0
     assert repair_counts["invented_members"] == 0
-
-
-def test_old_indexed_repair_maps_indices_to_exact_members():
-    ranking = [
-        (
-            Candidate(
-                label="coffee drinks, cold brew preparation",
-                index=1,
-                parent_id=1,
-                cluster_id=1,
-                cluster_score=1.0,
-                cluster_size=1,
-                parent_yield=1,
-            ),
-            10.0,
-        ),
-        (
-            Candidate(
-                label="cold-brew coffee",
-                index=2,
-                parent_id=1,
-                cluster_id=1,
-                cluster_score=1.0,
-                cluster_size=1,
-                parent_yield=1,
-            ),
-            9.0,
-        ),
-    ]
-
-    families, repair_counts = repair_indexed_families(
-        {"cold brew coffee": [1, 2]},
-        ranking,
-    )
-
-    assert families[0].label == "cold brew coffee"
-    assert families[0].members == (
-        "coffee drinks, cold brew preparation",
-        "cold-brew coffee",
-    )
-    assert repair_counts["invented_indices"] == 0
-    assert repair_counts["missing_members"] == 0
-
-
-def test_reduction_object_repair_uses_exact_string_members():
-    ranking = [
-        (
-            Candidate(
-                label="printer supplies, toner cartridges",
-                index=1,
-                parent_id=1,
-                cluster_id=1,
-                cluster_score=1.0,
-                cluster_size=1,
-                parent_yield=1,
-            ),
-            10.0,
-        ),
-        (
-            Candidate(
-                label="toner for office printers",
-                index=2,
-                parent_id=1,
-                cluster_id=1,
-                cluster_score=1.0,
-                cluster_size=1,
-                parent_yield=1,
-            ),
-            9.0,
-        ),
-    ]
-
-    families, repair_counts = repair_object_families(
-        {
-            "printer toner": [
-                "printer supplies, toner cartridges",
-                "toner for office printers",
-            ]
-        },
-        ranking,
-    )
-
-    assert families[0].label == "printer toner"
-    assert families[0].members == (
-        "printer supplies, toner cartridges",
-        "toner for office printers",
-    )
-    assert repair_counts["invented_members"] == 0
-    assert repair_counts["missing_members"] == 0
 
 
 def test_incremental_family_merge_only_combines_matching_labels():
@@ -670,59 +526,6 @@ def test_incremental_family_merge_only_combines_matching_labels():
         "cold-brew coffee",
     )
     assert merged[1].label == "printer toner"
-
-
-def test_aggregator_model_overrides_accept_repeated_or_comma_values():
-    assert normalize_model_overrides(
-        [
-            "google/gemma-4-26b-a4b-it, anthropic/claude-sonnet-4.6",
-            "google/gemma-4-26b-a4b-it",
-        ]
-    ) == [
-        "google/gemma-4-26b-a4b-it",
-        "anthropic/claude-sonnet-4.6",
-    ]
-
-
-def test_batched_old_indexed_merge_preserves_cross_batch_exact_members():
-    ranking = [
-        (
-            Candidate(
-                label="territorial sovereignty dispute",
-                index=1,
-                parent_id=1,
-                cluster_id=1,
-                cluster_score=1.0,
-                cluster_size=1,
-                parent_yield=1,
-            ),
-            10.0,
-        ),
-        (
-            Candidate(
-                label="sovereignty and territorial integrity",
-                index=2,
-                parent_id=1,
-                cluster_id=1,
-                cluster_score=1.0,
-                cluster_size=1,
-                parent_yield=1,
-            ),
-            9.0,
-        ),
-    ]
-    first, first_counts = repair_indexed_families({"territorial sovereignty": [1]}, ranking[:1])
-    second, second_counts = repair_indexed_families({"territorial sovereignty": [1]}, ranking[1:])
-
-    merged = merge_family_batches(first, second, ranking)
-
-    assert first_counts["missing_members"] == 0
-    assert second_counts["missing_members"] == 0
-    assert merged[0].label == "territorial sovereignty"
-    assert merged[0].members == (
-        "territorial sovereignty dispute",
-        "sovereignty and territorial integrity",
-    )
 
 
 def test_topic_wordcloud_scores_preserve_granular_member_labels():
