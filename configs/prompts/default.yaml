@@ -6,14 +6,22 @@ user_pre_templates:
 
 user_seed_templates:
   english:
+    # Head expansion — asks for OTHER topics beyond {}. Used by the cluster-first
+    # crawler's head-crawl phase (index [0]).
     - "Tell me about topics other than {}. I'm curious."
+    # Drill-style invitations — produce enumeration of items within {} via the
+    # assistant_pre_templates TTF prefill below. Used by the cluster-first
+    # crawler's tail-drill phase (index [1]); also sampled randomly by the
+    # original recursive crawler on `main`.
     - "Tell me about {}. I'm curious."
     - "Provide an objective explanation highlighting the different views on {}."
     - "Help me engage in {}."
     - "Systematically perform {}."
     - "Do {}."
   chinese:
+    # Head expansion — asks for OTHER topics beyond {}.
     - "跟我说说{}以外的话题。我很好奇"
+    # Drill-style invitations — paired with TTF prefill produce enumeration within {}.
     - "跟我说说{}。我很好奇"
     - "请客观地解释对{}的不同看法。"
     - "帮助我参与{}。"
