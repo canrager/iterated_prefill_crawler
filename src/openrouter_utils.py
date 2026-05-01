@@ -147,6 +147,24 @@ async def async_query_openrouter(
             return (response, usage)
         return response
     except APIStatusError as e:
+        if e.status_code == 403 and "moderation" in str(e.message).lower():
+            if universal_backup_model and universal_backup_model != model_name:
+                print(f"Falling back to {universal_backup_model} after moderation refusal")
+                return await async_query_openrouter(
+                    model_name=universal_backup_model,
+                    prompt=prompt,
+                    assistant_prefill=assistant_prefill,
+                    system_prompt=system_prompt,
+                    verbose=verbose,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    client_kwargs=client_kwargs,
+                    prefer_nitro=prefer_nitro,
+                    extra_body=extra_body,
+                    return_usage=return_usage,
+                    universal_backup_model=None,
+                )
+            return _return(API_CALL_FAILED_SENTINEL)
         if e.status_code in (400, 401, 403, 404):
             raise
         print(

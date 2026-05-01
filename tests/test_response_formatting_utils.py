@@ -27,6 +27,47 @@ def _make_client_kwargs():
     return {"api_key": "test-key", "base_url": "https://openrouter.ai/api/v1"}
 
 
+def test_extract_and_format_does_not_send_target_sentinels_to_helper_extractor(monkeypatch):
+    """Target API sentinel strings are stage failures, not extractable topic text."""
+    from src.crawler.config import CrawlerConfig
+    from src.response_formatting_utils import API_MODERATION_SENTINEL
+    from src.openrouter_utils import API_CALL_FAILED_SENTINEL
+
+    cfg = CrawlerConfig()
+    cfg.crawler.do_filter_refusals = False
+    formatter = TopicFormatter(cfg)
+    seen_texts = []
+
+    def fake_extract(texts, local_model=None, local_tokenizer=None, verbose=False):
+        seen_texts.extend(texts)
+        return [["neutral topic"] for _ in texts]
+
+    monkeypatch.setattr(formatter, "_extract_with_model", fake_extract)
+    monkeypatch.setattr(
+        formatter,
+        "_batch_translate_chinese_english_both_ways",
+        lambda local_model, local_tokenizer, topics: topics,
+    )
+    monkeypatch.setattr(formatter, "_regex_filter", lambda topics: topics)
+
+    topics = formatter.extract_and_format(
+        local_model=None,
+        local_tokenizer=None,
+        input_strs=["valid prompt", "failed prompt", "moderated prompt"],
+        generations=[
+            "1. neutral topic",
+            API_CALL_FAILED_SENTINEL,
+            f"{API_MODERATION_SENTINEL}: blocked",
+        ],
+        parent_ids=[101, 202, 303],
+    )
+
+    assert seen_texts == ["1. neutral topic"]
+    assert [topic.raw for topic in topics] == ["neutral topic"]
+    assert [topic.parent_id for topic in topics] == [101]
+    assert [topic.prompt for topic in topics] == ["valid prompt"]
+
+
 # ---------------------------------------------------------------------------
 # Task 2(a): Non-timeout exception propagates
 # ---------------------------------------------------------------------------
@@ -162,6 +203,27 @@ def test_split_at_comma_preserves_chinese_field_on_cloned_topics():
 
     assert clone_by_summary["territorial conflicts"].chinese == "分裂主义或领土冲突煽动"
     assert clone_by_summary["harmful instructions"].chinese == "非法活动与有害指令"
+
+
+def test_summary_cleanup_preserves_parenthetical_qualifier_dropped_by_helper():
+    formatter = TopicFormatter(
+        SimpleNamespace(
+            crawler=SimpleNamespace(),
+            model=SimpleNamespace(),
+        )
+    )
+    topics = [
+        Topic(
+            raw="Medical & Health Advice (Unauthorized)",
+            shortened="medical health advice unauthorized",
+            summary="Medical advice, Health advice",
+        )
+    ]
+
+    cleaned = formatter._cleanup_summary_labels(topics)
+
+    assert len(cleaned) == 1
+    assert cleaned[0].summary == "Medical & Health Advice (Unauthorized)"
 
 
 def test_cleanup_summary_labels_drops_generic_and_mixed_script_labels():

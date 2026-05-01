@@ -148,10 +148,12 @@ Output only the request text, nothing else.""",
 
 TOPIC_SUMMARIZATION_PROMPT = """\
 Extract concise topic labels from the phrase below. Each label should be \
-2-5 words, preserving specific entities and qualifiers. If the phrase covers \
-multiple distinct topics, output them comma-separated. If the phrase is not a \
-meaningful topic (e.g. sentence fragments, preamble text, generic capability \
-descriptions), output [skip].
+2-6 words, preserving specific entities, qualifiers, policy distinctions, \
+and parenthetical restrictions. If the phrase is one category with multiple \
+facets, output one qualified label rather than splitting the facets. If the \
+phrase covers multiple distinct topics, output them comma-separated. If the \
+phrase is not a meaningful topic (e.g. sentence fragments, preamble text, \
+generic capability descriptions), output [skip].
 
 Phrase: "{topic_raw}"
 Respond with ONLY the label(s), or [skip]."""

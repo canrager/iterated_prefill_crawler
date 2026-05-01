@@ -5,7 +5,17 @@ import unicodedata
 from typing import List, Union
 
 from src.crawler.topic_queue import Topic
-from src.openrouter_utils import REASONING_DISABLED
+from src.openrouter_utils import API_CALL_FAILED_SENTINEL, REASONING_DISABLED
+
+API_MODERATION_SENTINEL = "__API_MODERATION_REFUSED__"
+
+
+def _is_target_stage_sentinel(text: str) -> bool:
+    """Return True when a target generation is an API-stage sentinel."""
+    return isinstance(text, str) and (
+        text.startswith(API_CALL_FAILED_SENTINEL)
+        or text.startswith(API_MODERATION_SENTINEL)
+    )
 
 
 def _parse_translation_response(raw: str, expected_count: int = 0) -> List[str]:
@@ -519,9 +529,42 @@ class TopicFormatter:
             if cleaned_summary is None:
                 topic.summary = None
                 continue
+            cleaned_summary = self._preserve_raw_parenthetical_qualifier(
+                topic.raw,
+                cleaned_summary,
+            )
             topic.summary = cleaned_summary
             cleaned_topics.append(topic)
         return cleaned_topics
+
+    def _preserve_raw_parenthetical_qualifier(
+        self,
+        raw: str | None,
+        summary: str,
+    ) -> str:
+        if not raw or not summary:
+            return summary
+        qualifiers = [
+            q.strip()
+            for q in re.findall(r"\(([^()]+)\)", raw)
+            if q.strip()
+        ]
+        if not qualifiers:
+            return summary
+        raw_key = self._summary_dedup_key(raw)
+        summary_key = self._summary_dedup_key(summary)
+        missing = [
+            qualifier
+            for qualifier in qualifiers
+            if self._summary_dedup_key(qualifier) not in summary_key
+        ]
+        if not missing:
+            return summary
+        # If the summarizer split one qualified category into facets and lost
+        # the qualifier, the raw label is the less destructive display label.
+        if "," in summary or raw_key.startswith(summary_key):
+            return raw.strip()
+        return f"{summary} ({'; '.join(missing)})"
 
     def _split_at_comma(
         self,
@@ -634,6 +677,24 @@ class TopicFormatter:
         parent_ids = parent_ids * (len(generations) // len(parent_ids))
         assert len(parent_ids) == len(generations)
 
+        aligned_records = [
+            (prompt, generation, pid)
+            for prompt, generation, pid in zip(input_strs, generations, parent_ids)
+            if not _is_target_stage_sentinel(generation)
+        ]
+        skipped_sentinels = len(generations) - len(aligned_records)
+        if not aligned_records:
+            if skipped_sentinels:
+                print(
+                    "Warning. No extractable target generations: "
+                    f"skipped {skipped_sentinels} API sentinel generation(s)."
+                )
+            return []
+
+        input_strs = [prompt for prompt, _, _ in aligned_records]
+        generations = [generation for _, generation, _ in aligned_records]
+        parent_ids = [pid for _, _, pid in aligned_records]
+
         all_extracted_items = self._extract_with_model(
             generations,
             local_model=local_model,
@@ -648,7 +709,15 @@ class TopicFormatter:
                 formatted_topics.append(Topic(raw=item, parent_id=pid, prompt=prompt))
 
         if len(formatted_topics) == 0:
-            print(f"Warning. No topics found in this generation:\n{generations}\n\n")
+            print(
+                "Warning. No topics found in "
+                f"{len(generations)} extractable generation(s)"
+                + (
+                    f"; skipped {skipped_sentinels} API sentinel generation(s)."
+                    if skipped_sentinels
+                    else "."
+                )
+            )
             return []
 
         formatted_topics = self._batch_translate_chinese_english_both_ways(

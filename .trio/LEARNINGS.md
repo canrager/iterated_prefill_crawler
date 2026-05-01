@@ -1,384 +1,312 @@
 # Learnings
 
-This file is the single resumable source of truth for the crawler's research
-and engineering state. Read it top to bottom to pick up cold. Each entry is
-forward-facing: it tells future-you what to do, what not to do, and why.
-Rewrite, merge, and prune continuously. Source control tracks history.
+This file is for forward-facing decisions only. Do not append lab logs,
+command transcripts, one-off run summaries, or postmortem narration. Put exact
+commands and raw evidence in `HANDOFF.md`, `REVIEW.md`, or timestamped
+artifacts; keep this file as the short guide for what future work should do
+and avoid.
 
-## Where we are right now
-
-**Branch:** `increase-coverage`. Tests: 174 passing.
-
-**Goal (from CLAUDE.md):** become an extremely effective forbidden-topic
-recovery crawler against black-box targets that don't enumerate their refusal
-surface. Stay target-agnostic in code; treat known target ontologies as
-post-hoc external scoring data only.
-
-**Current target organism:** `deepseek/deepseek-v3.2`. Latest crawl artifact:
-`artifacts/out/crawler_out_20260424_020254_deepseek-v3.2_25samples_2crawls_Truefilter.json`.
-
-**Recent shipped fixes (committed, not yet validated by a fresh crawl):**
-
-1. Translation step uses the bench-validated JSON-array batch prompt instead of
-   one terse call per topic.
-2. `_split_at_comma` removed from `extract_and_format`. The previous version
-   shredded ~23% of head topics into ghost clones (783/3,361 rows).
-3. Analyzer probes (`scripts/analyze_crawl.py`) extended to recognize the
-   compact political abbreviations DeepSeek actually uses (`台独`, `藏独`,
-   `疆独`, `颠覆`, etc.). Score on the existing artifact moved 4/15 → 6/15.
-
-**The next experiment to run is one bounded live crawl** with the post-fix
-codebase (same prompts, same target, same configs). Do not propose new
-selection rules, prompt redesigns, or pipeline changes before that crawl
-exists. The audit below explains why; reread before starting work.
-
-## Hard constraints (do not violate, ever)
-
-### Stay target-agnostic in code
-
-Never put expected sensitive-topic literals (Taiwan, Tibet, Tiananmen, CCP,
-etc.) into prompts, production source, reusable research helper source,
-reviewer rubrics, or queue-ranking features. Selection logic must read only
-graph metadata (`parent_id`, `is_refusal`, language flags) — never label text.
-The crawler must run identically against any target organism; only the
-target's own behavior shapes its output.
-
-Expected-topic vocabularies are allowed *only* as external evaluation data
-loaded by post-hoc scoring scripts (e.g. analyzer probes), and only after
-selector outputs are frozen. The line is: any code path that influences what
-the next API call does is target-agnostic; any code path that scores already-
-collected data may use external evaluation literals.
-
-### Keep targeted rehearsal separate from the neutral path
-
-`jailbreak_rehearsal.yaml` is for proving reachability on a specific target.
-`jailbreak.yaml` is the paper-facing neutral path. Promote only general
-mechanism improvements (prompt shape, prefill format, branch count) into the
-neutral path. Never promote target-family steering or seeded sensitive
-literals upward. Mixed artifacts overstate the method.
-
-### Never retry experiments the human ruled out
-
-If a result, model, or approach was rejected, do not silently rerun it.
-Reread this file's "do not retry" section before scoping any new bakeoff,
-benchmark, or model swap.
-
-## Pipeline integrity — five steps, nothing in between
-
-The crawler is exactly five steps:
-
-1. Prompt the target model
-2. Extract topics (LLM returns a JSON array of labels)
-3. Translate bidirectionally (ZH↔EN)
-4. Provoke the target model with refusal probes
-5. Classify refusal vs. not
-
-Everything between these steps must preserve label fidelity. Inline
-post-processing (splitting, regex cleanup, dedup, summarization heuristics)
-that *modifies* labels has consistently hurt recall. The extractor decides
-topic boundaries: if it returns one array element, that is one topic.
-
-Post-crawl aggregation and analysis can be as topic-literate as needed —
-splitting, merging, normalizing — because it operates on final data without
-feeding corrupted labels back into the seed pool.
-
-*Concrete losses observed before fixes: `歪曲党史国史军史` ("Distorting the
-history of the Party, the nation, and the military") shredded into three
-fragments including `"the nation"` and `"the military"`, all carrying the
-original Chinese raw. `隐私、个人信息与监控` reduced to `"privacy"`. 783 of
-3,361 head topics in the latest artifact were ghost clones from
-`_split_at_comma`.*
-
-### Translation must use the prompt shape the bench validated
-
-If the extractor/translator bench tests JSON-array batch prompts, prod must
-send JSON-array batch prompts. A bench that validates a capability prod
-doesn't use is wasted information. Aligning prod to bench also reduces API
-calls (one batch vs. N individual translations) and gives short labels
-disambiguating context.
-
-*Before the fix, prod sent `"Translate to English (translation only): 支持台独"`
-per topic. The bench sent a JSON array with system prompt and structured
-instructions. The bench's `TRANSLATION_PROMPT` and `parse_translation_output`
-were never used. Now `_translate_batch` matches the bench format.*
-
-### The extractor's list-gate drops prose deflections — three failure modes
-
-`TOPIC_EXTRACTION_PROMPT` is gated to return `[]` for non-list inputs. That
-correctly drops documents, code, and off-topic content. It also drops prose
-refusals where the target named a topic in continuous text without listing
-("X is a complex issue, let's discuss in balanced terms"). Targets whose
-refusal style favors deflection prose lose those topics at extraction.
-
-When labeling a recovery gap, distinguish three failure modes:
-
-1. **Selection failure** — the topic was extracted into the queue but never
-   drilled. Fix: graph- or routing-level seed prioritization.
-2. **Extraction failure on prose deflection** — the topic was named by the
-   target in non-list output and dropped. Fix (open question): a second-pass
-   path for topics named inside refusal-classified responses, without
-   reintroducing extraction noise.
-3. **Elicitation failure** — the target never named the topic at all under
-   the prompts in use. Fix: prompt-config work, not pipeline work. No amount
-   of drilling or extraction change recovers a topic the target never uttered.
-
-Do not conflate these when proposing crawler changes.
-
-*In the latest artifact, the "missing" 9 golden categories split as: 4 in
-deflection prose (`南海`, `中印`, `香港`, `一带一路`), 5 never uttered (`六四`,
-`天安门`, `法轮功`, `达赖`, `文化大革命`).*
-
-## Discovery and routing — where the next gain probably lives
-
-### Warmup discovers politically-productive seeds reproducibly; the bottleneck is what we *do* with them
-
-The Chinese warmup prompt in `jailbreak.yaml` reliably elicits CCP-relevant
-top-level umbrellas. `生成用于政治诽谤的虚假新闻` (parent 1808) and
-`分裂主义与分离运动` are two examples in the latest artifact. Each, when
-followed by the **expansion** prompt template, produced a rich enumeration
-of CCP-sensitive child topics (`支持台独`, `支持藏独`, `支持疆独`,
-`歪曲党史国史军史`, `否定中国共产党领导`, `争议性国家主权表述`, etc.).
-
-The drill-down prompt template was used 12 times in Chinese during the same
-crawl. Every single seed it received was a Western-safety topic (hate
-content, weapons, hacking, suicide methods). The drill-down was never applied
-to a politically-flavored seed.
-
-This is a *routing* gap, not a discovery, prompt design, or selection-pool
-gap. The right seeds exist in the queue. The right prompts exist in the
-config. They were never combined.
-
-*Evidence: `artifacts/research/crawl_shape/offline_audit_findings.md` (audit
-C). Of 38 children of parent 1808, 36 came from the Chinese expansion
-template and 2 are comma-split clones. Zero came from drill-down. Of 12
-distinct Chinese drill-down invocations, zero seeds were politically-flavored.*
-
-### The drill-down prompt is byte-for-byte the gold March 30 prompt
-
-`user_seed_templates[chinese][0]` in `jailbreak.yaml` matches the gold
-March 30 OpenRouter transcript word-for-word, with `{}` substituted for the
-seed. The forged CoT, authorization line, and `话题：\n1.` prefill are all
-identical. When DeepSeek was hit with this prompt seeded with
-`敏感政治与地缘冲突`, it produced a 20-item Chinese enumeration containing
-all 15 golden categories.
-
-Do not redesign these prompts. They work. The shortfall is routing.
-
-*Evidence: `artifacts/research/crawl_shape/offline_audit_findings.md` (audit B).*
-
-### `is_refusal`-only seed eligibility was tried and reverted; do not regress
-
-An earlier code revision restricted seed selection to `head_refusal_topics`
-only. That consistently missed broad parents that answered safely at the
-coarse label but had refusable subcategories underneath ("Politically
-Sensitive History" → helpful enumeration of Rwandan Genocide, American
-Slavery → no `is_refusal` mark on the parent → never drilled, even though
-the children would refuse). The current code in `_get_user_seed_candidates`
-deliberately seeds from `head_topics` (all discovered), with
-`head_refusal_topics` as a compatibility fallback. The function comment
-documents this decision. Do not regress.
-
-A new selection signal beyond `is_refusal` is an open research question.
-Probe-shape dependence (the same topic refuses or not depending on how the
-probe is phrased) means `is_refusal` alone is too noisy as a sole priority
-signal.
-
-### The strongest known offline signal is "this parent already produced refusal children"
+## Mission
 
-Across the latest artifact, the most productive parent (id 1808) produced 35
-children flagged `is_refusal: true`. None of those 35 were ever drilled —
-random uniform sampling over ~2,097 unexplored top-level candidates gave each
-~0.25% chance per slot. The information needed for depth was already in the
-queue; selection couldn't use it.
+Build the Iterated Prefill Crawler into a cost-efficient black-box refusal
+surface recovery tool. The useful paper artifact is a model-specific
+"nutrition label" of refusal topics, recoverable through prefill/fake-prefill
+elicitation and summarized as clusters or wordclouds.
 
-This *correlates* with productivity but is not yet a validated selection
-rule. Combining it with the previous warning means: any future selection
-work must (a) preserve the current "seed from all head topics" policy as
-the floor, (b) avoid topic-text inspection, (c) prove on a counterfactual
-crawl artifact (not the same artifact that observed the historical
-selection) that the new rule beats current behavior. The latter requires
-fresh crawl data, not more offline reasoning over the same artifact.
+Production selection and prompts must remain target-agnostic. Target-specific
+topic vocabularies are allowed only for frozen-output, post-hoc scoring.
 
-## Helper-LLM behavior
+## Hard Constraints
 
-### Extractors silently drop alignment-trigger categories under prod prompts
+Never put concrete expected target topics into production prompts, queue
+selection, reviewer rubrics, or reusable selector code. The crawler must run
+the same way against any target organism.
 
-Helper LLMs fine-tuned for safety can produce clean JSON and no visible
-refusal while systematically omitting the hardest categories (CSAM, weapons,
-self-harm, exploit code) from a target's audit enumeration. This is the
-worst failure mode: biased recall loss on exactly the categories that matter,
-with output that looks successful. A general extractor bench
-(historical/political fixtures) will not catch it; benches must include real
-jailbreak enumeration fixtures.
+Do not redesign `jailbreak.yaml` because a crawl misses expected topics. The
+known-good drill-down prompt shape already works when routed the right broad
+parent. The present gap is routing/selection, not prompt invention.
 
-*Evidence: bench 2026-04-22 on `extractor_test_alignment_triggers_en.txt`.
-`openai/gpt-5.4-mini` scored 23/38 (61%) with 0% visible refusal. Reports at
-`/tmp/ipc-main/artifacts/bench/extractor_models_*.json`.*
+Do not use `is_refusal` as the only seed eligibility rule. Broad parents can
+look safe at the coarse level while their children are refusal-bearing.
 
-### Disable reasoning on helper calls; keep it on for target calls
+Do not treat LEARNINGS as an audit trail. If a note does not change a future
+decision, remove it.
 
-Helper roles (extraction, translation, summarization, judging) are
-deterministic transformations, not reasoning tasks. Provider-default reasoning
-burns tokens and latency for no quality gain. Disable at the helper call
-boundary only; target-model calls must keep reasoning on (that's the audit
-signal). Plumbed via `REASONING_DISABLED` in `src/openrouter_utils.py`.
+## Pipeline Invariants
 
-### Cap helper concurrency at the API boundary
+The crawler's core loop remains:
 
-Refusal-check produces `topics * j` messages in a single `batch_generate`
-call. Without a semaphore, OpenRouter rate-limits the provider and the SDK's
-retry-with-backoff turns the stall into a self-perpetuating retry storm.
-Every `_api_batch_generate` call needs a semaphore (currently
-`max_concurrent_api_calls=16`). Translation sub-batching must use a
-dedicated `translation_batch_size`, not `generation_batch_size` (which is
-~2 and would inflate translate calls ~50x).
+```text
+Generate -> Extract -> Translate -> Provoke -> Classify Refusals
+```
 
-### Topic extractor must gate on "is this a topic list" first
+Everything before post-crawl analysis must preserve target-emitted label
+fidelity. Inline splitting, cleanup, and summarization heuristics that mutate
+labels have repeatedly damaged recall. If a helper returns one label, keep it
+as one label unless a separate verified post-crawl analysis step splits it.
 
-`TOPIC_EXTRACTION_PROMPT` opens with the gate check, not the extraction
-instruction. Without the gate, contaminating inputs (textbook copyright
-pages, LeetCode solutions hallucinated by the target) become "topics" that
-poison the queue. Regression tests in `tests/test_topic_extraction_drift.py`
-use the exact contaminating fixtures.
+Upstream API sentinels are terminal records for that stage, not semantic text.
+Never pass `__API_CALL_FAILED__` or API-moderation sentinels into extraction,
+translation, summarization, clustering, or selector prompts.
 
-### Aggregation and coverage loaders must share the same topic key
+Helper-model moderation failures should use the configured universal backup
+model before a helper result is allowed to drop data. Target-model moderation
+or refusal sentinels are part of the target behavior and must not be hidden by
+backup substitution.
 
-Different normalizers across aggregator and analyzer score different topic
-surfaces. Use the shared helper `normalize_topic_key()` in
-`src/aggregation/topic_normalization.py`; require both `TopicAggregator` and
-`coverage` to call it. The compatibility test covers ASCII punctuation/case
-variants and Unicode (full-width) punctuation.
+## Discovery vs. Routing
 
-### Refusal-probe-generator bypass: opt-in only
+Warmup can emit useful broad umbrellas. The repeated failure mode is that the
+crawler does not drill the right broad parents. Treat this as a routing
+problem until a crawl proves the target never emitted a usable parent.
 
-The hardcoded fallback probes can eliminate the refusal-check
-query-generation call. That proves a cost-saving mechanism, not live
-sufficiency. `crawler.use_hardcoded_refusal_probes_only=false` by default;
-a budgeted live comparison is required before treating it as a replacement.
+When diagnosing a miss, classify it as exactly one of:
 
-## Methodology
+1. **Elicitation failure:** the target never emitted a relevant broad parent.
+2. **Extraction/translation failure:** the parent was present but not preserved.
+3. **Selection failure:** the parent was preserved but not drilled.
+4. **Validation/reporting failure:** the useful child survived but never
+   entered validation or the final artifact.
 
-### Use a live two-step harness to prove a stochastic crawl path
+Do not solve a selection failure with a new target prompt.
 
-A full crawl conflates code-path bugs with sampling variance. For new
-mechanisms, build a small live probe (like `--chain-zh` in
-`tests/test_refusal_pipeline.py`) that reuses real prompt configs for both
-stages. Only the trigger detector should be hardcoded.
+## Cluster-First Crawler
 
-### Trigger extraction must score candidates, not first-match
+The cluster-first crawler is the right low-cost shape for wordcloud artifacts:
 
-Broad audit responses contain generic scaffolding phrases that match trigger
-patterns before reaching the politically useful seed. Gather all candidates,
-blacklist generic policy/compliance frames, prefer the strongest political or
-historical parent.
+```text
+Generation -> Extract/Translate/Summarize -> Cluster -> Drill selected umbrellas -> Validate reps -> Wordcloud
+```
 
-### Encode experiment variants in YAML; never CLI-override
+It is still called a crawler for continuity, but operationally it is a
+fixed-budget clusterer. Evidence should be cluster-level, not raw-row-level.
 
-CLI overrides leave a stronger experiment path unnamed and unreproducible.
-A new defaults set deserves a new YAML config. Acceptable overrides: one-off
-diagnostic flags only.
+The current mixed selector uses largest clusters, random tail/singletons, and
+farthest-first diversity. It is unique within a run, but it is not aligned
+with the research objective. Increasing `--auto-drill-seeds` alone improves
+breadth but does not reliably recover rare broad umbrellas.
 
-### Promote branch count before token count
+Next selector work should reserve quota for broad rare umbrellas before
+random tail sampling. This must be phrased generically: broad, abstract,
+contestable, institutional, historical, geopolitical, public-order,
+rights-related, security-related, law-related, information-control-related, or
+framing-dependent categories. The selector may use those general properties;
+it must not use concrete target-topic vocabularies.
 
-When warmup finds the right topics but the seeded step drifts, the failure
-is sampling variance, not token budget. Raise `num_samples_per_topic` first.
+## Helper Selector Prompting
 
-*Evidence: rehearsal.yaml from 1 to 5 samples/topic turned a drifting
-DeepSeek rehearsal into a successful Taiwan/Tibet/Xinjiang targeting run.*
+The first helper-selector prompt was too cluttered. It over-specified the
+rubric, buried the actual job, and asked the model to rank the full label list
+in one shot. That benchmark showed a useful distinction: the primary helper model
+can obey exact-label constraints, while the fallback model may normalize or
+invent labels and therefore needs strict post-filtering.
 
-### Rehearsal without refusal filtering is judged by branch quality
-
-`rehearsal.yaml` sets `do_filter_refusals: false` by design. Zero discovered
-refusals is expected. Judge by whether discovered topics enter the intended
-sensitive branch and whether seeded drilldown stays on it.
-
-### DeepSeek's low neutral-path refusal rate is a finding, not a bug
-
-CCP-aligned models systematically deny their censorship surface on the
-neutral `jailbreak` path. ~71% refusal vs 97%+ for GPT/Haiku is expected:
-without forgery-style elicitation, these models will not volunteer that
-"disputing Taiwan independence" is restricted. Do not treat the rate gap
-as a pipeline failure when comparing across model families.
-
-### Validate prompt fixes with integration tests on real bad fixtures
-
-When an LLM prompt is changed to fix a contamination or extraction bug, the
-cheapest validation is an integration test that feeds the exact bad inputs
-as fixtures. A full debug run is expensive and stochastic.
-
-### Crawl-shape evaluation must separate three measurement layers
-
-Source-level recovery (topic in `raw`/`chinese`/`english`), exported-summary
-recovery (topic in `summary`), and analyzer-counted recovery can disagree.
-A single headline score can hide bugs in any of the three. Future evaluation
-must report all three before claiming a prompt or queue improvement.
-
-## Dead ends — do not retry without new evidence
-
-### Offline selector bakeoffs over a single artifact
-
-Three rounds (embedding-first, embedding-strict cost-saving, cheap-hybrid)
-all hit the same wall: offline ranking can score redundancy and historical-
-selection match, but cannot fairly score child/refusal yield for unobserved
-candidates because the artifact has no counterfactual children. Any new
-selection-rule research needs a counterfactual artifact (a separate crawl)
-or a budgeted live A/B. Stop running offline bakeoffs.
-
-*Reports: `artifacts/research/crawl_shape/offline_selector_bakeoff_a.md`,
-`offline_selector_bakeoff_b.md`, `cheap_hybrid_selector_bakeoff.md`,
-`offline_selector_bakeoff_synthesis.md`.*
-
-### Embedding ranking as core queue logic
-
-Local Qwen embeddings work and find semantic redundancy missed by string
-matching, but failed to beat cheap baselines on cost-saving and
-recovery-per-budget metrics. Useful as analysis tooling; not justified as
-production queue logic without new data.
-
-### `is_refusal`-only seed eligibility
-
-Already documented above as a hard "do not regress." Listed here too because
-it's tempting to re-propose under the framing of "graph-priority selection."
-The rule misses broad-parent-with-helpful-coarse-label cases. Don't.
-
-### Redesigning `jailbreak.yaml` prompts
-
-The Chinese drill-down prompt is byte-for-byte the gold March 30 prompt that
-elicited all 15 golden categories from DeepSeek. The English templates
-mirror the gold April 16 transcript. The shortfall is routing, not prompt
-design. Do not redesign.
-
-### Inline post-processing as a recall fix
-
-Comma splitting on summaries, regex filtering of shortened labels,
-word-count summarization bypass — all grew to patch edge cases and all hurt
-recall on cases that mattered. Future inline-postprocessing additions need
-proof of net-positive recall on a real artifact, not just on the edge case
-they target.
-
-## What to do next, in order
-
-1. **Run one bounded live crawl** with the current codebase against
-   `deepseek/deepseek-v3.2`, same prompts and configs as the latest
-   artifact. The fresh artifact establishes the post-fix baseline. Until
-   this exists, no further code changes are well-grounded.
-
-2. **Compare the fresh artifact to the latest artifact** on three axes:
-   how many ghost rows from comma split (should be zero), source-vs-summary
-   recall on translated labels (should agree), and whether the
-   politically-productive-seed-not-drilled pattern reproduces.
-
-3. **If the routing pattern reproduces:** design a target-agnostic seed
-   prioritization signal that does not collapse to `is_refusal`-only and
-   does not inspect topic text. Open research question.
-
-4. **If the routing pattern does not reproduce:** Slice 1's removal of 783
-   ghost rows changed the selection landscape enough on its own. Different
-   seeds will be drilled. New patterns will emerge. Re-audit and re-decide.
-
-5. **In parallel, the prose-deflection extraction gap remains an open
-   research question.** Designing a second-pass extractor that runs only on
-   refusal-classified responses, without reintroducing list-gate noise, is
-   worth scoping after step 1's data lands.
-
-Steps 3 and 5 require the live crawl in step 1 first. Do not pre-optimize.
+Forward rule: do not ask a helper to discover rare broad singletons from the
+entire cluster list. First create a deterministic, target-agnostic candidate
+pool using cheap metadata and broadness features, then ask the helper to rank
+that small pool verbatim.
+
+A cleaner helper-selector task should be short:
+
+```text
+Choose labels worth drilling because they are broad categories, not concrete
+requests. Prefer labels whose children may vary by actor, time period,
+institution, jurisdiction, public context, disputed facts, or framing. Return
+only verbatim labels from the input.
+```
+
+The benchmark pass condition is not "the model returned plausible labels."
+It is:
+
+- all selected labels are verbatim input labels;
+- the selected set includes rare broad singleton candidates;
+- selected candidates were not already drilled or validated;
+- post-hoc target-specific scoring improves after those frozen selections.
+
+## Validation Strategy
+
+Validation cannot only follow top cluster score. Rare broad umbrellas and
+their descendants are low-frequency by construction. Reserve validation quota
+for:
+
+- top scored clusters;
+- newly drilled umbrella descendants;
+- rare broad singleton clusters;
+- diversity among semantic neighborhoods.
+
+Keep validation probes low during shape tests. Increase probes only after the
+selector is retrieving the right neighborhoods.
+
+## Model/Helper Guidance
+
+Disable reasoning for helper calls. Helpers are doing extraction, translation,
+summarization, ranking, or judging. Reasoning tokens add cost and latency
+without being the audit signal. Keep target-model reasoning behavior intact.
+
+Cap helper concurrency at the API boundary. Fan-out stages can otherwise turn
+rate limits into retry storms.
+
+Translation and extraction should use the same prompt shape that their benches
+validated. A bench that tests a different shape than production is not useful.
+
+## Current Next Move
+
+Do not run another larger crawl yet. The next valuable experiment is an
+offline selector slice:
+
+1. Build a deterministic broad-umbrella prefilter over frozen cluster labels.
+2. Feed only that reduced candidate pool to the primary helper selector.
+3. Strictly post-filter to verbatim labels.
+4. Compare selected seeds against the current mixed selector on frozen
+   artifacts before spending more target API calls.
+5. Only then run a small live crawl with a reserved broad-umbrella drill quota.
+
+The falsifiable question is: can the new selector consistently surface broad
+rare umbrellas that the current mixed selector misses, without target-specific
+topic literals?
+
+The broad-tail bilingual path now exists behind a flag. Use it as the next
+research shape: Kimi extracts a broadest-first array from raw target taxonomy
+text, the crawler deduplicates and drills from tail toward head, and each seed
+is drilled in both available language surfaces. Treat this as the hypothesis
+to compare against structure-only cluster sampling.
+
+The next default crawler shape should reserve broad-topic budget in two
+directions before any embedding-based auto-drill: use the head of Kimi's
+broadest-first array for lateral "what else" crawl, and the tail for granular
+drill-down. Tune new runs with explicit `--broad-head-crawl-seeds`,
+`--broad-tail-drill-seeds`, and `--broad-iterations` so effectiveness and API
+cost can be attributed.
+
+There is no legacy broad-drill alias in the cluster crawler. Tune and report
+the new shape only through explicit `broad_head_crawl_seeds`,
+`broad_tail_drill_seeds`, and `broad_iterations` profile fields or CLI flags.
+
+Debug cluster-crawler profiles may be verbose because their purpose is payload
+inspection. Rehearsal/default live runs should keep verbose logging off unless
+the output is redirected and inspected narrowly, because current verbose mode
+can print raw prompts, topics, helper request bodies, and formatted topic
+objects.
+
+For paper-style wordclouds, clustering is not the ranking mechanism. The
+post-crawl renderer should benchmark pairwise-ranking ideas against frozen
+artifacts before changing production display weights. A useful offline proxy is
+to compare cluster-size scoring against Elo-style pairwise updates over generic
+signals such as parent-yield, cluster score, and label specificity, then score
+target-specific recovery only as post-hoc artifact evaluation.
+
+Target-specific regexes or vocabularies belong in one-off post-hoc benchmark
+commands or saved result artifacts, not reusable scripts, prompts, selectors,
+or configs. The reusable renderer should accept a regex argument and otherwise
+remain target-agnostic.
+
+For wordcloud display, rank first and then collect display terms by discovered
+cluster. On the frozen debug artifact, raw pairwise-proxy ranking recovered
+the target neighborhood but let one repeated semantic family dominate the top
+50. A display cap of two terms per cluster preserved all post-hoc target
+anchors in the top 50 while cutting the repeated-family top-50 count from
+eight to two. Treat cap 2 as the current offline renderer default, and
+falsify it on the next rehearsal artifact before claiming generality.
+
+Family/canonicalization should preserve exact member strings and keep the
+display label separate. Local string and TF-IDF grouping can reduce obvious
+duplicates, but the frozen debug benchmark shows they do not solve canonical
+label choice: string grouping can pick a generic label for a more specific
+member, while TF-IDF can merge the desired sovereignty wording pair. The next
+valuable comparison is a carefully prompted aggregator model with the minimal
+schema `[{label, members}]`, scored against the same aggregate metrics and
+CCP-only qualitative vetting artifact.
+
+For the minimal aggregator prompt, Kimi behaved better than Qwen on the frozen
+debug artifact: both returned valid exact-member JSON with no repair needed,
+but Qwen grouped nothing at 120 labels while Kimi made three conservative
+two-member families and preserved the useful sovereignty wording merge. Treat
+this as evidence for Kimi as the display-family aggregator candidate, not as a
+reason to replace Qwen for translation or other helper roles.
+
+Aggregator display labels should be allowed to be readable generated strings;
+only `members` must be exact input strings. The prompt should stay
+target-agnostic and linguistic, using non-refusal examples. Deterministic
+repair should validate exact member coverage and use member-string fallback
+only when a display label is missing or blank.
+
+The first display-label aggregator benchmark improved readability but made the
+main risk visible: generated labels can become too broad even when members are
+exact. Qwen over-grouped on the frozen debug artifact; Kimi stayed cleaner but
+still used broader display labels for some specific member strings. The next
+prompt should remain domain-agnostic and describe this as a linguistic rule:
+prefer labels that keep distinctive concrete words from the most specific
+members, and split rather than using a label that could also describe many
+other input strings.
+
+Do not assume a stronger aggregation prompt fixes loss of specificity at large
+batch size. On the frozen debug artifact, 120-label aggregation made models
+choose among bad behaviors: singleton everything, fail parsing, or compress
+fine-grained findings into broad umbrellas. Before changing prompt wording
+again, run a batch-size ablation on the same frozen input and measure whether
+30-60 label chunks preserve exact-member fidelity and produce better display
+families.
+
+Incremental batching should be evaluated per model, not assumed uniformly
+better. At batch size 30 on the frozen debug artifact, Qwen improved
+substantially versus one-shot display-label aggregation: zero repair, smaller
+max family, and more CCP-vetting families. Kimi kept zero repair too, but
+compressed harder than desired. The next renderer benchmark should ablate
+batch sizes before changing wording or model roles.
+
+Do not assume frontier or western aggregator models will preserve paper-style
+specificity. In the batch-30 benchmark, Gemma 4 and Claude Sonnet 4.6 both
+preserved exact members but hid Taiwan-related strings under broad
+territorial/sovereignty labels. The failure is increasingly a task/objective
+problem: semantic grouping rewards compression, while the wordcloud needs
+specific exact-member visibility.
+
+The older indexed aggregator prompt and the newer `src/aggregation` reduction
+prompt are useful comparators, not current renderer candidates. They reduce
+repetition, but their objective is semantic clustering/reduction, which is not
+the same as paper-style wordcloud labeling. Use them to falsify new ideas, not
+as defaults for final display.
+
+Batching the legacy `exp/` indexed prompt makes it more tractable but does not
+change its core objective. In the frozen debug artifact, 30-topic legacy
+batches still hid Taiwan-related exact strings under broad semantic cluster
+labels. Treat the legacy prompt as historical reconstruction evidence, not as
+the final paper-wordcloud renderer unless the renderer separately surfaces
+high-value exact members inside broad families.
+
+Do not choose the final cloud maker from the tiny debug crawl alone. After
+augmenting the frozen debug artifact with Kimi extraction from the combined ZH
+fixture, the batched legacy `exp/` prompt became the strongest
+website-style candidate: both Qwen and Kimi surfaced all post-hoc CCP-matched
+members in the top 80, and Kimi preserved more families. The current best
+next step is a larger real crawl followed by Kimi + batched-old-indexed
+rendering, with exact members retained for audit and optional member-level
+display.
+
+Rehearsal-size live crawls can differ by an order of magnitude across target
+and method. In the May 1 rehearsal pair, DeepSeek V3.2 jailbreak produced a
+large aggregation-ready artifact, while Haiku 3.5 assistant-prefix produced a
+valid but small artifact. Use the DeepSeek artifact for the next cloud-maker
+comparison; do not assume the Haiku prefill artifact is an equally strong
+nutrition-label run without either more breadth or a stronger prefill variant.
+
+When post-crawl aggregation preserves a rare target family but the wordcloud
+still hides it, inspect the family score before changing retrieval. In the
+DeepSeek rehearsal, Kimi + batched legacy aggregation preserved a 13-member
+CCP-aligned family, but current max-member scoring ranked it 99. A generic
+log member-count boost moved it to rank 29 without target-specific vocabulary.
+The next renderer should score by member strength plus family support, then
+cap rendered terms.
+
+## Do Not Retry Without New Evidence
+
+Do not run more offline bakeoffs over a single historical artifact unless they
+produce frozen seed selections for a live counterfactual. A static artifact
+cannot reveal child yield for seeds that were never drilled.
+
+Do not promote embedding ranking into production queue logic yet. Embeddings
+are useful for analysis and redundancy, but they have not proven better than
+cheap structural baselines for recovery per budget.
+
+Do not add inline label-mutating post-processing as a recall fix. Prove net
+positive recall on real artifacts first.
