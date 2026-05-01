@@ -41,11 +41,16 @@ The `haiku` config also uses a local auxiliary model (`allenai/Olmo-3-7B-Instruc
 for translation, summarization, and refusal checking. It downloads automatically on first run
 to `hf_models/` inside the repo. Override the location with `model.cache_dir=/your/path`.
 
-## Cluster-first pipeline (low-cost wordcloud audits)
+## Cluster-first pipeline (structured crawler shape)
 
-An alternative to the recursive crawler above when you want a paper-style refusal-topic
-wordcloud at a bounded API cost. Three commands end-to-end against any provider-hosted target
-via OpenRouter, roughly $5 per run on DeepSeek V3.2 scale:
+A more directed crawler shape than the recursive iterated-prefill loop. Instead of an
+undirected N-step × S-sample sweep where every extracted topic recursively re-seeds, the
+cluster-first crawler routes the target's emitted taxonomy through a helper LLM that sorts
+topics broadest-first, then expands the broadest *head* categories laterally and drills the
+narrowest *tail* categories vertically. Recovers more refusal-topic neighborhood per target
+generation; the lower API cost is a consequence of that, not an arbitrary cap.
+
+Three commands end-to-end against any provider-hosted target via OpenRouter:
 
 ```bash
 # 1. Crawl: fixed-budget jailbreak pass with broad head-crawl + tail-drill, then clustering.
