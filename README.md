@@ -133,12 +133,14 @@ Tunable via `--broad-head-crawl-seeds`, `--broad-tail-drill-seeds`, `--broad-ite
 Named profiles in `configs/cluster_crawler/{debug,rehearsal,default}.yaml` set sensible
 defaults.
 
-Both `jailbreak.yaml` and `default.yaml` populate the new `user_drill_templates` slot on
-`PromptsConfig` directly, so the cluster-first crawler's tail-drill phase reads from a typed
-config field rather than scanning `user_seed_templates` for content markers — the head/drill
-split is now explicit at the schema level, not inferred. Configs that don't define
-`user_drill_templates` fall back to the existing marker-matching heuristic, so the recursive
-crawler on `main` is unaffected.
+Both `jailbreak.yaml` and `default.yaml` populate `user_drill_templates` on
+`PromptsConfig` directly. The cluster-first crawler reads `user_seed_templates[0]` for the
+head-crawl phase and `user_drill_templates[0]` for the tail-drill phase — both typed,
+predictable, no marker matching. A custom config that doesn't define `user_drill_templates`
+gets baseline behavior: tail-drill falls back to `user_seed_templates[0]`, the same prompt
+the head phase uses. That's "no head/drill distinction" by design — for a real broad-then-drill
+traversal, populate `user_drill_templates`. The recursive crawler on `main` only consumes
+`user_seed_templates` and is unaffected.
 
 The self-rank step in 3 is the same target-as-judge Elo design from `src/evaluation/ranking.py`,
 ported to OpenRouter so it runs against hosted targets without a local GPU.

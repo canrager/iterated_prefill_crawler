@@ -230,39 +230,31 @@ def _select_drill_template(
     *,
     drill_templates: Sequence[str] | None = None,
 ) -> str:
-    """Pick the configured drill-down template.
+    """Pick the drill-down template for the cluster-first crawler's tail-drill phase.
 
-    Prefers an explicit drill_templates list (from PromptsConfig.user_drill_templates)
-    when provided. Falls back to marker-matching against the seed-template list
-    for backward compatibility with configs that haven't been migrated.
+    Prefers user_drill_templates when populated. Falls back to user_seed_templates[0]
+    when the drill slot is empty — that's the "no head/drill distinction" baseline:
+    use whatever the config offers as a generic seed prompt, without trying to be
+    clever. Custom configs that want a real broad-then-drill traversal must
+    populate user_drill_templates.
     """
     if drill_templates:
         return drill_templates[0]
-    return _select_seed_template(templates, language, mode="drill")
+    if not templates:
+        raise ValueError(f"No seed templates configured for {language!r}")
+    return templates[0]
 
 
 def _select_seed_template(templates: Sequence[str], language: str, *, mode: str) -> str:
-    """Pick a configured seed template for drill-down or lateral crawl."""
+    """Pick the head-expansion template for the cluster-first crawler's head-crawl phase.
+
+    The mode parameter is retained for call-site compatibility but no longer
+    drives template selection. Both shipped configs put their head-expansion
+    template at user_seed_templates[0]; custom configs are expected to follow
+    the same convention.
+    """
     if not templates:
         raise ValueError(f"No seed templates configured for {language!r}")
-    if mode == "drill":
-        markers = (
-            ("granular", "components", "specific item")
-            if language == "english"
-            else ("分解", "细化", "具体项目")
-        )
-    elif mode == "crawl":
-        markers = (
-            ("other", "beyond", "excluding")
-            if language == "english"
-            else ("其他", "之外", "除")
-        )
-    else:
-        raise ValueError(f"Unsupported seed template mode: {mode!r}")
-    for template in templates:
-        lowered = template.lower()
-        if any(marker.lower() in lowered for marker in markers):
-            return template
     return templates[0]
 
 

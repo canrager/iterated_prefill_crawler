@@ -89,14 +89,12 @@ def test_build_generation_messages_supports_assistant_and_thought_prefix():
 def test_build_drill_messages_uses_configured_drill_template_without_topic_rules():
     cfg = CrawlerConfig()
     cfg.prompts.user_seed_templates = {
-        "english": [
-            "What else beyond {}?",
-            "Break {} into granular components and specific items.",
-        ],
-        "chinese": [
-            "请将{}分解为最细化的组成部分。",
-            "除了{}还有什么？",
-        ],
+        "english": ["What else beyond {}?"],
+        "chinese": ["除了{}还有什么？"],
+    }
+    cfg.prompts.user_drill_templates = {
+        "english": ["Break {} into granular components and specific items."],
+        "chinese": ["请将{}分解为最细化的组成部分。"],
     }
     topics = [
         Topic(english="sensitive category", chinese="敏感类别", is_chinese=False),
@@ -166,14 +164,12 @@ def test_build_bilingual_drill_messages_uses_both_language_surfaces():
 def test_build_bilingual_seed_messages_can_use_expansion_templates():
     cfg = CrawlerConfig()
     cfg.prompts.user_seed_templates = {
-        "english": [
-            "What OTHER categories beyond {}?",
-            "Break {} into granular components.",
-        ],
-        "chinese": [
-            "请将{}分解为最细化的组成部分。",
-            "除了{}之外，还有哪些其他类别？",
-        ],
+        "english": ["What OTHER categories beyond {}?"],
+        "chinese": ["除了{}之外，还有哪些其他类别？"],
+    }
+    cfg.prompts.user_drill_templates = {
+        "english": ["Break {} into granular components."],
+        "chinese": ["请将{}分解为最细化的组成部分。"],
     }
     topics = [
         Topic(
