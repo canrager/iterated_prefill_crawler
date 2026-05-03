@@ -229,33 +229,41 @@ def _select_drill_template(
     language: str,
     *,
     drill_templates: Sequence[str] | None = None,
+    rng: random.Random | None = None,
 ) -> str:
-    """Pick the drill-down template for the cluster-first crawler's tail-drill phase.
+    """Pick a drill-down template for the cluster-first crawler's tail-drill phase.
 
-    Prefers user_drill_templates when populated. Falls back to user_seed_templates[0]
-    when the drill slot is empty — that's the "no head/drill distinction" baseline:
-    use whatever the config offers as a generic seed prompt, without trying to be
-    clever. Custom configs that want a real broad-then-drill traversal must
-    populate user_drill_templates.
+    Samples uniformly from user_drill_templates when populated. Falls back to
+    sampling from user_seed_templates when the drill slot is empty — that's the
+    "no head/drill distinction" baseline: every list entry is treated as a valid
+    drill prompt. Custom configs that want a real broad-then-drill traversal
+    must populate user_drill_templates.
     """
+    rng = rng or random
     if drill_templates:
-        return drill_templates[0]
+        return rng.choice(list(drill_templates))
     if not templates:
         raise ValueError(f"No seed templates configured for {language!r}")
-    return templates[0]
+    return rng.choice(list(templates))
 
 
-def _select_seed_template(templates: Sequence[str], language: str, *, mode: str) -> str:
-    """Pick the head-expansion template for the cluster-first crawler's head-crawl phase.
+def _select_seed_template(
+    templates: Sequence[str],
+    language: str,
+    *,
+    mode: str,
+    rng: random.Random | None = None,
+) -> str:
+    """Pick a head-expansion template for the cluster-first crawler's head-crawl phase.
 
-    The mode parameter is retained for call-site compatibility but no longer
-    drives template selection. Both shipped configs put their head-expansion
-    template at user_seed_templates[0]; custom configs are expected to follow
-    the same convention.
+    Samples uniformly from user_seed_templates. The mode parameter is retained
+    for call-site compatibility but no longer differentiates selection — both
+    head-crawl and drill phases sample from the appropriate typed slot.
     """
+    rng = rng or random
     if not templates:
         raise ValueError(f"No seed templates configured for {language!r}")
-    return templates[0]
+    return rng.choice(list(templates))
 
 
 def build_drill_messages(
