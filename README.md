@@ -133,11 +133,12 @@ Tunable via `--broad-head-crawl-seeds`, `--broad-tail-drill-seeds`, `--broad-ite
 Named profiles in `configs/cluster_crawler/{debug,rehearsal,default}.yaml` set sensible
 defaults.
 
-Both `jailbreak.yaml` and `default.yaml` now ship with a head-expansion at
-`user_seed_templates[0]` (asks for topics OTHER than the named seed) and a drill-style
-template at `[1]` (asks the model to enumerate within the named seed via the existing TTF
-prefill). The recursive crawler on `main` is unaffected — it samples `user_seed_templates`
-randomly and the new variant just expands the random pool by one entry.
+Both `jailbreak.yaml` and `default.yaml` populate the new `user_drill_templates` slot on
+`PromptsConfig` directly, so the cluster-first crawler's tail-drill phase reads from a typed
+config field rather than scanning `user_seed_templates` for content markers — the head/drill
+split is now explicit at the schema level, not inferred. Configs that don't define
+`user_drill_templates` fall back to the existing marker-matching heuristic, so the recursive
+crawler on `main` is unaffected.
 
 The self-rank step in 3 is the same target-as-judge Elo design from `src/evaluation/ranking.py`,
 ported to OpenRouter so it runs against hosted targets without a local GPU.
