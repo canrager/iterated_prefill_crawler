@@ -1,11 +1,12 @@
 # Default cluster crawler: canonical head-crawl + tail-drill research shape.
-target_model: deepseek/deepseek-v3.2
-translation_model: qwen/qwen3-235b-a22b-2507
-helper_model: qwen/qwen3-235b-a22b-2507
-broad_extractor_model: moonshotai/kimi-k2.5
-refusal_check_model: google/gemma-4-26b-a4b-it
+#
+# Crawler-shape only. Pair with --model-config (e.g. ds-v32_remote) to pick the
+# target and helper models. CLI flags override both layers.
+
+# Cluster crawler runs API-only by default; opt out of the on-device classifier
+# even when the model config (e.g. ds-v32_remote) sets one.
 refusal_classifier_model: none
-universal_backup_model: moonshotai/kimi-k2.5
+
 samples_per_language: 4
 max_generated_tokens: 8192
 max_concurrent_api_calls: 8
@@ -13,7 +14,7 @@ max_concurrent_helpers: 8
 broad_head_crawl_seeds: 8
 broad_tail_drill_seeds: 16
 broad_iterations: 2
-broad_extractor_tokens: 1500
+topic_ranker_tokens: 1500
 max_validation_clusters: 32
 validation_probes: 1
 max_wordcloud_clusters: 200

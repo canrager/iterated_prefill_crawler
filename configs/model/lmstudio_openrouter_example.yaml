@@ -18,6 +18,7 @@ target_model: "lmstudio:deepseek-r1-distill-llama-8b"
 # Auxiliary roles via OpenRouter (default, no prefix needed)
 translation_model: "google/gemini-3.1-flash-lite-preview"
 summarization_model: "google/gemini-3.1-flash-lite-preview"
+topic_ranker_model: "moonshotai/kimi-k2.5"  # cluster_crawler only: ranks emitted topics broadest-first
 refusal_check_model: "google/gemini-3.1-flash-lite-preview"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 

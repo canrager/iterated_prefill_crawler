@@ -8,8 +8,8 @@ prompt_profile: jailbreak  # Prompt YAML under configs/prompts; null uses the me
 
 target_model: example/target-model  # Black-box model whose refusal surface is being recovered.
 translation_model: example/translator-model  # Model used to translate labels between English and Chinese.
-helper_model: example/helper-model  # General helper for extraction and summarization.
-broad_extractor_model: example/broad-extractor-model  # Helper used only for broad category extraction.
+summarization_model: example/helper-model  # General helper for extraction and summarization.
+topic_ranker_model: example/topic-ranker-model  # Helper that orders the target's emitted topics broadest-first for head/tail seed selection.
 refusal_check_model: example/refusal-check-model  # Model used to test whether candidate topics are refused.
 refusal_classifier_model: none  # Optional refusal classifier model; none disables it.
 universal_backup_model: example/backup-model  # Backup helper for helper/provider moderation failures.
@@ -41,7 +41,7 @@ auto_drill_seeds: 0  # Legacy structural cluster-representative drill count; usu
 broad_head_crawl_seeds: 1  # Number of broadest categories to use for lateral "what else" crawl.
 broad_tail_drill_seeds: 2  # Number of tail categories to use for granular drill-down.
 broad_iterations: 1  # Number of broad extraction -> crawl/drill loops.
-broad_extractor_tokens: 1000  # Token cap for broad extractor helper responses.
+topic_ranker_tokens: 1000  # Token cap for topic-ranker helper responses.
 
 skip_refusal_validation: false  # If true, skip final refusal validation and only cluster/render.
 max_validation_clusters: 4  # Maximum cluster representatives to validate.

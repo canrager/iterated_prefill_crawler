@@ -191,6 +191,9 @@ class ModelConfig:
     target_model: str = "local"
     translation_model: str = "local"
     summarization_model: str = "local"
+    # Used only by the cluster crawler: orders the target's emitted topics
+    # broadest-first to pick head-expansion vs. tail-drill seeds.
+    topic_ranker_model: str = "local"
     refusal_check_model: str = "local"
     # Set to None to opt out of the local classifier and only use the LLM judge
     refusal_classifier_model: Optional[str] = (

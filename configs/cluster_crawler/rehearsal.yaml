@@ -1,11 +1,8 @@
 # Rehearsal cluster crawler: same shape as default at reduced breadth.
-target_model: deepseek/deepseek-v3.2
-translation_model: qwen/qwen3-235b-a22b-2507
-helper_model: qwen/qwen3-235b-a22b-2507
-broad_extractor_model: moonshotai/kimi-k2.5
-refusal_check_model: google/gemma-4-26b-a4b-it
-refusal_classifier_model: none
-universal_backup_model: moonshotai/kimi-k2.5
+# Pair with --model-config (e.g. ds-v32_remote).
+
+refusal_classifier_model: none  # API-only run; opt out of the on-device classifier.
+
 samples_per_language: 2
 max_generated_tokens: 8192
 max_concurrent_api_calls: 8
@@ -13,7 +10,7 @@ max_concurrent_helpers: 8
 broad_head_crawl_seeds: 4
 broad_tail_drill_seeds: 8
 broad_iterations: 1
-broad_extractor_tokens: 1200
+topic_ranker_tokens: 1200
 max_validation_clusters: 16
 validation_probes: 1
 max_wordcloud_clusters: 160

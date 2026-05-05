@@ -886,6 +886,54 @@ def load_cluster_crawler_config(name: str | None) -> dict:
     return data
 
 
+def load_model_config(name: str | None) -> dict:
+    """Load a named model config profile from configs/model.
+
+    Lets the cluster crawler reuse the same model role schema as the recursive
+    crawler. Only model role keys are pulled in; crawler-shape keys live in
+    configs/cluster_crawler.
+    """
+    if not name:
+        return {}
+    from src.directory_config import CONFIG_DIR
+    import yaml
+
+    config_path = Path(name)
+    if config_path.suffix not in (".yaml", ".yml"):
+        config_path = CONFIG_DIR / "model" / f"{name}.yaml"
+    elif not config_path.is_absolute():
+        config_path = CONFIG_DIR / "model" / config_path
+    if not config_path.exists():
+        raise ValueError(f"Unknown model config: {name}")
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"Model config must be a mapping: {config_path}")
+    # Only pass through keys the cluster crawler argparse layer accepts.
+    allowed = {
+        "target_model",
+        "translation_model",
+        "summarization_model",
+        "topic_ranker_model",
+        "refusal_check_model",
+        "refusal_classifier_model",
+        "universal_backup_model",
+        "default_provider",
+        "local_model",
+        "device",
+        "cache_dir",
+        "quantization_bits",
+        "vllm_tensor_parallel_size",
+        "vllm_gpu_memory_utilization",
+        "vllm_max_model_len",
+        "temperature",
+    }
+    out = {k: v for k, v in data.items() if k in allowed}
+    # `device` in configs/model/*.yaml maps to `local_device` on the cluster crawler.
+    if "device" in out:
+        out["local_device"] = out.pop("device")
+    return out
+
+
 def _resolve_model(config: CrawlerConfig, role: str, local_model, local_tokenizer):
     model_name = getattr(config.model, f"{role}_model")
     if model_name == "local":
@@ -943,7 +991,7 @@ def run_cluster_crawler(args: argparse.Namespace) -> dict:
     _load_prompt_profile(config, prompt_profile)
     config.model.target_model = args.target_model
     config.model.translation_model = args.translation_model
-    config.model.summarization_model = args.helper_model
+    config.model.summarization_model = args.summarization_model
     config.model.refusal_check_model = args.refusal_check_model
     config.model.refusal_classifier_model = (
         None
@@ -980,8 +1028,8 @@ def run_cluster_crawler(args: argparse.Namespace) -> dict:
             config.model.summarization_model,
             config.model.refusal_check_model,
             *(
-                [args.broad_extractor_model]
-                if broad_requested and args.broad_extractor_model != "local"
+                [args.topic_ranker_model]
+                if broad_requested and args.topic_ranker_model != "local"
                 else []
             ),
         ],
@@ -998,7 +1046,7 @@ def run_cluster_crawler(args: argparse.Namespace) -> dict:
             "helper": config.model.summarization_model,
             "refusal_check": config.model.refusal_check_model,
             **(
-                {"broad_extractor": args.broad_extractor_model}
+                {"topic_ranker": args.topic_ranker_model}
                 if broad_requested
                 else {}
             ),
@@ -1086,8 +1134,8 @@ def run_cluster_crawler(args: argparse.Namespace) -> dict:
     broad_iterations_completed = 0
 
     if broad_requested:
-        if args.broad_extractor_model == "local":
-            raise ValueError("--broad-extractor-model local is not supported yet")
+        if args.topic_ranker_model == "local":
+            raise ValueError("--topic-ranker-model local is not supported yet")
 
         seen_broad_keys: set[str] = set()
         current_broad_generations = [
@@ -1102,13 +1150,13 @@ def run_cluster_crawler(args: argparse.Namespace) -> dict:
             iteration_candidates = asyncio.run(
                 _extract_broad_topics_with_api(
                     generations=current_broad_generations,
-                    model_name=args.broad_extractor_model,
+                    model_name=args.topic_ranker_model,
                     default_provider=config.model.default_provider,
                     provider_url_overrides=config.model.provider_urls,
                     prefer_nitro=config.model.prefer_nitro,
                     universal_backup_model=config.model.universal_backup_model,
                     max_concurrent=config.crawler.max_concurrent_summarizations,
-                    max_tokens=args.broad_extractor_tokens,
+                    max_tokens=args.topic_ranker_tokens,
                 )
             )
             broad_iterations_completed += 1
@@ -1349,7 +1397,7 @@ def run_cluster_crawler(args: argparse.Namespace) -> dict:
             "target": config.model.target_model,
             "translation": config.model.translation_model,
             "helper": config.model.summarization_model,
-            "broad_extractor": args.broad_extractor_model,
+            "topic_ranker": args.topic_ranker_model,
             "refusal_check": config.model.refusal_check_model,
             "refusal_classifier": config.model.refusal_classifier_model,
         },
@@ -1420,8 +1468,14 @@ def run_cluster_crawler(args: argparse.Namespace) -> dict:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     prelim = argparse.ArgumentParser(add_help=False)
     prelim.add_argument("--cluster-crawler-config", default="default")
+    prelim.add_argument("--model-config", default=None)
     prelim_args, _ = prelim.parse_known_args(argv)
-    config_defaults = load_cluster_crawler_config(prelim_args.cluster_crawler_config)
+    # Layered defaults: model-config (model role schema) is overridden by
+    # cluster-crawler-config (crawler shape, may also pin model fields), which
+    # is overridden by CLI flags handled by the main parser below.
+    model_defaults = load_model_config(prelim_args.model_config)
+    crawler_defaults = load_cluster_crawler_config(prelim_args.cluster_crawler_config)
+    config_defaults = {**model_defaults, **crawler_defaults}
 
     allowed_config_keys = {
         "runnable",
@@ -1429,8 +1483,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "prompt_profile",
         "target_model",
         "translation_model",
-        "helper_model",
-        "broad_extractor_model",
+        "summarization_model",
+        "topic_ranker_model",
         "refusal_check_model",
         "refusal_classifier_model",
         "default_provider",
@@ -1460,7 +1514,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "broad_head_crawl_seeds",
         "broad_tail_drill_seeds",
         "broad_iterations",
-        "broad_extractor_tokens",
+        "topic_ranker_tokens",
         "skip_refusal_validation",
         "max_validation_clusters",
         "validation_probes",
@@ -1476,9 +1530,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "seed",
         "verbose",
     }
-    unknown_config_keys = sorted(set(config_defaults) - allowed_config_keys)
-    if unknown_config_keys:
-        keys = ", ".join(unknown_config_keys)
+    unknown_in_crawler = sorted(set(crawler_defaults) - allowed_config_keys)
+    if unknown_in_crawler:
+        keys = ", ".join(unknown_in_crawler)
         raise ValueError(f"Unknown cluster crawler config key(s): {keys}")
     if config_defaults.get("runnable") is False:
         raise ValueError(
@@ -1499,6 +1553,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=prelim_args.cluster_crawler_config,
         help="Named YAML profile under configs/cluster_crawler, e.g. debug, rehearsal, or default.",
     )
+    parser.add_argument(
+        "--model-config",
+        default=prelim_args.model_config,
+        help="Named YAML profile under configs/model (e.g. ds-v32_remote). Provides model-role defaults; --cluster-crawler-config and CLI flags override.",
+    )
     parser.add_argument("--method", choices=("jailbreak", "assistant-prefix", "thought-prefix"), default=default("method", "jailbreak"))
     parser.add_argument(
         "--prompt-profile",
@@ -1507,8 +1566,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--target-model", default=default("target_model", "local"))
     parser.add_argument("--translation-model", default=default("translation_model", "local"))
-    parser.add_argument("--helper-model", default=default("helper_model", "local"))
-    parser.add_argument("--broad-extractor-model", default=default("broad_extractor_model", "moonshotai/kimi-k2.5"))
+    parser.add_argument("--summarization-model", default=default("summarization_model", "local"))
+    parser.add_argument("--topic-ranker-model", default=default("topic_ranker_model", "moonshotai/kimi-k2.5"))
     parser.add_argument("--refusal-check-model", default=default("refusal_check_model", "local"))
     parser.add_argument("--refusal-classifier-model", default=default("refusal_classifier_model", "ProtectAI/distilroberta-base-rejection-v1"))
     parser.add_argument("--default-provider", default=default("default_provider", "openrouter"))
@@ -1558,7 +1617,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=default("broad_iterations", 1),
         help="Repeat broad extraction over the previous broad crawl/drill target outputs this many times.",
     )
-    parser.add_argument("--broad-extractor-tokens", type=int, default=default("broad_extractor_tokens", 1000))
+    parser.add_argument("--topic-ranker-tokens", type=int, default=default("topic_ranker_tokens", 1000))
     parser.add_argument("--skip-refusal-validation", action="store_true", default=default("skip_refusal_validation", False))
     parser.add_argument("--max-validation-clusters", type=int, default=default("max_validation_clusters", 80))
     parser.add_argument("--validation-probes", type=int, default=default("validation_probes", 3))

@@ -2,6 +2,7 @@
 target_model: "local"
 translation_model: "ollama:olmo-3:7b-instruct"
 summarization_model: "ollama:olmo-3:7b-instruct"
+topic_ranker_model: "ollama:olmo-3:7b-instruct"  # cluster_crawler only: ranks emitted topics broadest-first
 refusal_check_model: "ollama:olmo-3:7b-instruct"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 

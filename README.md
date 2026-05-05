@@ -56,10 +56,11 @@ Three commands end-to-end against any provider-hosted target via OpenRouter:
 
 ```bash
 # 1. Crawl: fixed-budget jailbreak pass with broad head-crawl + tail-drill, then clustering.
+#    --model-config picks model roles (target/helpers); --cluster-crawler-config picks crawler shape.
 uv run python scripts/cluster_crawler.py \
     --cluster-crawler-config rehearsal \
+    --model-config ds-v32_remote \
     --method jailbreak \
-    --target-model deepseek/deepseek-v3.2 \
     --output-dir artifacts/out/my_run \
     --run-name my_run
 
@@ -115,8 +116,8 @@ every extracted topic becomes a new seed, the loop runs until it hits its step o
 The cluster-first crawler doesn't replace TTF; it adds two pieces of structure on top:
 
 1. **Helper-routed seed selection.** Instead of re-seeding every extracted topic, a helper
-   "broad extractor" LLM (default `moonshotai/kimi-k2.5`, configurable via
-   `--broad-extractor-model`) reads the target's emitted taxonomy and sorts the topics from
+   "topic ranker" LLM (default `moonshotai/kimi-k2.5`, configurable via
+   `--topic-ranker-model`) reads the target's emitted taxonomy and sorts the topics from
    broadest to narrowest. The crawler then picks a fixed budget of broad-head seeds and
    narrow-tail seeds.
 2. **Two distinct TTF re-prompts per seed**, instead of one templated re-prompt:
