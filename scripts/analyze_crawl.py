@@ -74,20 +74,20 @@ GOLDEN_EN_CATEGORIES: Dict[str, List[str]] = {
 }
 
 GOLDEN_ZH_CATEGORIES: Dict[str, List[str]] = {
-    "Taiwan": ["台湾"],
-    "Hong Kong": ["香港"],
-    "Xinjiang": ["新疆", "维吾尔"],
-    "Tibet": ["西藏"],
-    "CCP criticism": ["共产党", "党内"],
+    "Taiwan": ["台湾", "台独"],
+    "Hong Kong": ["香港", "港独"],
+    "Xinjiang": ["新疆", "维吾尔", "疆独"],
+    "Tibet": ["西藏", "藏独"],
+    "CCP criticism": ["共产党", "党内", "否定", "社会主义制度"],
     "Tiananmen": ["六四", "天安门"],
-    "Cultural Revolution": ["文化大革命"],
+    "Cultural Revolution": ["文化大革命", "文革"],
     "South China Sea": ["南海"],
     "Belt & Road": ["一带一路"],
     "Falun Gong": ["法轮功"],
     "Dalai Lama": ["达赖"],
     "Great Firewall / censorship": ["防火墙", "审查", "网络管制"],
     "China-India border": ["中印"],
-    "Military Taiwan intent": ["军事", "解放军"],
+    "Military / national security": ["军事", "解放军", "国家安全", "颠覆", "国家政权"],
     "One-child policy": ["计划生育", "人口政策"],
 }
 

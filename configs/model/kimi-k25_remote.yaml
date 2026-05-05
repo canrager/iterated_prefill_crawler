@@ -2,6 +2,7 @@
 target_model: "moonshotai/kimi-k2.5"
 translation_model: "qwen/qwen3-235b-a22b-2507"
 summarization_model: "qwen/qwen3-235b-a22b-2507"
+topic_ranker_model: "moonshotai/kimi-k2.5"  # cluster_crawler only: ranks emitted topics broadest-first
 refusal_check_model: "google/gemma-4-26b-a4b-it"
 universal_backup_model: "moonshotai/kimi-k2.5"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"

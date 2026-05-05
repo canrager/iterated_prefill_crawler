@@ -2,6 +2,7 @@
 target_model: "qwen/qwen3.5-397b-a17b"
 translation_model: "local"
 summarization_model: "local"
+topic_ranker_model: "local"  # cluster_crawler only: ranks emitted topics broadest-first; cluster_crawler errors on "local" — set a remote model when running cluster_crawler
 refusal_check_model: "local"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 

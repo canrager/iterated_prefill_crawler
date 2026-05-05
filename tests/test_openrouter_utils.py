@@ -432,8 +432,7 @@ def test_universal_backup_fires_on_timeout():
 
 
 def test_universal_backup_not_fired_on_auth_error():
-    """403 moderation / 400 / 401 / 404 must NOT trigger the backup — these
-    are config errors, fallback would just mask the problem."""
+    """400 / 401 / 404 must NOT trigger the backup — these are config errors."""
     from src.openrouter_utils import async_query_openrouter
     from openai import APIStatusError as _SDKStatus
 
@@ -467,6 +466,51 @@ def test_universal_backup_not_fired_on_auth_error():
 
     assert result == "AUTH_RAISED"
     assert call_count["n"] == 1, "Auth errors must raise immediately; no backup retry"
+
+
+def test_universal_backup_fires_on_moderation_error():
+    """A helper-model moderation refusal should retry the universal backup."""
+    from src.openrouter_utils import async_query_openrouter
+    from openai import APIStatusError as _SDKStatus
+
+    call_count = {"n": 0}
+    models = []
+
+    backup_choice = MagicMock()
+    backup_choice.message.content = "backup response"
+    backup_completion = MagicMock()
+    backup_completion.choices = [backup_choice]
+    backup_completion.usage = None
+
+    async def _create(*args, **kwargs):
+        call_count["n"] += 1
+        models.append(kwargs.get("model"))
+        if call_count["n"] == 1:
+            resp = MagicMock()
+            resp.status_code = 403
+            err = _SDKStatus("moderation rejected", response=resp, body={"error": {"message": "moderation"}})
+            err.status_code = 403
+            raise err
+        return backup_completion
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = _create
+
+    async def _run():
+        return await async_query_openrouter(
+            model_name="qwen/qwen3-235b-a22b-2507",
+            prompt="extract",
+            universal_backup_model="moonshotai/kimi-k2.5",
+        )
+
+    with patch("src.openrouter_utils.log_model_call"):
+        with patch("openai.AsyncOpenAI", return_value=mock_client):
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                result = asyncio.run(_run())
+
+    assert result == "backup response"
+    assert call_count["n"] == 2
+    assert models == ["qwen/qwen3-235b-a22b-2507", "moonshotai/kimi-k2.5"]
 
 
 def test_both_primary_and_backup_timeout_returns_failure_sentinel():

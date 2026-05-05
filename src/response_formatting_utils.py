@@ -1,11 +1,60 @@
 import json
 import logging
 import re
-import string
+import unicodedata
 from typing import List, Union
 
 from src.crawler.topic_queue import Topic
-from src.openrouter_utils import REASONING_DISABLED
+from src.openrouter_utils import API_CALL_FAILED_SENTINEL, REASONING_DISABLED
+
+API_MODERATION_SENTINEL = "__API_MODERATION_REFUSED__"
+
+
+def _is_target_stage_sentinel(text: str) -> bool:
+    """Return True when a target generation is an API-stage sentinel."""
+    return isinstance(text, str) and (
+        text.startswith(API_CALL_FAILED_SENTINEL)
+        or text.startswith(API_MODERATION_SENTINEL)
+    )
+
+
+def _parse_translation_response(raw: str, expected_count: int = 0) -> List[str]:
+    """Parse a JSON array from a batch translation response.
+
+    Fallback chain: bare JSON → markdown-fenced JSON → embedded JSON array
+    → numbered/bulleted list (only if line count matches expected_count).
+    Returns [] when nothing parses reliably.
+    """
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed]
+    except Exception:
+        pass
+    m = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", raw, re.DOTALL)
+    if m:
+        try:
+            return [str(x) for x in json.loads(m.group(1))]
+        except Exception:
+            pass
+    m = re.search(r"(\[(?:.|\n)*\])", raw)
+    if m:
+        try:
+            return [str(x) for x in json.loads(m.group(1))]
+        except Exception:
+            pass
+    lines = []
+    for line in raw.splitlines():
+        line = line.strip()
+        line = re.sub(r"^[-*•]\s+", "", line)
+        line = re.sub(r"^\d+\.\s*", "", line)
+        if line:
+            lines.append(line)
+    if expected_count and len(lines) == expected_count:
+        return lines
+    return []
 
 
 def remove_thinking_context(queries: List[str]) -> List[str]:
@@ -44,10 +93,22 @@ def remove_thinking_context(queries: List[str]) -> List[str]:
 
 
 class TopicFormatter:
+    GENERIC_SUMMARY_LABELS = {
+        "etc",
+        "etcetera",
+        "other",
+        "others",
+        "misc",
+        "miscellaneous",
+        "various",
+        "various topics",
+    }
+
     def __init__(self, config):
         self.config = config
         self.numbered_list_pattern = re.compile(r"(?m)^\d+\.\s*(.*?)$")
         self.chinese_pattern = re.compile(r"[\u4e00-\u9fff]")
+        self.ascii_letter_pattern = re.compile(r"[A-Za-z]")
 
     def _extract_from_numbered_list(self, text: str) -> List[str]:
         """Extract topics from a text that contains a numbered list."""
@@ -241,43 +302,29 @@ class TopicFormatter:
         local_tokenizer,
         inputs: Union[str, List[str]],
     ) -> Union[str, List[str]]:
-        from src.generation_utils import batch_generate
-
-        translation_model, translation_tokenizer = self._resolve_model(
-            "translation", local_model, local_tokenizer
+        return self._translate_batch(
+            local_model, local_tokenizer, inputs,
+            src_lang="Chinese", tgt_lang="English",
         )
-        is_single = isinstance(inputs, str)
-        texts = [inputs] if is_single else inputs
-        messages = [
-            [
-                {
-                    "role": "user",
-                    "content": f"Translate to English (translation only): {t}",
-                }
-            ]
-            for t in texts
-        ]
-        translated, _ = batch_generate(
-            translation_model,
-            translation_tokenizer,
-            messages,
-            max_new_tokens=500,
-            temperature=0.0,
-            default_provider=self.config.model.default_provider,
-            provider_url_overrides=self.config.model.provider_urls,
-            prefer_nitro=self.config.model.prefer_nitro,
-            extra_body=REASONING_DISABLED,
-            universal_backup_model=self.config.model.universal_backup_model,
-        )
-        # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
-        translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
-        return translated[0] if is_single else translated
 
     def _translate_en_to_zn(
         self,
         local_model,
         local_tokenizer,
         inputs: Union[str, List[str]],
+    ) -> Union[str, List[str]]:
+        return self._translate_batch(
+            local_model, local_tokenizer, inputs,
+            src_lang="English", tgt_lang="Chinese",
+        )
+
+    def _translate_batch(
+        self,
+        local_model,
+        local_tokenizer,
+        inputs: Union[str, List[str]],
+        src_lang: str,
+        tgt_lang: str,
     ) -> Union[str, List[str]]:
         from src.generation_utils import batch_generate
 
@@ -286,25 +333,72 @@ class TopicFormatter:
         )
         is_single = isinstance(inputs, str)
         texts = [inputs] if is_single else inputs
-        messages = [
-            [{"role": "user", "content": f"翻译成中文（只输出翻译）：{t}"}]
-            for t in texts
-        ]
-        translated, _ = batch_generate(
-            translation_model,
-            translation_tokenizer,
-            messages,
-            max_new_tokens=500,
-            temperature=0.0,
-            default_provider=self.config.model.default_provider,
-            provider_url_overrides=self.config.model.provider_urls,
-            prefer_nitro=self.config.model.prefer_nitro,
-            extra_body=REASONING_DISABLED,
-            universal_backup_model=self.config.model.universal_backup_model,
-        )
-        # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
-        translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
-        return translated[0] if is_single else translated
+
+        if not texts:
+            return "" if is_single else []
+
+        is_api = isinstance(translation_model, str)
+
+        if is_api:
+            json_array = json.dumps(texts, ensure_ascii=False)
+            prompt = (
+                f"You are a translator. Translate each item in the JSON array"
+                f" below from {src_lang} to {tgt_lang}. Preserve the original"
+                f" order and count exactly. Translate each label as a short"
+                f" canonical term in {tgt_lang} (2-5 words). Do not add"
+                f" explanations, notes, or commentary.\n\n"
+                f"Output ONLY a JSON array of strings, same length as the"
+                f" input, no other text.\n\n"
+                f"INPUT ({src_lang}):\n{json_array}"
+            )
+            messages = [[
+                {"role": "system", "content": "You are a professional translator. Respond only with valid JSON."},
+                {"role": "user", "content": prompt},
+            ]]
+            translated, _ = batch_generate(
+                translation_model,
+                translation_tokenizer,
+                messages,
+                max_new_tokens=max(500, len(texts) * 30),
+                temperature=0.0,
+                default_provider=self.config.model.default_provider,
+                provider_url_overrides=self.config.model.provider_urls,
+                prefer_nitro=self.config.model.prefer_nitro,
+                extra_body=REASONING_DISABLED,
+                universal_backup_model=self.config.model.universal_backup_model,
+            )
+            raw_response = translated[0] if translated else ""
+            parsed = _parse_translation_response(raw_response, expected_count=len(texts))
+            result = []
+            for i, src in enumerate(texts):
+                if i < len(parsed) and parsed[i].strip():
+                    result.append(parsed[i].strip())
+                else:
+                    result.append(src)
+            return result[0] if is_single else result
+        else:
+            if tgt_lang == "English":
+                terse = "Translate to English (translation only): "
+            else:
+                terse = "翻译成中文（只输出翻译）："
+            messages = [
+                [{"role": "user", "content": f"{terse}{t}"}]
+                for t in texts
+            ]
+            translated, _ = batch_generate(
+                translation_model,
+                translation_tokenizer,
+                messages,
+                max_new_tokens=500,
+                temperature=0.0,
+                default_provider=self.config.model.default_provider,
+                provider_url_overrides=self.config.model.provider_urls,
+                prefer_nitro=self.config.model.prefer_nitro,
+                extra_body=REASONING_DISABLED,
+                universal_backup_model=self.config.model.universal_backup_model,
+            )
+            translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
+            return translated[0] if is_single else translated
 
     def _resolve_model(self, role: str, local_model, local_tokenizer):
         """Return (model, tokenizer) for the given role.
@@ -386,6 +480,91 @@ class TopicFormatter:
             topic.shortened = item
         return topics
 
+    def _summary_dedup_key(self, text) -> str:
+        if text is None:
+            return ""
+        if isinstance(text, list):
+            text = " ".join(str(item) for item in text if item)
+        if not isinstance(text, str):
+            text = str(text)
+
+        text = text.lower()
+        chars = [
+            ch
+            for ch in text
+            if not unicodedata.category(ch).startswith("P")
+        ]
+        normalized = " ".join("".join(chars).split())
+        return normalized
+
+    def _clean_summary_label(self, summary) -> str | None:
+        if summary is None:
+            return None
+        if isinstance(summary, list):
+            summary = " ".join(str(item) for item in summary if item)
+        if not isinstance(summary, str):
+            summary = str(summary)
+
+        label = " ".join(summary.strip().split())
+        while label and unicodedata.category(label[0]).startswith("P"):
+            label = label[1:].lstrip()
+        while label and unicodedata.category(label[-1]).startswith("P"):
+            label = label[:-1].rstrip()
+        if not label:
+            return None
+
+        if self.ascii_letter_pattern.search(label) and self.chinese_pattern.search(label):
+            return None
+
+        key = self._summary_dedup_key(label)
+        if not key or key in self.GENERIC_SUMMARY_LABELS or len(key) <= 1:
+            return None
+
+        return label
+
+    def _cleanup_summary_labels(self, topics: List[Topic]) -> List[Topic]:
+        cleaned_topics = []
+        for topic in topics:
+            cleaned_summary = self._clean_summary_label(topic.summary)
+            if cleaned_summary is None:
+                topic.summary = None
+                continue
+            cleaned_summary = self._preserve_raw_parenthetical_qualifier(
+                topic.raw,
+                cleaned_summary,
+            )
+            topic.summary = cleaned_summary
+            cleaned_topics.append(topic)
+        return cleaned_topics
+
+    def _preserve_raw_parenthetical_qualifier(
+        self,
+        raw: str | None,
+        summary: str,
+    ) -> str:
+        if not raw or not summary:
+            return summary
+        qualifiers = [
+            q.strip()
+            for q in re.findall(r"\(([^()]+)\)", raw)
+            if q.strip()
+        ]
+        if not qualifiers:
+            return summary
+        raw_key = self._summary_dedup_key(raw)
+        summary_key = self._summary_dedup_key(summary)
+        missing = [
+            qualifier
+            for qualifier in qualifiers
+            if self._summary_dedup_key(qualifier) not in summary_key
+        ]
+        if not missing:
+            return summary
+        # If the summarizer split one qualified category into facets and lost
+        # the qualifier, the raw label is the less destructive display label.
+        if "," in summary or raw_key.startswith(summary_key):
+            return raw.strip()
+        return f"{summary} ({'; '.join(missing)})"
 
     def _split_at_comma(
         self,
@@ -401,10 +580,17 @@ class TopicFormatter:
             if topic_attr and ("," in topic_attr or " or " in topic_attr):
                 splitted_text = re.split(r",\s*|\s+or\s+", topic_attr)
                 # Update the original topic with the first part
-                setattr(topic, attribute, splitted_text[0].strip())
+                first_item = splitted_text[0].strip()
+                if attribute == "summary":
+                    first_item = self._clean_summary_label(first_item)
+                setattr(topic, attribute, first_item)
                 # Create new topics for the remaining parts
                 for item in splitted_text[1:]:
                     item = re.sub(r"^(?:or|and)\s+", "", item.strip())
+                    if attribute == "summary":
+                        item = self._clean_summary_label(item)
+                        if item is None:
+                            continue
                     new_topic_kwargs = {
                         "parent_id": topic.parent_id,
                         attribute: item.strip(),
@@ -448,28 +634,16 @@ class TopicFormatter:
         if formatted_topics == []:
             return formatted_topics
 
-        def normalize_summary(text) -> str:
-            if text is None:
-                return ""
-            if isinstance(text, list):
-                text = " ".join(str(item) for item in text if item)
-            if not isinstance(text, str):
-                text = str(text)
-            text_lower = text.lower()
-            translator = str.maketrans("", "", string.punctuation)
-            normalized = text_lower.translate(translator)
-            return normalized
-
         # Build lookup dictionary: normalized_summary -> cluster_idx
         normalized_to_cluster_idx = {}
         for idx, head_topic in enumerate(head_topics):
-            normalized_summary = normalize_summary(head_topic.summary)
+            normalized_summary = self._summary_dedup_key(head_topic.summary)
             if normalized_summary:
                 normalized_to_cluster_idx[normalized_summary] = idx
 
         # Process each topic
         for topic in formatted_topics:
-            normalized_summary = normalize_summary(topic.summary)
+            normalized_summary = self._summary_dedup_key(topic.summary)
 
             if normalized_summary and normalized_summary in normalized_to_cluster_idx:
                 cluster_idx = normalized_to_cluster_idx[normalized_summary]
@@ -503,6 +677,24 @@ class TopicFormatter:
         parent_ids = parent_ids * (len(generations) // len(parent_ids))
         assert len(parent_ids) == len(generations)
 
+        aligned_records = [
+            (prompt, generation, pid)
+            for prompt, generation, pid in zip(input_strs, generations, parent_ids)
+            if not _is_target_stage_sentinel(generation)
+        ]
+        skipped_sentinels = len(generations) - len(aligned_records)
+        if not aligned_records:
+            if skipped_sentinels:
+                print(
+                    "Warning. No extractable target generations: "
+                    f"skipped {skipped_sentinels} API sentinel generation(s)."
+                )
+            return []
+
+        input_strs = [prompt for prompt, _, _ in aligned_records]
+        generations = [generation for _, generation, _ in aligned_records]
+        parent_ids = [pid for _, _, pid in aligned_records]
+
         all_extracted_items = self._extract_with_model(
             generations,
             local_model=local_model,
@@ -517,7 +709,15 @@ class TopicFormatter:
                 formatted_topics.append(Topic(raw=item, parent_id=pid, prompt=prompt))
 
         if len(formatted_topics) == 0:
-            print(f"Warning. No topics found in this generation:\n{generations}\n\n")
+            print(
+                "Warning. No topics found in "
+                f"{len(generations)} extractable generation(s)"
+                + (
+                    f"; skipped {skipped_sentinels} API sentinel generation(s)."
+                    if skipped_sentinels
+                    else "."
+                )
+            )
             return []
 
         formatted_topics = self._batch_translate_chinese_english_both_ways(
@@ -534,9 +734,8 @@ class TopicFormatter:
                 local_tokenizer=local_tokenizer,
                 verbose=verbose,
             )
-            self._split_at_comma(formatted_topics, "summary")
-            # Drop topics the summarizer flagged as non-meaningful
-            formatted_topics = [t for t in formatted_topics if t.summary is not None]
+            # Drop topics the summarizer or deterministic cleanup flagged as non-meaningful.
+            formatted_topics = self._cleanup_summary_labels(formatted_topics)
 
         if verbose:
             print(f"formatted topics:\n{formatted_topics}\n\n")

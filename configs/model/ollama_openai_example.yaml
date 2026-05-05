@@ -18,6 +18,7 @@ target_model: "ollama:llama3"
 # Auxiliary roles via OpenAI
 translation_model: "openai:gpt-4o-mini"
 summarization_model: "openai:gpt-4o-mini"
+topic_ranker_model: "openai:gpt-4o-mini"  # cluster_crawler only: ranks emitted topics broadest-first
 refusal_check_model: "openai:gpt-4o-mini"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 

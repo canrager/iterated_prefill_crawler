@@ -1,0 +1,16 @@
+# Rehearsal cluster crawler: same shape as default at reduced breadth.
+# Pair with --model-config (e.g. ds-v32_remote).
+
+refusal_classifier_model: none  # API-only run; opt out of the on-device classifier.
+
+samples_per_language: 2
+max_generated_tokens: 8192
+max_concurrent_api_calls: 8
+max_concurrent_summarizations: 8
+broad_head_crawl_seeds: 4
+broad_tail_drill_seeds: 8
+broad_iterations: 1
+topic_ranker_tokens: 1200
+max_validation_clusters: 16
+num_refusal_checks_per_topic: 1
+max_wordcloud_clusters: 160

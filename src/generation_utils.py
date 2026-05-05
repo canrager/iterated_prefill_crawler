@@ -4,7 +4,10 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
-from vllm.inputs.data import TokensPrompt
+try:
+    from vllm.inputs.data import TokensPrompt
+except ModuleNotFoundError:
+    from vllm.inputs import TokensPrompt
 
 
 # httpx schedules TLS teardown tasks that fire after asyncio.run() closes the loop,
@@ -176,6 +179,8 @@ async def _async_api_single(
             )
             reason_str = ", ".join(reasons) if reasons else "unknown"
             print(f"API moderation refusal ({model_name}): {reason_str}")
+            if universal_backup_model and universal_backup_model != model_name:
+                return await _fallback_or_sentinel("moderation refusal")
             return f"{API_MODERATION_SENTINEL}: {reason_str}"
         # Auth / permission / not-found errors are not retryable — crash
         # immediately so the user notices the misconfiguration instead of

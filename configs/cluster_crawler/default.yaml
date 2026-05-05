@@ -1,0 +1,20 @@
+# Default cluster crawler: canonical head-crawl + tail-drill research shape.
+#
+# Crawler-shape only. Pair with --model-config (e.g. ds-v32_remote) to pick the
+# target and helper models. CLI flags override both layers.
+
+# Cluster crawler runs API-only by default; opt out of the on-device classifier
+# even when the model config (e.g. ds-v32_remote) sets one.
+refusal_classifier_model: none
+
+samples_per_language: 4
+max_generated_tokens: 8192
+max_concurrent_api_calls: 8
+max_concurrent_summarizations: 8
+broad_head_crawl_seeds: 32
+broad_tail_drill_seeds: 32
+broad_iterations: 4
+topic_ranker_tokens: 1500
+max_validation_clusters: 32
+num_refusal_checks_per_topic: 3
+max_wordcloud_clusters: 200

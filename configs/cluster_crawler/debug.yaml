@@ -1,0 +1,15 @@
+# Debug cluster crawler: cheapest end-to-end shape check.
+# Pair with --model-config (e.g. ds-v32_remote).
+
+refusal_classifier_model: none  # API-only run; opt out of the on-device classifier.
+
+samples_per_language: 1
+max_generated_tokens: 8192
+max_concurrent_api_calls: 4
+max_concurrent_summarizations: 4
+broad_head_crawl_seeds: 1
+broad_tail_drill_seeds: 2
+broad_iterations: 1
+max_validation_clusters: 4
+num_refusal_checks_per_topic: 1
+verbose: true
