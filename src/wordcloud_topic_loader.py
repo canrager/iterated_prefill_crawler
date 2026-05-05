@@ -13,7 +13,6 @@ ranking is target self-rank Elo; see ``scripts/self_rank_families.py``.
 from __future__ import annotations
 
 import json
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -73,36 +72,6 @@ def load_candidates(path: Path) -> list[Candidate]:
             )
         )
     return candidates
-
-
-def collect_ranking_by_cluster(
-    ranking: list[tuple[Candidate, float]],
-    *,
-    max_terms: int | None = None,
-    max_terms_per_cluster: int | None = None,
-) -> list[tuple[Candidate, float]]:
-    """Cap the number of candidates per source cluster.
-
-    Used to feed the aggregator a bounded, balanced label set rather than
-    every wordcloud_topic in the artifact (which would over-represent
-    populous clusters at the input stage).
-    """
-    selected: list[tuple[Candidate, float]] = []
-    cluster_counts: Counter[int] = Counter()
-    for candidate, score in ranking:
-        cluster_id = candidate.cluster_id
-        if (
-            max_terms_per_cluster is not None
-            and cluster_id is not None
-            and cluster_counts[cluster_id] >= max_terms_per_cluster
-        ):
-            continue
-        selected.append((candidate, score))
-        if cluster_id is not None:
-            cluster_counts[cluster_id] += 1
-        if max_terms is not None and len(selected) >= max_terms:
-            break
-    return selected
 
 
 def order_by_parent_yield(candidates: list[Candidate]) -> list[tuple[Candidate, float]]:

@@ -37,7 +37,6 @@ from src.openrouter_utils import API_CALL_FAILED_SENTINEL, REASONING_DISABLED, a
 from src.provider_config import get_provider_client_kwargs
 from src.wordcloud_topic_loader import (
     Candidate,
-    collect_ranking_by_cluster,
     load_candidates,
     order_by_parent_yield,
 )
@@ -113,19 +112,8 @@ def extract_json_array(text: str) -> Any:
         raise
 
 
-def ranked_input(
-    artifact: Path,
-    *,
-    max_terms: int,
-    max_terms_per_cluster: int,
-) -> list[tuple[Candidate, float]]:
-    candidates = load_candidates(artifact)
-    raw_ranking = order_by_parent_yield(candidates)
-    return collect_ranking_by_cluster(
-        raw_ranking,
-        max_terms=max_terms,
-        max_terms_per_cluster=max_terms_per_cluster,
-    )
+def ranked_input(artifact: Path) -> list[tuple[Candidate, float]]:
+    return order_by_parent_yield(load_candidates(artifact))
 
 
 def repair_families(
@@ -369,8 +357,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--aggregator-model", required=True, help="Helper model id (e.g. qwen/qwen3-235b-a22b-2507)")
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--output-json", type=Path, required=True)
-    p.add_argument("--max-terms", type=int, default=260)
-    p.add_argument("--max-terms-per-cluster", type=int, default=2)
     p.add_argument("--batch-size", type=int, default=30)
     p.add_argument("--max-tokens", type=int, default=3500)
     p.add_argument("--default-provider", default="openrouter")
@@ -379,11 +365,7 @@ def parse_args() -> argparse.Namespace:
 
 async def main_async(args: argparse.Namespace) -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    ranking = ranked_input(
-        args.artifact,
-        max_terms=args.max_terms,
-        max_terms_per_cluster=args.max_terms_per_cluster,
-    )
+    ranking = ranked_input(args.artifact)
     (args.output_dir / "aggregator_prompt.txt").write_text(
         f"SYSTEM:\n{SYSTEM_PROMPT}\n\nUSER (template):\n{INCREMENTAL_USER_PROMPT_TEMPLATE}",
         encoding="utf-8",
@@ -405,8 +387,6 @@ async def main_async(args: argparse.Namespace) -> None:
                 "artifact": str(args.artifact),
                 "model": result.model,
                 "batch_size": args.batch_size,
-                "max_terms": args.max_terms,
-                "max_terms_per_cluster": args.max_terms_per_cluster,
                 "parse_success": result.parse_success,
                 "parse_error": result.parse_error,
                 "family_count": len(result.families),

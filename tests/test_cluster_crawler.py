@@ -9,7 +9,7 @@ from scripts.aggregate_families import (
     merge_family_batches,
     repair_families,
 )
-from src.wordcloud_topic_loader import Candidate, collect_ranking_by_cluster
+from src.wordcloud_topic_loader import Candidate
 from src.cluster_crawler import (
     TopicCluster,
     build_bilingual_drill_messages,
@@ -358,50 +358,6 @@ def test_render_wordcloud_scores_uses_cjk_font_when_available(tmp_path: Path, mo
     assert resolve_wordcloud_font_path(["台湾地位与主权"]) == str(font_path)
     assert output.exists()
     assert output.stat().st_size > 0
-
-
-def test_collect_ranking_by_cluster_limits_redundant_display_terms():
-    ranking = [
-        (
-            Candidate(
-                label=f"repeated family {idx}",
-                index=idx,
-                parent_id=1,
-                cluster_id=7,
-                cluster_score=3.0,
-                cluster_size=5,
-                parent_yield=5,
-            ),
-            100.0 - idx,
-        )
-        for idx in range(5)
-    ]
-    ranking.append(
-        (
-            Candidate(
-                label="separate family",
-                index=10,
-                parent_id=2,
-                cluster_id=8,
-                cluster_score=1.0,
-                cluster_size=1,
-                parent_yield=1,
-            ),
-            1.0,
-        )
-    )
-
-    selected = collect_ranking_by_cluster(
-        ranking,
-        max_terms=4,
-        max_terms_per_cluster=2,
-    )
-
-    assert [candidate.label for candidate, _score in selected] == [
-        "repeated family 0",
-        "repeated family 1",
-        "separate family",
-    ]
 
 
 def test_aggregator_repair_allows_readable_display_label_and_exact_members():
