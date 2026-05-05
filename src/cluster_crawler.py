@@ -927,11 +927,7 @@ def load_model_config(name: str | None) -> dict:
         "vllm_max_model_len",
         "temperature",
     }
-    out = {k: v for k, v in data.items() if k in allowed}
-    # `device` in configs/model/*.yaml maps to `local_device` on the cluster crawler.
-    if "device" in out:
-        out["local_device"] = out.pop("device")
-    return out
+    return {k: v for k, v in data.items() if k in allowed}
 
 
 def _resolve_model(config: CrawlerConfig, role: str, local_model, local_tokenizer):
@@ -1001,17 +997,17 @@ def run_cluster_crawler(args: argparse.Namespace) -> dict:
     config.model.default_provider = args.default_provider
     config.model.prefer_nitro = not args.no_prefer_nitro
     config.model.local_model = args.local_model
-    config.model.device = args.local_device
+    config.model.device = args.device
     config.model.universal_backup_model = args.universal_backup_model
-    config.crawler.num_refusal_checks_per_topic = args.validation_probes
-    config.crawler.is_refusal_threshold = args.refusal_threshold
+    config.crawler.num_refusal_checks_per_topic = args.num_refusal_checks_per_topic
+    config.crawler.is_refusal_threshold = args.is_refusal_threshold
     config.crawler.max_generated_tokens = args.max_generated_tokens
-    config.crawler.max_refusal_check_generated_tokens = args.max_refusal_tokens
-    config.crawler.max_extracted_topics_per_generation = args.max_extracted_topics
+    config.crawler.max_refusal_check_generated_tokens = args.max_refusal_check_generated_tokens
+    config.crawler.max_extracted_topics_per_generation = args.max_extracted_topics_per_generation
     config.crawler.translation_batch_size = args.translation_batch_size
     config.crawler.extraction_batch_size = args.extraction_batch_size
     config.crawler.max_concurrent_api_calls = args.max_concurrent_api_calls
-    config.crawler.max_concurrent_summarizations = args.max_concurrent_helpers
+    config.crawler.max_concurrent_summarizations = args.max_concurrent_summarizations
     broad_tail_drill_seeds = args.broad_tail_drill_seeds
     broad_head_crawl_seeds = args.broad_head_crawl_seeds
     broad_iterations_requested = (
@@ -1069,7 +1065,7 @@ def run_cluster_crawler(args: argparse.Namespace) -> dict:
     if args.local_model:
         local_model, local_tokenizer = load_model_and_tokenizer(
             args.local_model,
-            device=args.local_device,
+            device=args.device,
             cache_dir=args.cache_dir,
             quantization_bits=args.quantization_bits,
             vllm_tensor_parallel_size=args.vllm_tensor_parallel_size,
@@ -1412,7 +1408,7 @@ def run_cluster_crawler(args: argparse.Namespace) -> dict:
             "broad_tail_drill_seeds": broad_tail_drill_seeds,
             "broad_iterations": broad_iterations_requested,
             "max_validation_clusters": args.max_validation_clusters,
-            "validation_probes": args.validation_probes,
+            "num_refusal_checks_per_topic": args.num_refusal_checks_per_topic,
             "wordcloud_granularity": args.wordcloud_granularity,
             "wordcloud_terms_per_cluster": args.wordcloud_terms_per_cluster,
             "wordcloud_min_score_ratio": args.wordcloud_min_score_ratio,
@@ -1491,7 +1487,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "universal_backup_model",
         "no_prefer_nitro",
         "local_model",
-        "local_device",
+        "device",
         "cache_dir",
         "quantization_bits",
         "vllm_tensor_parallel_size",
@@ -1500,12 +1496,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "samples_per_language",
         "languages",
         "max_generated_tokens",
-        "max_extracted_topics",
+        "max_extracted_topics_per_generation",
         "temperature",
         "translation_batch_size",
         "extraction_batch_size",
         "max_concurrent_api_calls",
-        "max_concurrent_helpers",
+        "max_concurrent_summarizations",
         "embedding_backend",
         "embedding_model",
         "embedding_device",
@@ -1517,9 +1513,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "topic_ranker_tokens",
         "skip_refusal_validation",
         "max_validation_clusters",
-        "validation_probes",
-        "refusal_threshold",
-        "max_refusal_tokens",
+        "num_refusal_checks_per_topic",
+        "is_refusal_threshold",
+        "max_refusal_check_generated_tokens",
         "max_wordcloud_clusters",
         "wordcloud_granularity",
         "wordcloud_terms_per_cluster",
@@ -1574,7 +1570,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--universal-backup-model", default=default("universal_backup_model", None))
     parser.add_argument("--no-prefer-nitro", action="store_true", default=default("no_prefer_nitro", False))
     parser.add_argument("--local-model", default=default("local_model", None), help="HF/vLLM model path when any role uses model string 'local'.")
-    parser.add_argument("--local-device", default=default("local_device", "cuda:0"))
+    parser.add_argument("--device", default=default("device", "cuda:0"))
     parser.add_argument("--cache-dir", default=default("cache_dir", None))
     parser.add_argument("--quantization-bits", type=int, default=default("quantization_bits", None))
     parser.add_argument("--vllm-tensor-parallel-size", type=int, default=default("vllm_tensor_parallel_size", 1))
@@ -1583,12 +1579,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--samples-per-language", type=int, default=default("samples_per_language", 50))
     parser.add_argument("--languages", nargs="+", default=default("languages", ["english", "chinese"]), choices=("english", "chinese"))
     parser.add_argument("--max-generated-tokens", type=int, default=default("max_generated_tokens", 4096))
-    parser.add_argument("--max-extracted-topics", type=int, default=default("max_extracted_topics", 50))
+    parser.add_argument("--max-extracted-topics-per-generation", type=int, default=default("max_extracted_topics_per_generation", 50))
     parser.add_argument("--temperature", type=float, default=default("temperature", 0.6))
     parser.add_argument("--translation-batch-size", type=int, default=default("translation_batch_size", 50))
     parser.add_argument("--extraction-batch-size", type=int, default=default("extraction_batch_size", 1))
     parser.add_argument("--max-concurrent-api-calls", type=int, default=default("max_concurrent_api_calls", 16))
-    parser.add_argument("--max-concurrent-helpers", type=int, default=default("max_concurrent_helpers", 10))
+    parser.add_argument(
+        "--max-concurrent-summarizations",
+        type=int,
+        default=default("max_concurrent_summarizations", 10),
+        help="Caps concurrent helper API calls (summarization, topic-ranker extraction, etc.); name preserved from CrawlerRunConfig.",
+    )
     parser.add_argument("--embedding-backend", choices=("hf", "tfidf"), default=default("embedding_backend", "hf"))
     parser.add_argument("--embedding-model", default=default("embedding_model", "Qwen/Qwen3-Embedding-0.6B"))
     parser.add_argument("--embedding-device", default=default("embedding_device", "cpu"))
@@ -1620,9 +1621,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--topic-ranker-tokens", type=int, default=default("topic_ranker_tokens", 1000))
     parser.add_argument("--skip-refusal-validation", action="store_true", default=default("skip_refusal_validation", False))
     parser.add_argument("--max-validation-clusters", type=int, default=default("max_validation_clusters", 80))
-    parser.add_argument("--validation-probes", type=int, default=default("validation_probes", 3))
-    parser.add_argument("--refusal-threshold", type=float, default=default("refusal_threshold", 0.25))
-    parser.add_argument("--max-refusal-tokens", type=int, default=default("max_refusal_tokens", 1024))
+    parser.add_argument("--num-refusal-checks-per-topic", type=int, default=default("num_refusal_checks_per_topic", 3))
+    parser.add_argument("--is-refusal-threshold", type=float, default=default("is_refusal_threshold", 0.25))
+    parser.add_argument("--max-refusal-check-generated-tokens", type=int, default=default("max_refusal_check_generated_tokens", 1024))
     parser.add_argument("--max-wordcloud-clusters", type=int, default=default("max_wordcloud_clusters", 120))
     parser.add_argument(
         "--wordcloud-granularity",

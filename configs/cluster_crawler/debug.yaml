@@ -6,10 +6,10 @@ refusal_classifier_model: none  # API-only run; opt out of the on-device classif
 samples_per_language: 1
 max_generated_tokens: 8192
 max_concurrent_api_calls: 4
-max_concurrent_helpers: 4
+max_concurrent_summarizations: 4
 broad_head_crawl_seeds: 1
 broad_tail_drill_seeds: 2
 broad_iterations: 1
 max_validation_clusters: 4
-validation_probes: 1
+num_refusal_checks_per_topic: 1
 verbose: true

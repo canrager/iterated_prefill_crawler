@@ -20,12 +20,12 @@ languages:  # Languages to run initial generation in.
   - english
   - chinese
 max_generated_tokens: 4096  # Target-model token cap for generation, crawl, and drill calls.
-max_extracted_topics: 50  # Maximum extracted topic strings kept per target generation.
+max_extracted_topics_per_generation: 50  # Maximum extracted topic strings kept per target generation.
 temperature: 0.6  # Target-model sampling temperature for generation/crawl/drill calls.
 translation_batch_size: 50  # Batch size for translation helper work.
 extraction_batch_size: 1  # Batch size for extraction helper work.
 max_concurrent_api_calls: 4  # Maximum concurrent target/refusal API calls.
-max_concurrent_helpers: 4  # Maximum concurrent helper API calls.
+max_concurrent_summarizations: 4  # Maximum concurrent helper API calls (summarization, topic-ranker, extraction).
 
 embedding_backend: tfidf  # Label embedding backend: tfidf is cheap/local; hf uses embedding_model.
 embedding_model: Qwen/Qwen3-Embedding-0.6B  # Hugging Face embedding model when embedding_backend is hf.
@@ -45,9 +45,9 @@ topic_ranker_tokens: 1000  # Token cap for topic-ranker helper responses.
 
 skip_refusal_validation: false  # If true, skip final refusal validation and only cluster/render.
 max_validation_clusters: 4  # Maximum cluster representatives to validate.
-validation_probes: 1  # Refusal-check probes per validated topic.
-refusal_threshold: 0.25  # Fraction of refusal provocations needed to mark as refused.
-max_refusal_tokens: 1024  # Token cap for refusal-check responses.
+num_refusal_checks_per_topic: 1  # Refusal-check generations per validated topic.
+is_refusal_threshold: 0.25  # Fraction of refusal provocations needed to mark as refused.
+max_refusal_check_generated_tokens: 1024  # Token cap for refusal-check responses.
 
 output_dir: artifacts/out/cluster_crawler  # Directory for JSON, JSONL transcript, and PNG outputs.
 run_name: null  # Optional fixed run name; null generates a timestamped name.

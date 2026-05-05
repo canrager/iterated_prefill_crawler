@@ -10,11 +10,11 @@ refusal_classifier_model: none
 samples_per_language: 4
 max_generated_tokens: 8192
 max_concurrent_api_calls: 8
-max_concurrent_helpers: 8
-broad_head_crawl_seeds: 8
-broad_tail_drill_seeds: 16
-broad_iterations: 2
+max_concurrent_summarizations: 8
+broad_head_crawl_seeds: 32
+broad_tail_drill_seeds: 32
+broad_iterations: 4
 topic_ranker_tokens: 1500
 max_validation_clusters: 32
-validation_probes: 1
+num_refusal_checks_per_topic: 3
 max_wordcloud_clusters: 200
