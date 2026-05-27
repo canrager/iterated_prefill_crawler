@@ -27,6 +27,15 @@ def _make_client_kwargs():
     return {"api_key": "test-key", "base_url": "https://openrouter.ai/api/v1"}
 
 
+def _make_formatter_for_parser(max_topics=10):
+    return TopicFormatter(
+        SimpleNamespace(
+            crawler=SimpleNamespace(max_extracted_topics_per_generation=max_topics),
+            model=SimpleNamespace(),
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Task 2(a): Non-timeout exception propagates
 # ---------------------------------------------------------------------------
@@ -162,6 +171,38 @@ def test_split_at_comma_preserves_chinese_field_on_cloned_topics():
 
     assert clone_by_summary["territorial conflicts"].chinese == "分裂主义或领土冲突煽动"
     assert clone_by_summary["harmful instructions"].chinese == "非法活动与有害指令"
+
+
+def test_parse_extraction_response_recovers_plain_extractor_label_lists():
+    """Extractor helper drift to plain labels should not drop valid topics."""
+    formatter = _make_formatter_for_parser(max_topics=5)
+
+    comma_labels = (
+        "illegal activities, harm to self or others, hateful content, "
+        "privacy violations"
+    )
+    assert formatter._parse_extraction_response(comma_labels) == [
+        "illegal activities",
+        "harm to self or others",
+        "hateful content",
+        "privacy violations",
+    ]
+
+    bullet_labels = """\
+- 恐怖主义
+- 攻击国家主权
+- 分裂国家
+- 歪曲历史
+- 绕过平台规则
+- extra item beyond cap
+"""
+    assert formatter._parse_extraction_response(bullet_labels) == [
+        "恐怖主义",
+        "攻击国家主权",
+        "分裂国家",
+        "歪曲历史",
+        "绕过平台规则",
+    ]
 
 
 def test_extract_and_format_does_not_split_single_summarized_phrase_at_comma(monkeypatch):

@@ -59,6 +59,76 @@ class TopicFormatter:
         extracted_list = [item for item in extracted_list if item is not None]
         return extracted_list
 
+    def _parse_extraction_response(self, raw: str) -> List[str]:
+        """Parse extractor output, accepting JSON first and simple label lists second."""
+        if not raw:
+            return []
+
+        def _limit(items: List[str]) -> List[str]:
+            seen = set()
+            cleaned = []
+            for item in items:
+                item = str(item).strip()
+                item = re.sub(r"^[\-*•]\s*", "", item).strip()
+                item = item.strip(" \t\r\n\"'`")
+                if not item or item in seen:
+                    continue
+                seen.add(item)
+                cleaned.append(item)
+            return cleaned[: self.config.crawler.max_extracted_topics_per_generation]
+
+        def _parse_json_array(candidate: str) -> List[str]:
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                return []
+            if isinstance(parsed, list):
+                return _limit([str(t) for t in parsed])
+            return []
+
+        json_str = raw.strip()
+        if "```" in json_str:
+            parts = json_str.split("```")
+            if len(parts) >= 3:
+                json_str = parts[1]
+                if json_str.startswith("json"):
+                    json_str = json_str[4:]
+                json_str = json_str.strip()
+
+        topics = _parse_json_array(json_str)
+        if topics:
+            return topics
+
+        bracket_match = re.search(r"(\[(?:.|\n)*\])", json_str)
+        if bracket_match:
+            topics = _parse_json_array(bracket_match.group(1))
+            if topics:
+                return topics
+
+        bullet_items = []
+        for line in raw.splitlines():
+            line = line.strip()
+            match = re.match(
+                r"^(?:[-*•]|\d+[.)]|[（(]?\d+[）)]|[一二三四五六七八九十]+[、.])\s*(.+)$",
+                line,
+            )
+            if not match:
+                continue
+            item = match.group(1).strip()
+            if item.endswith(":") or item.endswith("："):
+                continue
+            bullet_items.append(item)
+        if bullet_items:
+            return _limit(bullet_items)
+
+        one_line = raw.strip()
+        if "\n" not in one_line and ":" not in one_line and "：" not in one_line:
+            comma_items = re.split(r"\s*[,，;；]\s*", one_line)
+            if len(comma_items) >= 3 and all(len(item) <= 100 for item in comma_items):
+                return _limit(comma_items)
+
+        return []
+
     def _extract_with_model(
         self,
         texts: List[str],
@@ -109,28 +179,10 @@ class TopicFormatter:
 
             all_extracted = []
             for raw in responses:
-                json_str = raw.strip()
-                if "```" in json_str:
-                    parts = json_str.split("```")
-                    if len(parts) >= 3:
-                        json_str = parts[1]
-                        if json_str.startswith("json"):
-                            json_str = json_str[4:]
-                        json_str = json_str.strip()
-                try:
-                    topics = json.loads(json_str)
-                    if isinstance(topics, list):
-                        all_extracted.append(
-                            [str(t) for t in topics][
-                                : self.config.crawler.max_extracted_topics_per_generation
-                            ]
-                        )
-                    else:
-                        all_extracted.append([])
-                except json.JSONDecodeError:
-                    if verbose:
-                        print(f"Failed to parse extraction JSON: {raw}")
-                    all_extracted.append([])
+                topics = self._parse_extraction_response(raw)
+                if not topics and verbose:
+                    print(f"Failed to parse extraction JSON: {raw}")
+                all_extracted.append(topics)
             return all_extracted
 
         from src.generation_utils import async_query_openrouter
@@ -189,22 +241,10 @@ class TopicFormatter:
                     return []
 
                 raw = response.strip()
-                json_str = raw
-                if "```" in json_str:
-                    parts = json_str.split("```")
-                    if len(parts) >= 3:
-                        json_str = parts[1]
-                        if json_str.startswith("json"):
-                            json_str = json_str[4:]
-                        json_str = json_str.strip()
-
-                try:
-                    topics = json.loads(json_str)
-                    if isinstance(topics, list):
-                        return [str(t) for t in topics][
-                            : self.config.crawler.max_extracted_topics_per_generation
-                        ]
-                except json.JSONDecodeError:
+                topics = self._parse_extraction_response(raw)
+                if topics:
+                    return topics
+                else:
                     if verbose:
                         print(f"Failed to parse extraction JSON: {raw}")
                 return []
