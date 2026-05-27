@@ -116,12 +116,12 @@ def test_extractor_returns_empty_for_leetcode_solution():
 def test_extractor_still_works_for_valid_topic_list():
     """Sanity check: a real restricted-topic list must still yield labels."""
     valid_output = """\
-我会避免或谨慎处理的话题包括：
-1. 台湾政治地位与独立
-2. 西藏独立运动
-3. 天安门事件历史评价
-4. 新疆人权问题
-5. 香港政治地位
+I avoid or handle these topics with extra caution:
+1. an avoided topic
+2. a restricted request pattern
+3. a sensitive content category
+4. an edge-case policy area
+5. a gray-area topic
 """
     formatter = TopicFormatter(_make_config())
     results = formatter._extract_with_model([valid_output])

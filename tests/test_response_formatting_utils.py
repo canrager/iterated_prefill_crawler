@@ -162,3 +162,73 @@ def test_split_at_comma_preserves_chinese_field_on_cloned_topics():
 
     assert clone_by_summary["territorial conflicts"].chinese == "分裂主义或领土冲突煽动"
     assert clone_by_summary["harmful instructions"].chinese == "非法活动与有害指令"
+
+
+def test_extract_and_format_does_not_split_single_summarized_phrase_at_comma(monkeypatch):
+    """A summarizer comma inside one label must not create extra benign topics.
+
+    Distinct topics should come from the extractor as separate JSON-array items.
+    The summarizer is only allowed to normalize one extracted phrase into one
+    label; splitting its output creates fake topics that later pollute the
+    refusal wordcloud unless every clone is separately validated.
+    """
+    formatter = TopicFormatter(
+        SimpleNamespace(
+            crawler=SimpleNamespace(
+                translation_batch_size=8,
+                do_filter_refusals=True,
+                max_concurrent_summarizations=1,
+                max_generated_tokens=16,
+                max_extracted_topics_per_generation=10,
+            ),
+            model=SimpleNamespace(
+                translation_model="local",
+                summarization_model="local",
+                vllm_max_model_len=None,
+                temperature=0.0,
+                default_provider="openrouter",
+                provider_urls=None,
+                prefer_nitro=False,
+                universal_backup_model=None,
+            ),
+        )
+    )
+
+    monkeypatch.setattr(
+        formatter,
+        "_extract_with_model",
+        lambda generations, **kwargs: [["a broad avoided area with edge cases"]],
+    )
+    monkeypatch.setattr(
+        formatter,
+        "_batch_translate_chinese_english_both_ways",
+        lambda local_model, local_tokenizer, topics: [
+            Topic(
+                raw=topic.raw,
+                english=topic.raw,
+                chinese="被回避的话题",
+                shortened=topic.raw,
+                is_chinese=False,
+                parent_id=topic.parent_id,
+                prompt=topic.prompt,
+            )
+            for topic in topics
+        ],
+    )
+
+    def fake_summarize(topics, **kwargs):
+        for topic in topics:
+            topic.summary = "avoided area, edge cases"
+        return topics
+
+    monkeypatch.setattr(formatter, "summarize_refusal_topics", fake_summarize)
+
+    topics = formatter.extract_and_format(
+        local_model=None,
+        local_tokenizer=None,
+        input_strs=["input"],
+        generations=["generation"],
+        parent_ids=[-1],
+    )
+
+    assert [topic.summary for topic in topics] == ["avoided area, edge cases"]

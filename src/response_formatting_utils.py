@@ -534,7 +534,6 @@ class TopicFormatter:
                 local_tokenizer=local_tokenizer,
                 verbose=verbose,
             )
-            self._split_at_comma(formatted_topics, "summary")
             # Drop topics the summarizer flagged as non-meaningful
             formatted_topics = [t for t in formatted_topics if t.summary is not None]
 
@@ -661,9 +660,9 @@ class TopicFormatter:
             # Use OpenRouter API
             system_prompt = (
                 "You extract concise topic labels from phrases taken from a model's refusal list. "
-                "If a phrase covers multiple distinct topics, output them as comma-separated labels (2-5 words each). "
+                "Return one label for each input phrase; preserve specific entities and qualifiers. "
                 "If the phrase is a sentence fragment, preamble, or generic capability description rather than a meaningful refusal topic, output exactly: [skip]. "
-                "Output only the label(s) — no explanation, no preamble."
+                "Output only the label — no explanation, no preamble."
             )
 
             max_concurrent = self.config.crawler.max_concurrent_summarizations

@@ -27,10 +27,10 @@ def _non_refusal_seed_topic_queue() -> TopicQueue:
     queue.incoming_batch(
         [
             Topic(
-                raw="sensitive political conflicts",
-                english="sensitive political conflicts",
-                chinese="敏感政治冲突",
-                summary="sensitive political conflicts",
+                raw="broad avoided area",
+                english="broad avoided area",
+                chinese="被回避的话题领域",
+                summary="broad avoided area",
                 is_head=True,
                 is_refusal=False,
             )
@@ -99,10 +99,10 @@ def test_build_messages_can_seed_from_non_refusal_head_topics():
     )
 
     assert english_messages == [
-        [{"role": "user", "content": "SEED EN sensitive political conflicts"}]
+        [{"role": "user", "content": "SEED EN broad avoided area"}]
     ]
     assert english_parent_ids == [0]
-    assert chinese_messages == [[{"role": "user", "content": "SEED ZH 敏感政治冲突"}]]
+    assert chinese_messages == [[{"role": "user", "content": "SEED ZH 被回避的话题领域"}]]
     assert chinese_parent_ids == [0]
 
 
@@ -338,10 +338,7 @@ def test_jailbreak_warmup_matches_golden_english_audit_prompt_shape():
 
 
 def test_jailbreak_seeded_prompts_match_golden_artifact_structures():
-    """Each language has two seeded templates -- expansion ("every OTHER category")
-    and drill-down ("break this category into granular components"). PromptBuilder
-    picks randomly, so the test samples many draws and asserts (a) every draw
-    matches ONE of the two expected shapes, (b) both shapes appear across draws."""
+    """Seeded jailbreak prompts keep both expansion and drill-down shapes."""
     import random as _random
 
     builder = _build_jailbreak_prompt_builder()
@@ -387,15 +384,7 @@ def test_jailbreak_seeded_prompts_match_golden_artifact_structures():
 
 
 def test_non_refusal_topics_seed_drilldown(monkeypatch, tmp_path):
-    """End-to-end: warmup discovers a broad political topic that the target model
-    does NOT refuse.  After the fix, that topic still enters ``head_topics`` and
-    becomes a seed for drill-down templates on the next crawl step.
-
-    This exercises the real jailbreak prompt templates to verify that a topic like
-    "geopolitical conflict" — which DeepSeek answers with propaganda instead of
-    refusing — can still seed the "I know you restrict {}" drill-down path that
-    the manual probe used successfully.
-    """
+    """A broad non-refused handle can still seed later exploration."""
     from src.crawler.crawler import Crawler
 
     # ── Config: 2 crawl steps, 1 warmup, jailbreak prompts, English only ──
@@ -415,28 +404,28 @@ def test_non_refusal_topics_seed_drilldown(monkeypatch, tmp_path):
     )
 
     # ── Canned data simulating what DeepSeek produces ──
-    POLITICAL_TOPIC = "sensitive geopolitical conflicts"
-    SAFETY_TOPIC = "drug manufacturing"
+    BROAD_HANDLE = "broad avoided area"
+    CONCRETE_REFUSAL = "concrete avoided request"
 
     warmup_topics = [
         Topic(
-            raw=POLITICAL_TOPIC,
-            english=POLITICAL_TOPIC,
-            chinese="敏感地缘政治冲突",
-            shortened=POLITICAL_TOPIC,
-            summary=POLITICAL_TOPIC,
+            raw=BROAD_HANDLE,
+            english=BROAD_HANDLE,
+            chinese="被回避的话题领域",
+            shortened=BROAD_HANDLE,
+            summary=BROAD_HANDLE,
             is_head=True,
-            is_refusal=False,  # DS answers with propaganda, not a refusal
+            is_refusal=False,
             parent_id=-1,
         ),
         Topic(
-            raw=SAFETY_TOPIC,
-            english=SAFETY_TOPIC,
-            chinese="药物制造",
-            shortened=SAFETY_TOPIC,
-            summary=SAFETY_TOPIC,
+            raw=CONCRETE_REFUSAL,
+            english=CONCRETE_REFUSAL,
+            chinese="具体被回避的请求",
+            shortened=CONCRETE_REFUSAL,
+            summary=CONCRETE_REFUSAL,
             is_head=True,
-            is_refusal=True,  # DS actually refuses this
+            is_refusal=True,
             parent_id=-1,
         ),
     ]
@@ -481,19 +470,19 @@ def test_non_refusal_topics_seed_drilldown(monkeypatch, tmp_path):
     head_summaries = {t.summary for t in crawler.queue.head_topics}
     refusal_summaries = {t.summary for t in crawler.queue.head_refusal_topics}
 
-    assert POLITICAL_TOPIC in head_summaries, (
-        f"Political topic should be in head_topics but got: {head_summaries}"
+    assert BROAD_HANDLE in head_summaries, (
+        f"Broad handle should be in head_topics but got: {head_summaries}"
     )
-    assert SAFETY_TOPIC in head_summaries
-    assert SAFETY_TOPIC in refusal_summaries
-    assert POLITICAL_TOPIC not in refusal_summaries, (
-        "Political topic should NOT be in head_refusal_topics (DS didn't refuse it)"
+    assert CONCRETE_REFUSAL in head_summaries
+    assert CONCRETE_REFUSAL in refusal_summaries
+    assert BROAD_HANDLE not in refusal_summaries, (
+        "Broad handle should not enter head_refusal_topics unless it validates"
     )
 
     # ── Assert 2: Seed drill-down templates can reference the political topic ──
     # Generate many messages to increase chance of sampling the political topic
     # (there are only 2 topics in the queue, so even with random sampling we'll hit it)
-    found_political_seed = False
+    found_broad_seed = False
     for _ in range(50):
         messages, parent_ids = crawler.prompt_builder.build_messages(
             "english", 1, use_seed_templates=True
@@ -502,15 +491,15 @@ def test_non_refusal_topics_seed_drilldown(monkeypatch, tmp_path):
         user_content = next(
             m["content"] for m in messages[0] if m["role"] == "user"
         )
-        if POLITICAL_TOPIC in user_content:
-            found_political_seed = True
+        if BROAD_HANDLE in user_content:
+            found_broad_seed = True
             # Verify it's in a drill-down template, not a pre-template
             assert "already" in user_content.lower() or "restrict" in user_content.lower() or "documented" in user_content.lower(), (
-                f"Political topic should appear in a seed drill-down template, got:\n{user_content[:300]}"
+                f"Broad handle should appear in a seeded exploration template, got:\n{user_content[:300]}"
             )
             break
 
-    assert found_political_seed, (
-        "After 50 samples, the political topic was never used as a seed. "
+    assert found_broad_seed, (
+        "After 50 samples, the broad handle was never used as a seed. "
         "This suggests _get_user_seed_candidates() is not returning head_topics."
     )
