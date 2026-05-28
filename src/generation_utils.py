@@ -4,7 +4,10 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
-from vllm.inputs.data import TokensPrompt
+try:
+    from vllm.inputs import TokensPrompt
+except ImportError:
+    from vllm.inputs.data import TokensPrompt
 
 
 # httpx schedules TLS teardown tasks that fire after asyncio.run() closes the loop,
@@ -22,6 +25,8 @@ from src.openrouter_utils import (  # re-exported for backward compatibility
     REASONING_DISABLED,
     async_query_llm_api,
     async_query_openrouter,
+    get_api_max_retries,
+    get_api_timeout_seconds,
     query_llm_api,
 )
 from src.provider_config import get_provider_client_kwargs
@@ -145,13 +150,18 @@ async def _async_api_single(
             )
         return API_CALL_FAILED_SENTINEL
 
+    timeout_seconds = get_api_timeout_seconds()
+
     try:
-        completion = await client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            max_tokens=max_new_tokens,
-            temperature=temperature,
-            extra_body=extra_body,
+        completion = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=max_new_tokens,
+                temperature=temperature,
+                extra_body=extra_body,
+            ),
+            timeout=timeout_seconds,
         )
 
         if not completion.choices:
@@ -190,6 +200,12 @@ async def _async_api_single(
             f"API error ({model_name}) [status {e.status_code}, retries exhausted]: {e}"
         )
         return await _fallback_or_sentinel(f"status {e.status_code}")
+    except asyncio.TimeoutError:
+        print(
+            f"API error ({model_name}) [hard timeout {timeout_seconds}s]",
+            flush=True,
+        )
+        return await _fallback_or_sentinel("hard timeout")
     except Exception as e:
         # Network errors, timeouts, etc. — the SDK already retried these.
         print(f"API error ({model_name}) [retries exhausted]: {e}")
@@ -239,9 +255,13 @@ def _api_batch_generate(
         else None
     )
 
-    # The SDK auto-retries 429/500/502/503/504 with exponential backoff.
-    # Default is 2 retries; bump to 4 for resilience against rate limits.
-    client = AsyncOpenAI(**client_kwargs, max_retries=4)
+    # The SDK auto-retries retryable provider errors with exponential backoff.
+    # Keep retries bounded so one slow helper call does not stall an entire run.
+    client = AsyncOpenAI(
+        **client_kwargs,
+        max_retries=get_api_max_retries(),
+        timeout=get_api_timeout_seconds(),
+    )
 
     async def _run():
         semaphore = asyncio.Semaphore(max_concurrent)

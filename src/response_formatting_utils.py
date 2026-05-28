@@ -5,7 +5,7 @@ import string
 from typing import List, Union
 
 from src.crawler.topic_queue import Topic
-from src.openrouter_utils import REASONING_DISABLED
+from src.openrouter_utils import API_CALL_FAILED_SENTINEL, REASONING_DISABLED
 
 
 def remove_thinking_context(queries: List[str]) -> List[str]:
@@ -306,12 +306,27 @@ class TopicFormatter:
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
             prefer_nitro=self.config.model.prefer_nitro,
+            max_concurrent=self.config.crawler.max_concurrent_api_calls,
             extra_body=REASONING_DISABLED,
             universal_backup_model=self.config.model.universal_backup_model,
         )
-        # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
-        translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
+        translated = [
+            self._clean_translation_or_original(t, src)
+            for t, src in zip(translated, texts)
+        ]
         return translated[0] if is_single else translated
+
+    @staticmethod
+    def _clean_translation_or_original(translated: str, original: str) -> str:
+        """Return a usable translation, falling back to the source label on helper failure."""
+        cleaned = (translated or "").strip()
+        if (
+            not cleaned
+            or cleaned == API_CALL_FAILED_SENTINEL
+            or cleaned.startswith("__API_MODERATION_REFUSED__")
+        ):
+            return original
+        return cleaned
 
     def _translate_en_to_zn(
         self,
@@ -339,11 +354,14 @@ class TopicFormatter:
             default_provider=self.config.model.default_provider,
             provider_url_overrides=self.config.model.provider_urls,
             prefer_nitro=self.config.model.prefer_nitro,
+            max_concurrent=self.config.crawler.max_concurrent_api_calls,
             extra_body=REASONING_DISABLED,
             universal_backup_model=self.config.model.universal_backup_model,
         )
-        # Strip whitespace; fall back to original text if empty (e.g. Gemini safety filter)
-        translated = [t.strip() if t.strip() else src for t, src in zip(translated, texts)]
+        translated = [
+            self._clean_translation_or_original(t, src)
+            for t, src in zip(translated, texts)
+        ]
         return translated[0] if is_single else translated
 
     def _resolve_model(self, role: str, local_model, local_tokenizer):

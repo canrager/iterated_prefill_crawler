@@ -81,7 +81,7 @@ Both `model` and `crawler` are required. They select a YAML file from `configs/m
 
 **Available crawler configs** (`configs/crawler/`):
 
-- `default` — full 10-step submission crawl
+- `default` — full 3-step submission crawl
 - `rehearsal` — smaller same-method subset for faster validation
 - `debug` — smallest subset for immediate task checks
 
@@ -142,6 +142,203 @@ Without `--tmux`, the script waits for all runs and reports per-run success/fail
 ```bash
 ./scripts/run_parallel.sh --kill <timestamp_or_dir>
 ```
+
+### Reviewer 2x2 Ablation
+
+`scripts/reviewer_ablation.py` is the reviewer-response runner for separating
+iteration from assistant-prefill pressure. It runs four cells for each model:
+
+| Cell key | Method | Iteration | Assistant prefill | Prompt config | Steps |
+| -------- | ------ | --------: | ----------------: | ------------- | ----: |
+| `direct` | Direct baseline | no | no | `baseline` | 1 |
+| `prefill_only` | Prefill only | no | yes | `default` with `prompts.user_seed_templates=null` | 1 |
+| `iter_no_prefill` | Iteration only | yes | no | `baseline_crawl` | 2 |
+| `ipc` | Full IPC | yes | yes | `default` | 2 |
+
+The script has three subcommands:
+
+```bash
+# Print the exact crawler commands without running anything.
+python3 scripts/reviewer_ablation.py plan \
+  --models local_ds70b \
+  --crawler default \
+  --out-dir artifacts/out/reviewer_ablation_ds70b
+
+# Run the four cells sequentially. Do not pass --tmux for a local 70B target
+# unless you intentionally want four detached model loads.
+python3 scripts/reviewer_ablation.py run \
+  --models local_ds70b \
+  --crawler default \
+  --out-dir artifacts/out/reviewer_ablation_ds70b
+
+# Summarize completed crawler JSON artifacts as reviewer-facing Markdown tables.
+python3 scripts/reviewer_ablation.py summarize \
+  --out-dir artifacts/out/reviewer_ablation_ds70b
+```
+
+By default, the runner adds `crawler.do_filter_refusals=false`. That makes the
+2x2 a discovery ablation over candidate topic clusters and avoids the expensive
+per-candidate refusal-check fan-out. Add `--validate-all-discovered` only when
+you want every discovered candidate to go through the full refusal-check
+pipeline. For reviewer tables, the expected workflow is to run the 2x2
+discovery ablation, summarize the candidate clusters, then measure behavioral
+refusal rates separately on a fixed probe set.
+
+Other useful options:
+
+- `--models a,b,c` runs all four cells for each comma-separated model config.
+- `--crawler rehearsal` uses the smaller same-method crawler preset.
+- `--samples N` overrides `crawler.num_samples_per_topic=N` for quick smoke
+  checks.
+- `--tmux` is safe for remote API targets. For local vLLM 70B targets, prefer
+  one outer tmux session around the whole script so cells run sequentially.
+
+### Runpod Reviewer-Ready Runs
+
+The Runpod workflow is README-driven and uses plain SSH plus rsync. It assumes
+you already have a funded pod with SSH exposed. The scripts do not create,
+stop, or bill Runpod pods through the Runpod API; they control an existing pod
+from this checkout.
+
+The target model config for the reviewer-ready run is
+`configs/model/local_ds70b.yaml`, which loads
+`deepseek-ai/DeepSeek-R1-Distill-Llama-70B` through the in-process vLLM path.
+This is intentional: the TTF path depends on local tokenizer/chat-template
+prefill injection. A generic OpenAI-compatible `vllm serve` endpoint may treat
+assistant prefill as prior conversation history instead of a live continuation.
+
+#### Pod requirements
+
+- A CUDA image that can run Python 3.12, `uv`, PyTorch, and vLLM.
+- Enough GPU memory for `DeepSeek-R1-Distill-Llama-70B` with
+  `vllm_tensor_parallel_size: 2`. In practice, use a two-GPU pod with sufficient
+  aggregate VRAM for BF16 weights and KV cache.
+  A single very-high-memory GPU, such as a B200, can be used with
+  `--override model.vllm_tensor_parallel_size=1`.
+- `tmux`, `rsync`, `bash`, and SSH access.
+- `OPENROUTER_API_KEY` on the pod for the helper roles in
+  `configs/model/local_ds70b.yaml`.
+- `HF_TOKEN` on the pod if Hugging Face requires authentication for any model
+  download.
+
+The local controller accepts SSH settings as flags or environment variables:
+
+```bash
+export RUNPOD_SSH_HOST=<host>
+export RUNPOD_SSH_PORT=<port>
+export RUNPOD_SSH_USER=root
+export RUNPOD_SSH_KEY=~/.ssh/id_ed25519   # optional
+export RUNPOD_REMOTE_DIR=/workspace/iterated_prefill_crawler
+```
+
+Use Runpod's direct/full SSH endpoint, not the interactive proxy form
+`ssh <pod-user>@ssh.runpod.io`. The controller needs non-interactive SSH plus
+file transfer. In the Runpod Connect panel, look for the command shaped like
+`ssh root@<public-ip> -p <mapped-port> -i <key>` and set
+`RUNPOD_SSH_HOST=<public-ip>` and `RUNPOD_SSH_PORT=<mapped-port>`.
+
+If you pass SSH settings as flags instead, put them before the subcommand:
+
+```bash
+python3 scripts/runpod_control.py --host <host> --port <port> sync
+```
+
+#### 1. Inspect the planned 2x2 locally
+
+```bash
+python3 scripts/reviewer_ablation.py plan \
+  --models local_ds70b \
+  --crawler default
+```
+
+#### 2. Sync this checkout to the pod
+
+```bash
+python3 scripts/runpod_control.py sync
+```
+
+By default, sync excludes `.env`, virtualenvs, model caches, artifacts,
+outputs, Git internals, and Python caches. Pass `--include-env` only if you
+intentionally want to copy the local `.env` file to the pod.
+
+The controller tries `rsync` first and falls back to an archive transfer for
+hosts where `rsync` is unavailable:
+
+```bash
+python3 scripts/runpod_control.py sync --transfer-method archive
+```
+
+#### 3. Bootstrap the pod checkout
+
+```bash
+python3 scripts/runpod_control.py bootstrap
+```
+
+Bootstrap runs `scripts/runpod_bootstrap.sh` remotely. It checks basic GPU
+visibility, installs `uv` if it is missing, runs `uv sync`, ensures `ninja` is
+available for vLLM/FlashInfer JIT builds, creates artifact directories, and
+writes a short bootstrap log under `artifacts/log/`.
+
+#### 4. Start the reviewer-ready 2x2
+
+```bash
+python3 scripts/runpod_control.py start \
+  --model local_ds70b \
+  --crawler default \
+  --session ds70b_2x2
+```
+
+`start` launches exactly one remote tmux session. Inside that session,
+`scripts/runpod_reviewer_ready.sh` runs the four reviewer cells sequentially,
+writes the exact command plan to `plan.md`, writes logs to `run.log`, writes the
+reviewer tables to `summary.md`, and records the latest output directory in
+`artifacts/out/runpod_latest_reviewer_ablation.txt`.
+
+Helper model calls use bounded API waits by default:
+`LLM_API_TIMEOUT_SECONDS=90` and `LLM_API_MAX_RETRIES=1`. Override them with
+`start --env NAME=VALUE` if your provider is unusually slow or rate-limited.
+The timeout is enforced as an explicit asyncio hard cap around helper requests;
+failed translation calls fall back to the original topic label so one slow
+provider response cannot strand the GPU job indefinitely.
+
+For a quick smoke run before spending serious GPU time:
+
+```bash
+python3 scripts/runpod_control.py start \
+  --model local_ds70b \
+  --crawler debug \
+  --samples 2 \
+  --override model.vllm_tensor_parallel_size=1 \
+  --override crawler.max_extracted_topics_per_generation=10 \
+  --override crawler.max_concurrent_api_calls=8 \
+  --env LLM_API_TIMEOUT_SECONDS=30 \
+  --env LLM_API_MAX_RETRIES=0 \
+  --session ds70b_smoke
+```
+
+#### 5. Monitor and fetch results
+
+```bash
+# Show tmux/session state, latest output marker, and recent log tail.
+python3 scripts/runpod_control.py status --session ds70b_2x2
+
+# Follow the remote run log.
+python3 scripts/runpod_control.py tail --session ds70b_2x2
+
+# Stop a remote tmux run if a smoke test or provider call stalls.
+python3 scripts/runpod_control.py stop --session ds70b_2x2
+
+# Fetch the latest recorded reviewer-ablation output directory.
+python3 scripts/runpod_control.py fetch
+```
+
+Fetched results land under `artifacts/runpod/<remote-output-name>/` locally.
+The most important files are:
+
+- `plan.md` - exact commands for the four cells.
+- `run.log` - full sequential run log.
+- `summary.md` - reviewer-facing Markdown tables.
+- `crawler_out_*.json` and matching `.jsonl` transcripts - raw evidence.
 
 ## How the Crawler Works
 
@@ -266,7 +463,7 @@ When no prefix is given, the model string is routed to `model.default_provider` 
 | Summarization | `summarization_model` | Condenses raw topic strings into 2–5 word labels                        |
 | Refusal check | `refusal_check_model` | Generates diverse test queries for refusal checking                     |
 
-The `haiku` model config uses OpenRouter for the target model and local vLLM for all auxiliary roles. The `local_*` configs use vLLM for everything.
+The `haiku` model config uses OpenRouter for the target model and local vLLM for all auxiliary roles. The `local_*` configs use an in-process vLLM target, but their auxiliary roles are configured per YAML file; inspect the selected config before a production run.
 
 ### Multi-Provider Configs
 

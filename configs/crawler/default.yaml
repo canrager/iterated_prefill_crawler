@@ -15,6 +15,8 @@ seed_warmup_steps: 1
 tokenization_template: chat
 do_filter_refusals: true
 max_concurrent_summarizations: 10
+max_concurrent_api_calls: 16
+translation_batch_size: 50
 extraction_batch_size: 1
 prompt_languages:
   - english

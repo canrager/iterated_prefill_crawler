@@ -7,6 +7,12 @@ Source control will track versions of this document, so keep it fresh.
 
 ## Current learnings
 
+### Runpod reviewer runs need direct SSH plus bounded helper calls
+
+Runpod's `ssh.runpod.io` interactive proxy can corrupt rsync/SFTP-style transfers; use the direct TCP SSH endpoint from the Connect panel (`root@<public-ip> -p <mapped-port>`) for controller sync/fetch. On the B200 pod, vLLM/FlashInfer also needed `ninja` available on PATH. Helper-provider calls can keep sockets open past SDK timeout expectations, so wrap helper completions in an explicit asyncio hard timeout and fall back gracefully for translations.
+
+*Evidence: 2026-05-28 Runpod setup for `local_ds70b`; proxy rsync failed with `unexpected tag`, FlashInfer JIT failed until `ninja` was installed, and `ds70b_smoke4` wedged in helper HTTPS calls until hard timeouts were added.*
+
 ### Extractors silently drop alignment-trigger categories under prod prompts
 
 Helper-LLMs fine-tuned for safety (e.g. `openai/gpt-5.4-mini`) can produce clean JSON and no visible refusal while systematically omitting the hardest categories from a target's audit enumeration — CSAM, weapons, self-harm, non-consensual sexual acts, exploit code. This is the worst failure mode for an audit pipeline: biased recall loss on exactly the categories that matter, with output that looks successful. A general extractor bench (historical/political fixtures) will not catch it; the bench must include a real jailbreak enumeration fixture.

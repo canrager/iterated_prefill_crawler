@@ -7,14 +7,27 @@ from src.transcript_logger import log_model_call
 # OpenRouter base URL (canonical form, without trailing slash).
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-# Pass as extra_body to disable reasoning tokens on helper-model calls.
+# Pass as extra_body to minimize reasoning tokens on helper-model calls.
 # Target-model calls must NOT include this — reasoning is part of the audit signal.
-REASONING_DISABLED: Dict = {"reasoning": {"effort": "none"}}
+# OpenRouter providers do not agree on "none"; Google accepts "minimal".
+REASONING_DISABLED: Dict = {"reasoning": {"effort": "minimal"}}
 
 # Sentinel returned when both primary and universal-backup helper calls
 # exhaust retries with non-auth errors or timeouts. Distinct from "", which
 # means "the provider returned a valid but empty response".
 API_CALL_FAILED_SENTINEL = "__API_CALL_FAILED__"
+DEFAULT_API_TIMEOUT_SECONDS = 90.0
+DEFAULT_API_MAX_RETRIES = 1
+
+
+def get_api_timeout_seconds() -> float:
+    """Return the per-request helper API timeout from env."""
+    return float(os.environ.get("LLM_API_TIMEOUT_SECONDS", DEFAULT_API_TIMEOUT_SECONDS))
+
+
+def get_api_max_retries() -> int:
+    """Return the helper API retry count from env."""
+    return int(os.environ.get("LLM_API_MAX_RETRIES", DEFAULT_API_MAX_RETRIES))
 
 
 def _apply_nitro(model_id: str, base_url: str, prefer: bool) -> str:
@@ -72,14 +85,19 @@ async def async_query_openrouter(
 
     # Let the SDK handle retries (429/5xx) with exponential backoff.
     if client_kwargs is not None:
-        client = AsyncOpenAI(**client_kwargs, max_retries=4)
+        client = AsyncOpenAI(
+            **client_kwargs,
+            max_retries=get_api_max_retries(),
+            timeout=get_api_timeout_seconds(),
+        )
         effective_base_url = client_kwargs.get("base_url", _OPENROUTER_BASE_URL)
     else:
         api_key = os.environ.get("OPENROUTER_API_KEY")
         client = AsyncOpenAI(
             api_key=api_key,
             base_url=_OPENROUTER_BASE_URL,
-            max_retries=4,
+            max_retries=get_api_max_retries(),
+            timeout=get_api_timeout_seconds(),
         )
         effective_base_url = _OPENROUTER_BASE_URL
 
@@ -104,13 +122,18 @@ async def async_query_openrouter(
             return (text, usage if usage is not None else _empty_usage)
         return text
 
+    timeout_seconds = get_api_timeout_seconds()
+
     try:
-        completion = await client.chat.completions.create(
-            model=resolved_model_name,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            extra_body=extra_body,
+        completion = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=resolved_model_name,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                extra_body=extra_body,
+            ),
+            timeout=timeout_seconds,
         )
         if not completion.choices:
             print(f"API returned no choices ({resolved_model_name})")
@@ -154,6 +177,28 @@ async def async_query_openrouter(
         )
         if universal_backup_model and universal_backup_model != model_name:
             print(f"Falling back to {universal_backup_model} after status {e.status_code}")
+            return await async_query_openrouter(
+                model_name=universal_backup_model,
+                prompt=prompt,
+                assistant_prefill=assistant_prefill,
+                system_prompt=system_prompt,
+                verbose=verbose,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                client_kwargs=client_kwargs,
+                prefer_nitro=prefer_nitro,
+                extra_body=extra_body,
+                return_usage=return_usage,
+                universal_backup_model=None,
+            )
+        return _return(API_CALL_FAILED_SENTINEL)
+    except asyncio.TimeoutError:
+        print(
+            f"API error ({resolved_model_name}) [hard timeout {timeout_seconds}s]",
+            flush=True,
+        )
+        if universal_backup_model and universal_backup_model != model_name:
+            print(f"Falling back to {universal_backup_model} after hard timeout")
             return await async_query_openrouter(
                 model_name=universal_backup_model,
                 prompt=prompt,

@@ -181,6 +181,7 @@ def build_command(
     samples: int | None,
     validate_all_discovered: bool,
     tmux: bool,
+    overrides: tuple[str, ...] = (),
 ) -> list[str]:
     tag = f"{model}_{cell.key}"
     cmd = ["./scripts/run.sh"]
@@ -201,6 +202,7 @@ def build_command(
     if samples is not None:
         cmd.append(f"crawler.num_samples_per_topic={samples}")
     cmd.extend(cell.extra_overrides)
+    cmd.extend(overrides)
     return cmd
 
 
@@ -216,6 +218,7 @@ def iter_commands(args: argparse.Namespace) -> Iterable[list[str]]:
                 samples=args.samples,
                 validate_all_discovered=args.validate_all_discovered,
                 tmux=args.tmux,
+                overrides=tuple(args.override or ()),
             )
 
 
@@ -484,21 +487,68 @@ def print_summary(args: argparse.Namespace) -> None:
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_run_args(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--models", default=",".join(DEFAULT_MODELS))
-        p.add_argument("--crawler", default="rehearsal")
-        p.add_argument("--samples", type=int, default=None)
-        p.add_argument("--out-dir", default=None)
-        p.add_argument("--tmux", action="store_true")
+        p.add_argument(
+            "--models",
+            default=",".join(DEFAULT_MODELS),
+            help=(
+                "Comma-separated Hydra model config names. Each model gets all "
+                "four 2x2 cells. Default: %(default)s"
+            ),
+        )
+        p.add_argument(
+            "--crawler",
+            default="rehearsal",
+            help=(
+                "Hydra crawler config. Use 'default' for reviewer-ready runs "
+                "and 'debug' or 'rehearsal' for smoke checks. Default: %(default)s"
+            ),
+        )
+        p.add_argument(
+            "--samples",
+            type=int,
+            default=None,
+            help="Optional override for crawler.num_samples_per_topic.",
+        )
+        p.add_argument(
+            "--out-dir",
+            default=None,
+            help=(
+                "Output directory shared by all generated crawler runs. "
+                "Default: artifacts/out/reviewer_ablation_<UTC timestamp>"
+            ),
+        )
+        p.add_argument(
+            "--tmux",
+            action="store_true",
+            help=(
+                "Pass --tmux through to each cell command. This is useful for "
+                "remote API targets, but not recommended for local 70B vLLM "
+                "targets because it starts multiple detached model loads."
+            ),
+        )
         p.add_argument(
             "--validate-all-discovered",
             action="store_true",
             help=(
                 "Keep crawler.do_filter_refusals=true. This is expensive and "
                 "is not recommended for discovery ablations."
+            ),
+        )
+        p.add_argument(
+            "--override",
+            action="append",
+            default=[],
+            metavar="HYDRA_OVERRIDE",
+            help=(
+                "Additional Hydra override appended to every cell command. "
+                "May be passed multiple times."
             ),
         )
 

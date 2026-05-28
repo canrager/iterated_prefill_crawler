@@ -7,10 +7,10 @@ universal_backup_model: "moonshotai/kimi-k2.5"
 refusal_classifier_model: "ProtectAI/distilroberta-base-rejection-v1"
 
 # Local model config
-local_model: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+local_model: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
 quantization_bits: null
 device: "cuda"
 cache_dir: "hf_models"
-vllm_tensor_parallel_size: 1
+vllm_tensor_parallel_size: 2
 vllm_gpu_memory_utilization: 0.9
 vllm_max_model_len: 8192
