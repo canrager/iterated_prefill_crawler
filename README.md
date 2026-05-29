@@ -316,6 +316,59 @@ python3 scripts/runpod_control.py start \
   --session ds70b_smoke
 ```
 
+Once that smoke run completes, the same shape of follow-on smoke exists for
+the aggregation and refusal-rate stages. Wait for `ds70b_smoke` to exit
+(`status --session ds70b_smoke`), then pull the candidate outputs locally:
+
+```bash
+python3 scripts/runpod_control.py fetch
+SMOKE_DIR=$(ls -td artifacts/runpod/reviewer_ablation_runpod_* | head -1)
+```
+
+The 2x2 smoke uses `crawler.do_filter_refusals=false`, so each cell's
+`crawler_out_*.json` leaves `head_refusal_topics_summaries` empty. Backfill
+it from `queue.topics.head_topics` so the aggregator has rows to reduce, then
+smoke the aggregator with tiny batches and a low cluster cap:
+
+```bash
+for cell in direct prefill_only iter_no_prefill ipc; do
+  src=$(ls "$SMOKE_DIR"/crawler_out_*_local_ds70b_${cell}.json 2>/dev/null | head -1)
+  [ -n "$src" ] && jq '{head_refusal_topics_summaries: [.queue.topics.head_topics[].summary | select(. != null)]}' "$src" \
+    > "$SMOKE_DIR/${cell}_candidate_topics_for_aggregation.json"
+done
+
+./scripts/run_aggregation.sh \
+  model=gemini-31fl_remote \
+  experiments.aggregation_model=moonshotai/kimi-k2-0905 \
+  experiments.input_paths="[\"$SMOKE_DIR/direct_candidate_topics_for_aggregation.json\",\"$SMOKE_DIR/prefill_only_candidate_topics_for_aggregation.json\",\"$SMOKE_DIR/iter_no_prefill_candidate_topics_for_aggregation.json\",\"$SMOKE_DIR/ipc_candidate_topics_for_aggregation.json\"]" \
+  experiments.max_final_topics=10 \
+  experiments.input_batch_size=10 \
+  experiments.output_batch_size=5
+```
+
+Aggregation writes to `artifacts/aggregation/<timestamp>/`. Push that dir up
+to the pod (`runpod_control.py sync` skips `artifacts/`, so use `scp`
+directly), then run the refusal-rate driver with a small probe count:
+
+```bash
+AGG_DIR=$(ls -td artifacts/aggregation/* | head -1)
+scp -P "$RUNPOD_SSH_PORT" -i "$RUNPOD_SSH_KEY" -r \
+  "$AGG_DIR" \
+  "${RUNPOD_SSH_USER}@${RUNPOD_SSH_HOST}:${RUNPOD_REMOTE_DIR}/artifacts/aggregation/"
+
+python3 scripts/runpod_control.py start \
+  --task refusal_rates \
+  --aggregation-dir "$AGG_DIR" \
+  --probes-per-topic 3 \
+  --override model.vllm_tensor_parallel_size=1 \
+  --session ds70b_smoke_refusal
+```
+
+The full smoke loop on a single-GPU pod typically finishes within a few
+minutes per stage and exercises every code path of
+`scripts/run_aggregation.sh`, `src/run_refusal_rates.py`, and the
+`--task refusal_rates` dispatch in `scripts/runpod_control.py`.
+
 #### 5. Monitor and fetch results
 
 ```bash
