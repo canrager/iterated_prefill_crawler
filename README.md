@@ -340,6 +340,94 @@ The most important files are:
 - `summary.md` - reviewer-facing Markdown tables.
 - `crawler_out_*.json` and matching `.jsonl` transcripts - raw evidence.
 
+### Post-Hoc Refusal-Rate Table
+
+The reviewer-ready 2x2 surfaces *candidate* topics per cell (refusal filtering
+off). To turn those candidates into a reviewer table sorted by behaviorally
+confirmed refusal rate, aggregate the four cells into one cluster space and
+then probe each aggregated cluster against the same target model.
+
+The pipeline assumes the four candidate JSON exports produced by the 2x2 run
+are already on the pod. The handoff bundle ships them under
+`aggregation_inputs/{direct,prefill_only,iter_no_prefill,ipc}_candidate_topics_for_aggregation.json`;
+the `_candidate_topics_for_aggregation.json` suffix is the convention the
+refusal-rate driver parses to recover the cell each cluster came from.
+
+#### 1. Aggregate the four cells
+
+Run `scripts/run_aggregation.sh` with all four candidate JSONs in one call so
+the aggregator's `reduction_log.json["consistency"]["source_sets"]` records,
+for every final cluster, which subset of `[0,1,2,3]` runs contributed it:
+
+```bash
+./scripts/run_aggregation.sh \
+  model=gemini-31fl_remote \
+  experiments.aggregation_model=moonshotai/kimi-k2-0905 \
+  experiments.input_paths='["artifacts/.../direct_candidate_topics_for_aggregation.json","artifacts/.../prefill_only_candidate_topics_for_aggregation.json","artifacts/.../iter_no_prefill_candidate_topics_for_aggregation.json","artifacts/.../ipc_candidate_topics_for_aggregation.json"]' \
+  experiments.max_final_topics=80 \
+  experiments.input_batch_size=50 \
+  experiments.output_batch_size=25
+```
+
+Outputs land under `artifacts/aggregation/<timestamp>/`:
+
+- `final_topics.txt` - newline-separated cluster heads, the row labels of the reviewer table.
+- `reduction_log.json` - includes `consistency.source_sets` (head → run indices) and `input_paths` (ordered).
+- `explorer.html` - interactive cluster trajectory viewer.
+
+#### 2. Start the refusal-rate driver on the pod
+
+```bash
+python3 scripts/runpod_control.py start \
+  --task refusal_rates \
+  --aggregation-dir artifacts/aggregation/<timestamp> \
+  --session ds70b_refusal_rates
+```
+
+`start --task refusal_rates` launches `scripts/runpod_compute_refusal_rates.sh`
+in one tmux session. The pod-side driver runs `python src/run_refusal_rates.py`
+with the configured target model (`local_ds70b` by default), generates probes
+for each (cluster, language) pair, queries the target through the existing
+refusal cascade (regex → classifier → LLM judge), and records the latest
+output directory in `artifacts/out/runpod_latest_refusal_rates.txt`.
+
+Tuning knobs (all optional):
+
+```bash
+python3 scripts/runpod_control.py start \
+  --task refusal_rates \
+  --aggregation-dir artifacts/aggregation/<timestamp> \
+  --probes-per-topic 10 \
+  --threshold 0.25 \
+  --override model.vllm_tensor_parallel_size=1 \
+  --session ds70b_refusal_rates
+```
+
+#### 3. Monitor and fetch results
+
+```bash
+# Show tmux state, latest output marker, and recent log tail.
+python3 scripts/runpod_control.py status --task refusal_rates
+
+# Follow the remote run log.
+python3 scripts/runpod_control.py tail --task refusal_rates
+
+# Fetch the latest recorded refusal-rate output directory.
+python3 scripts/runpod_control.py fetch --task refusal_rates
+```
+
+Fetched results land under `artifacts/runpod/<remote-output-name>/`. The key
+files are:
+
+- `refusal_rates.md` - reviewer table sorted by refusal rate descending. Columns: cluster, one boolean per 2x2 cell, refusal rate, refusals / probes.
+- `refusal_rates.json` - same shape as the sanity-check `reviewer_refusal_probe.json`: `metadata`, `per_cluster[]` (with `discovery.{direct,prefill_only,iter_no_prefill,ipc}`), and `per_topic[]` (per-language per-probe records).
+- `config.json` - resolved Hydra config used for the run.
+- `run.log` - tee'd stdout/stderr.
+- `refusal_rates_*.jsonl` - per-call transcript from `batch_generate`.
+
+The driver runs against the same target model as the 2x2 cells, so the
+refusal-rate column is directly comparable to the discovery booleans.
+
 ## How the Crawler Works
 
 1. **Initialization** — `run_crawler.py` loads Hydra config, creates a `CrawlerConfig`, and loads the local vLLM model (if configured). It then creates a `Crawler`, which internally sets up a `TopicQueue`, `PromptBuilder`, and `TopicFormatter`. Seed topics from `config.py` are translated to both English and Chinese and added to the queue as initial refusal topics.
