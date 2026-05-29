@@ -317,57 +317,35 @@ python3 scripts/runpod_control.py start \
 ```
 
 Once that smoke run completes, the same shape of follow-on smoke exists for
-the aggregation and refusal-rate stages. Wait for `ds70b_smoke` to exit
-(`status --session ds70b_smoke`), then pull the candidate outputs locally:
+the aggregation and refusal-rate stages. Both run on the pod — there is no
+intermediate local fetch or upload. Wait for `ds70b_smoke` to exit
+(`status --session ds70b_smoke`), then:
 
 ```bash
-python3 scripts/runpod_control.py fetch
-SMOKE_DIR=$(ls -td artifacts/runpod/reviewer_ablation_runpod_* | head -1)
-```
+# Aggregate the four smoke 2x2 cells. With --reviewer-out-dir omitted the
+# controller picks the latest reviewer_ablation marker on the pod.
+python3 scripts/runpod_control.py start \
+  --task aggregation \
+  --max-final-topics 10 \
+  --input-batch-size 10 \
+  --output-batch-size 5 \
+  --session ds70b_smoke_agg
 
-The 2x2 smoke uses `crawler.do_filter_refusals=false`, so each cell's
-`crawler_out_*.json` leaves `head_refusal_topics_summaries` empty. Backfill
-it from `queue.topics.head_topics` so the aggregator has rows to reduce, then
-smoke the aggregator with tiny batches and a low cluster cap:
-
-```bash
-for cell in direct prefill_only iter_no_prefill ipc; do
-  src=$(ls "$SMOKE_DIR"/crawler_out_*_local_ds70b_${cell}.json 2>/dev/null | head -1)
-  [ -n "$src" ] && jq '{head_refusal_topics_summaries: [.queue.topics.head_topics[].summary | select(. != null)]}' "$src" \
-    > "$SMOKE_DIR/${cell}_candidate_topics_for_aggregation.json"
-done
-
-./scripts/run_aggregation.sh \
-  model=gemini-31fl_remote \
-  experiments.aggregation_model=moonshotai/kimi-k2-0905 \
-  experiments.input_paths="[\"$SMOKE_DIR/direct_candidate_topics_for_aggregation.json\",\"$SMOKE_DIR/prefill_only_candidate_topics_for_aggregation.json\",\"$SMOKE_DIR/iter_no_prefill_candidate_topics_for_aggregation.json\",\"$SMOKE_DIR/ipc_candidate_topics_for_aggregation.json\"]" \
-  experiments.max_final_topics=10 \
-  experiments.input_batch_size=10 \
-  experiments.output_batch_size=5
-```
-
-Aggregation writes to `artifacts/aggregation/<timestamp>/`. Push that dir up
-to the pod (`runpod_control.py sync` skips `artifacts/`, so use `scp`
-directly), then run the refusal-rate driver with a small probe count:
-
-```bash
-AGG_DIR=$(ls -td artifacts/aggregation/* | head -1)
-scp -P "$RUNPOD_SSH_PORT" -i "$RUNPOD_SSH_KEY" -r \
-  "$AGG_DIR" \
-  "${RUNPOD_SSH_USER}@${RUNPOD_SSH_HOST}:${RUNPOD_REMOTE_DIR}/artifacts/aggregation/"
-
+# Smoke the refusal-rate driver. With --aggregation-dir omitted the
+# controller picks the latest aggregation marker.
 python3 scripts/runpod_control.py start \
   --task refusal_rates \
-  --aggregation-dir "$AGG_DIR" \
   --probes-per-topic 3 \
   --override model.vllm_tensor_parallel_size=1 \
   --session ds70b_smoke_refusal
 ```
 
-The full smoke loop on a single-GPU pod typically finishes within a few
-minutes per stage and exercises every code path of
-`scripts/run_aggregation.sh`, `src/run_refusal_rates.py`, and the
-`--task refusal_rates` dispatch in `scripts/runpod_control.py`.
+Each stage records its own latest-output marker on the pod, so the next
+stage's `start` command finds its input automatically. The full smoke loop
+on a single-GPU pod typically finishes within a few minutes per stage and
+exercises every code path of `scripts/runpod_run_aggregation.sh`,
+`src/run_refusal_rates.py`, and the `--task` dispatch in
+`scripts/runpod_control.py`.
 
 #### 5. Monitor and fetch results
 
@@ -398,28 +376,43 @@ The most important files are:
 The reviewer-ready 2x2 surfaces *candidate* topics per cell (refusal filtering
 off). To turn those candidates into a reviewer table sorted by behaviorally
 confirmed refusal rate, aggregate the four cells into one cluster space and
-then probe each aggregated cluster against the same target model.
+then probe each aggregated cluster against the same target model. Both stages
+run on the pod through the same `runpod_control.py start --task ...` shape
+used for the 2x2 itself — there is no intermediate local fetch or upload.
 
-The pipeline assumes the four candidate JSON exports produced by the 2x2 run
-are already on the pod. The handoff bundle ships them under
-`aggregation_inputs/{direct,prefill_only,iter_no_prefill,ipc}_candidate_topics_for_aggregation.json`;
-the `_candidate_topics_for_aggregation.json` suffix is the convention the
-refusal-rate driver parses to recover the cell each cluster came from.
+The aggregator reads each cell's `crawler_out_*.json` directly: it pulls
+candidate cluster heads from `queue.topics.head_topics[].summary`, so the
+discovery-mode default (`do_filter_refusals=false`) needs no backfill.
 
 #### 1. Aggregate the four cells
 
-Run `scripts/run_aggregation.sh` with all four candidate JSONs in one call so
-the aggregator's `reduction_log.json["consistency"]["source_sets"]` records,
-for every final cluster, which subset of `[0,1,2,3]` runs contributed it:
+```bash
+python3 scripts/runpod_control.py start \
+  --task aggregation \
+  --session ds70b_aggregation
+```
+
+`start --task aggregation` launches `scripts/runpod_run_aggregation.sh` in
+one tmux session. With `--reviewer-out-dir` omitted, the controller reads
+`artifacts/out/runpod_latest_reviewer_ablation.txt` on the pod and points
+the driver at the most recent 2x2 output. The driver auto-discovers one
+`crawler_out_*_<cell>.json` per cell, passes them to
+`src/aggregation/run_aggregation.py` as the Hydra `experiments.input_paths`
+list, and records the resulting aggregation dir in
+`artifacts/out/runpod_latest_aggregation.txt`.
+
+Tuning knobs (all optional):
 
 ```bash
-./scripts/run_aggregation.sh \
-  model=gemini-31fl_remote \
-  experiments.aggregation_model=moonshotai/kimi-k2-0905 \
-  experiments.input_paths='["artifacts/.../direct_candidate_topics_for_aggregation.json","artifacts/.../prefill_only_candidate_topics_for_aggregation.json","artifacts/.../iter_no_prefill_candidate_topics_for_aggregation.json","artifacts/.../ipc_candidate_topics_for_aggregation.json"]' \
-  experiments.max_final_topics=80 \
-  experiments.input_batch_size=50 \
-  experiments.output_batch_size=25
+python3 scripts/runpod_control.py start \
+  --task aggregation \
+  --reviewer-out-dir artifacts/out/reviewer_ablation_runpod_<ts> \
+  --max-final-topics 80 \
+  --input-batch-size 50 \
+  --output-batch-size 25 \
+  --agg-model-config gemini-31fl_remote \
+  --agg-llm moonshotai/kimi-k2-0905 \
+  --session ds70b_aggregation
 ```
 
 Outputs land under `artifacts/aggregation/<timestamp>/`:
@@ -428,21 +421,23 @@ Outputs land under `artifacts/aggregation/<timestamp>/`:
 - `reduction_log.json` - includes `consistency.source_sets` (head → run indices) and `input_paths` (ordered).
 - `explorer.html` - interactive cluster trajectory viewer.
 
-#### 2. Start the refusal-rate driver on the pod
+#### 2. Start the refusal-rate driver
 
 ```bash
 python3 scripts/runpod_control.py start \
   --task refusal_rates \
-  --aggregation-dir artifacts/aggregation/<timestamp> \
   --session ds70b_refusal_rates
 ```
 
 `start --task refusal_rates` launches `scripts/runpod_compute_refusal_rates.sh`
-in one tmux session. The pod-side driver runs `python src/run_refusal_rates.py`
-with the configured target model (`local_ds70b` by default), generates probes
-for each (cluster, language) pair, queries the target through the existing
-refusal cascade (regex → classifier → LLM judge), and records the latest
-output directory in `artifacts/out/runpod_latest_refusal_rates.txt`.
+in one tmux session. With `--aggregation-dir` omitted, the controller reads
+`artifacts/out/runpod_latest_aggregation.txt` on the pod and points the
+driver at the most recent aggregation output. The driver runs
+`python src/run_refusal_rates.py` with the configured target model
+(`local_ds70b` by default), generates probes for each (cluster, language)
+pair, queries the target through the existing refusal cascade (regex →
+classifier → LLM judge), and records the latest output directory in
+`artifacts/out/runpod_latest_refusal_rates.txt`.
 
 Tuning knobs (all optional):
 

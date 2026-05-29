@@ -28,6 +28,11 @@ TASKS: dict[str, dict[str, str]] = {
         "marker": "artifacts/out/runpod_latest_reviewer_ablation.txt",
         "session": "ds70b_2x2",
     },
+    "aggregation": {
+        "script": "scripts/runpod_run_aggregation.sh",
+        "marker": "artifacts/out/runpod_latest_aggregation.txt",
+        "session": "ds70b_aggregation",
+    },
     "refusal_rates": {
         "script": "scripts/runpod_compute_refusal_rates.sh",
         "marker": "artifacts/out/runpod_latest_refusal_rates.txt",
@@ -321,11 +326,46 @@ def command_start(args: argparse.Namespace) -> None:
                 "1" if args.validate_all_discovered else "0",
             ),
         ]
+    elif args.task == "aggregation":
+        if not args.reviewer_out_dir and not args.input_paths:
+            # Fall back to the on-pod latest reviewer-ablation marker so the
+            # natural flow "2x2 → aggregation" needs no path arg.
+            args.reviewer_out_dir = get_remote_latest_for_task(args, "reviewer_ablation")
+            print(
+                f"--reviewer-out-dir/--input-paths not given; using latest "
+                f"reviewer_ablation output: {args.reviewer_out_dir}"
+            )
+        assignments = [
+            env_assignment("REVIEWER_OUT_DIR", args.reviewer_out_dir),
+            env_assignment("INPUT_PATHS", args.input_paths),
+            env_assignment("OUT_DIR", args.out_dir),
+            env_assignment("AGG_MODEL_CONFIG", args.agg_model_config),
+            env_assignment("AGG_LLM", args.agg_llm),
+            env_assignment(
+                "MAX_FINAL_TOPICS",
+                str(args.max_final_topics) if args.max_final_topics is not None else None,
+            ),
+            env_assignment(
+                "INPUT_BATCH_SIZE",
+                str(args.input_batch_size) if args.input_batch_size is not None else None,
+            ),
+            env_assignment(
+                "OUTPUT_BATCH_SIZE",
+                str(args.output_batch_size) if args.output_batch_size is not None else None,
+            ),
+            env_assignment(
+                "EXTRA_OVERRIDES",
+                " ".join(args.override) if args.override else None,
+            ),
+        ]
     elif args.task == "refusal_rates":
         if not args.aggregation_dir:
-            raise ConfigError(
-                "--aggregation-dir is required for --task refusal_rates "
-                "(pod-relative path to artifacts/aggregation/<ts>)."
+            # Fall back to the on-pod latest aggregation marker so the natural
+            # flow "aggregation → refusal_rates" needs no path arg either.
+            args.aggregation_dir = get_remote_latest_for_task(args, "aggregation")
+            print(
+                f"--aggregation-dir not given; using latest aggregation output: "
+                f"{args.aggregation_dir}"
             )
         assignments = [
             env_assignment("MODEL_CONFIG", args.model),
@@ -412,16 +452,20 @@ def command_tail(args: argparse.Namespace) -> None:
     run_ssh(args, remote)
 
 
-def get_remote_latest(args: argparse.Namespace) -> str:
-    marker = task_marker(args.task)
+def get_remote_latest_for_task(args: argparse.Namespace, task: str) -> str:
+    marker = task_marker(task)
     marker_cmd = f"cd {q(remote_dir(args))} && cat {q(marker)}"
     latest = run_ssh(args, marker_cmd, capture=True).strip()
     if not latest:
         raise ConfigError(
             f"No latest marker found at {marker}. "
-            "Pass fetch --remote-out-dir explicitly if the run used a custom path."
+            f"Run --task {task} first, or pass the relevant --*-dir explicitly."
         )
     return latest
+
+
+def get_remote_latest(args: argparse.Namespace) -> str:
+    return get_remote_latest_for_task(args, args.task)
 
 
 def command_fetch(args: argparse.Namespace) -> None:
@@ -587,9 +631,56 @@ def make_parser() -> argparse.ArgumentParser:
         help="(reviewer_ablation) Enable full per-candidate refusal filtering.",
     )
     start.add_argument(
+        "--reviewer-out-dir",
+        default=None,
+        help=(
+            "(aggregation) Pod-relative 2x2 output dir. "
+            "Defaults to the latest reviewer_ablation marker when omitted."
+        ),
+    )
+    start.add_argument(
+        "--input-paths",
+        default=None,
+        help=(
+            "(aggregation) Verbatim Hydra JSON list of input paths, "
+            "e.g. '[\"a.json\",\"b.json\"]'. Overrides --reviewer-out-dir."
+        ),
+    )
+    start.add_argument(
+        "--max-final-topics",
+        type=int,
+        default=None,
+        help="(aggregation) experiments.max_final_topics.",
+    )
+    start.add_argument(
+        "--input-batch-size",
+        type=int,
+        default=None,
+        help="(aggregation) experiments.input_batch_size.",
+    )
+    start.add_argument(
+        "--output-batch-size",
+        type=int,
+        default=None,
+        help="(aggregation) experiments.output_batch_size.",
+    )
+    start.add_argument(
+        "--agg-model-config",
+        default=None,
+        help="(aggregation) Hydra model= for the aggregation driver.",
+    )
+    start.add_argument(
+        "--agg-llm",
+        default=None,
+        help="(aggregation) experiments.aggregation_model.",
+    )
+    start.add_argument(
         "--aggregation-dir",
         default=None,
-        help="(refusal_rates) Pod-relative aggregation output dir.",
+        help=(
+            "(refusal_rates) Pod-relative aggregation output dir. "
+            "Defaults to the latest aggregation marker when omitted."
+        ),
     )
     start.add_argument(
         "--probes-per-topic",

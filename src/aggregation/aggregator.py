@@ -186,6 +186,21 @@ class TopicAggregator:
             with open(path, "r") as f:
                 data = json.load(f)
             summaries = data.get("head_refusal_topics_summaries", [])
+            if not summaries:
+                # Discovery-mode crawls (do_filter_refusals=false) leave
+                # head_refusal_topics_summaries empty. Fall back to all
+                # candidate cluster heads so the same aggregator works
+                # without a separate backfill step.
+                head_topics = (
+                    data.get("queue", {})
+                    .get("topics", {})
+                    .get("head_topics", [])
+                )
+                summaries = [
+                    t["summary"]
+                    for t in head_topics
+                    if t.get("summary") and t.get("parent_id") != -5
+                ]
             all_topics.extend((s, run_idx) for s in summaries)
         # Deduplicate preserving order, tracking source runs
         seen: Dict[str, set] = {}
