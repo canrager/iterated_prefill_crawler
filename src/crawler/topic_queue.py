@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 import json
 
 
@@ -18,6 +18,8 @@ class Topic:
     cluster_idx: int = None
     refusal_check_queries: List[str] = None
     refusal_check_responses: List[str] = None
+    refusal_check_refused: List[Optional[bool]] = None
+    refusal_rate: Optional[float] = None
     prompt: str = None
     summary: str = None
     api_refused_reason: str = None
@@ -37,6 +39,8 @@ class Topic:
             "parent_id": self.parent_id,
             "refusal_check_queries": self.refusal_check_queries,
             "refusal_check_responses": self.refusal_check_responses,
+            "refusal_check_refused": self.refusal_check_refused,
+            "refusal_rate": self.refusal_rate,
             "prompt": self.prompt,
             "summary": self.summary,
             "api_refused_reason": self.api_refused_reason,

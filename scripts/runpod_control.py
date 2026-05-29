@@ -20,7 +20,33 @@ from typing import Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REMOTE_DIR = "/workspace/iterated_prefill_crawler"
-LATEST_MARKER = "artifacts/out/runpod_latest_reviewer_ablation.txt"
+
+# Per-task remote driver + latest-output marker + default tmux session name.
+TASKS: dict[str, dict[str, str]] = {
+    "reviewer_ablation": {
+        "script": "scripts/runpod_reviewer_ready.sh",
+        "marker": "artifacts/out/runpod_latest_reviewer_ablation.txt",
+        "session": "ds70b_2x2",
+    },
+    "refusal_rates": {
+        "script": "scripts/runpod_compute_refusal_rates.sh",
+        "marker": "artifacts/out/runpod_latest_refusal_rates.txt",
+        "session": "ds70b_refusal_rates",
+    },
+}
+DEFAULT_TASK = "reviewer_ablation"
+
+
+def task_marker(task: str) -> str:
+    return TASKS[task]["marker"]
+
+
+def task_script(task: str) -> str:
+    return TASKS[task]["script"]
+
+
+def task_default_session(task: str) -> str:
+    return TASKS[task]["session"]
 
 DEFAULT_EXCLUDES = [
     ".git/",
@@ -280,27 +306,54 @@ def parse_env_pair(pair: str) -> tuple[str, str]:
 
 
 def command_start(args: argparse.Namespace) -> None:
-    assignments = [
-        env_assignment("MODEL_CONFIG", args.model),
-        env_assignment("CRAWLER_CONFIG", args.crawler),
-        env_assignment("OUT_DIR", args.out_dir),
-        env_assignment("SAMPLES", str(args.samples) if args.samples is not None else None),
-        env_assignment(
-            "EXTRA_OVERRIDES",
-            " ".join(args.override) if args.override else None,
-        ),
-        env_assignment(
-            "VALIDATE_ALL_DISCOVERED",
-            "1" if args.validate_all_discovered else "0",
-        ),
-    ]
+    if args.task == "reviewer_ablation":
+        assignments = [
+            env_assignment("MODEL_CONFIG", args.model),
+            env_assignment("CRAWLER_CONFIG", args.crawler),
+            env_assignment("OUT_DIR", args.out_dir),
+            env_assignment("SAMPLES", str(args.samples) if args.samples is not None else None),
+            env_assignment(
+                "EXTRA_OVERRIDES",
+                " ".join(args.override) if args.override else None,
+            ),
+            env_assignment(
+                "VALIDATE_ALL_DISCOVERED",
+                "1" if args.validate_all_discovered else "0",
+            ),
+        ]
+    elif args.task == "refusal_rates":
+        if not args.aggregation_dir:
+            raise ConfigError(
+                "--aggregation-dir is required for --task refusal_rates "
+                "(pod-relative path to artifacts/aggregation/<ts>)."
+            )
+        assignments = [
+            env_assignment("MODEL_CONFIG", args.model),
+            env_assignment("AGGREGATION_DIR", args.aggregation_dir),
+            env_assignment("OUT_DIR", args.out_dir),
+            env_assignment(
+                "PROBES_PER_TOPIC",
+                str(args.probes_per_topic) if args.probes_per_topic is not None else None,
+            ),
+            env_assignment(
+                "THRESHOLD",
+                str(args.threshold) if args.threshold is not None else None,
+            ),
+            env_assignment(
+                "EXTRA_OVERRIDES",
+                " ".join(args.override) if args.override else None,
+            ),
+        ]
+    else:
+        raise ConfigError(f"Unknown --task: {args.task}")
+
     for pair in args.env:
         name, value = parse_env_pair(pair)
         assignments.append(env_assignment(name, value))
     env_prefix = " ".join(part for part in assignments if part)
     inner = (
         f"cd {q(remote_dir(args))} "
-        f"&& {env_prefix} bash scripts/runpod_reviewer_ready.sh"
+        f"&& {env_prefix} bash {task_script(args.task)}"
     )
     remote = (
         f"cd {q(remote_dir(args))} && "
@@ -328,14 +381,15 @@ def command_stop(args: argparse.Namespace) -> None:
 
 
 def command_status(args: argparse.Namespace) -> None:
+    marker = task_marker(args.task)
     remote = (
         f"cd {q(remote_dir(args))} && "
         "echo 'tmux sessions:' && "
         f"(tmux ls 2>/dev/null | grep -F -- {q(args.session)} || true) && "
         "echo && echo 'latest output marker:' && "
-        f"(cat {q(LATEST_MARKER)} 2>/dev/null || true) && "
+        f"(cat {q(marker)} 2>/dev/null || true) && "
         "latest=$(cat "
-        f"{q(LATEST_MARKER)} 2>/dev/null || true); "
+        f"{q(marker)} 2>/dev/null || true); "
         "if [ -n \"$latest\" ] && [ -f \"$latest/run.log\" ]; then "
         "echo && echo 'recent run log:'; tail -n 40 \"$latest/run.log\"; "
         "fi"
@@ -344,10 +398,11 @@ def command_status(args: argparse.Namespace) -> None:
 
 
 def command_tail(args: argparse.Namespace) -> None:
+    marker = task_marker(args.task)
     remote = (
         f"cd {q(remote_dir(args))} && "
         "latest=$(cat "
-        f"{q(LATEST_MARKER)} 2>/dev/null || true); "
+        f"{q(marker)} 2>/dev/null || true); "
         "if [ -z \"$latest\" ] || [ ! -f \"$latest/run.log\" ]; then "
         "echo 'No latest run.log marker yet. Try status or attach to tmux.'; "
         "exit 1; "
@@ -358,11 +413,12 @@ def command_tail(args: argparse.Namespace) -> None:
 
 
 def get_remote_latest(args: argparse.Namespace) -> str:
-    marker_cmd = f"cd {q(remote_dir(args))} && cat {q(LATEST_MARKER)}"
+    marker = task_marker(args.task)
+    marker_cmd = f"cd {q(remote_dir(args))} && cat {q(marker)}"
     latest = run_ssh(args, marker_cmd, capture=True).strip()
     if not latest:
         raise ConfigError(
-            f"No latest marker found at {LATEST_MARKER}. "
+            f"No latest marker found at {marker}. "
             "Pass fetch --remote-out-dir explicitly if the run used a custom path."
         )
     return latest
@@ -497,17 +553,27 @@ def make_parser() -> argparse.ArgumentParser:
     bootstrap = sub.add_parser("bootstrap", help="run remote dependency bootstrap")
     bootstrap.set_defaults(func=command_bootstrap)
 
-    start = sub.add_parser("start", help="start one remote tmux reviewer 2x2 run")
+    start = sub.add_parser("start", help="start one remote tmux run")
+    start.add_argument(
+        "--task",
+        choices=tuple(TASKS.keys()),
+        default=DEFAULT_TASK,
+        help="Which remote driver to launch (default: reviewer_ablation).",
+    )
     start.add_argument("--model", default="local_ds70b")
     start.add_argument("--crawler", default="default")
-    start.add_argument("--session", default="ds70b_2x2")
+    start.add_argument(
+        "--session",
+        default=None,
+        help="tmux session name (default: per-task default).",
+    )
     start.add_argument("--out-dir", default=None)
     start.add_argument("--samples", type=int, default=None)
     start.add_argument(
         "--override",
         action="append",
         default=[],
-        help="Additional Hydra override appended to every 2x2 cell command.",
+        help="Additional override appended to the remote driver command.",
     )
     start.add_argument(
         "--env",
@@ -518,24 +584,61 @@ def make_parser() -> argparse.ArgumentParser:
     start.add_argument(
         "--validate-all-discovered",
         action="store_true",
-        help="Enable full per-candidate refusal filtering in the 2x2 cells.",
+        help="(reviewer_ablation) Enable full per-candidate refusal filtering.",
+    )
+    start.add_argument(
+        "--aggregation-dir",
+        default=None,
+        help="(refusal_rates) Pod-relative aggregation output dir.",
+    )
+    start.add_argument(
+        "--probes-per-topic",
+        type=int,
+        default=None,
+        help="(refusal_rates) Probes per (cluster, language) topic.",
+    )
+    start.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="(refusal_rates) Majority refusal threshold.",
     )
     start.set_defaults(func=command_start)
 
     status = sub.add_parser("status", help="show remote session and latest log tail")
-    status.add_argument("--session", default="ds70b_2x2")
+    status.add_argument(
+        "--task",
+        choices=tuple(TASKS.keys()),
+        default=DEFAULT_TASK,
+    )
+    status.add_argument("--session", default=None)
     status.set_defaults(func=command_status)
 
-    stop = sub.add_parser("stop", help="stop a remote tmux reviewer run")
-    stop.add_argument("--session", default="ds70b_2x2")
+    stop = sub.add_parser("stop", help="stop a remote tmux run")
+    stop.add_argument(
+        "--task",
+        choices=tuple(TASKS.keys()),
+        default=DEFAULT_TASK,
+    )
+    stop.add_argument("--session", default=None)
     stop.set_defaults(func=command_stop)
 
     tail = sub.add_parser("tail", help="follow the latest remote run.log")
-    tail.add_argument("--session", default="ds70b_2x2")
+    tail.add_argument(
+        "--task",
+        choices=tuple(TASKS.keys()),
+        default=DEFAULT_TASK,
+    )
+    tail.add_argument("--session", default=None)
     tail.add_argument("--lines", type=int, default=80)
     tail.set_defaults(func=command_tail)
 
     fetch = sub.add_parser("fetch", help="fetch latest or selected output directory")
+    fetch.add_argument(
+        "--task",
+        choices=tuple(TASKS.keys()),
+        default=DEFAULT_TASK,
+    )
     fetch.add_argument("--remote-out-dir", default=None)
     fetch.add_argument("--local-dir", default=None)
     fetch.add_argument(
@@ -552,6 +655,9 @@ def make_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = make_parser()
     args = parser.parse_args()
+    # Fill in the per-task default tmux session name if the user didn't override.
+    if hasattr(args, "session") and getattr(args, "task", None) and args.session is None:
+        args.session = task_default_session(args.task)
     try:
         args.func(args)
     except ConfigError as exc:
