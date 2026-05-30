@@ -3,11 +3,20 @@ import logging
 from typing import Dict, List, Optional, Tuple, Union
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from vllm import LLM, SamplingParams
+
+# vLLM is optional: only needed for local GPU inference. On CPU/API-only
+# installs (e.g. macOS, where vLLM has no wheel) these stay None, and the
+# vLLM code paths raise only if actually invoked.
 try:
-    from vllm.inputs import TokensPrompt
+    from vllm import LLM, SamplingParams
+    try:
+        from vllm.inputs import TokensPrompt
+    except ImportError:
+        from vllm.inputs.data import TokensPrompt
 except ImportError:
-    from vllm.inputs.data import TokensPrompt
+    LLM = None
+    SamplingParams = None
+    TokensPrompt = None
 
 
 # httpx schedules TLS teardown tasks that fire after asyncio.run() closes the loop,
@@ -59,6 +68,12 @@ def batch_generate_from_tokens_vllm(
     Returns:
         List[str]: Generated texts
     """
+    if SamplingParams is None:
+        raise RuntimeError(
+            "vLLM is not installed, so local vLLM generation is unavailable. "
+            "This build is CPU/API-only; pass a model ID string to use the API path."
+        )
+
     # Convert None temperature to greedy (0.0)
     if temperature is None:
         temperature = 0.0
