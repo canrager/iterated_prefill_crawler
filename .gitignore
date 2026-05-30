@@ -15,6 +15,7 @@ outputs
 docs
 hf_models
 *.json
+*.tar.gz
 multirun
 
 # agent-trio files
