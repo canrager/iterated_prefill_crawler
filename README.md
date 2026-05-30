@@ -52,11 +52,12 @@ All crawler variables live in `src/crawler/config.py`, which defines three datac
 
 ### Hydra config groups
 
-YAML presets override a subset of the dataclass defaults. They are organized into three Hydra config groups:
+YAML presets override a subset of the dataclass defaults. They are organized into four Hydra config groups:
 
 - `configs/model/*.yaml` — model presets (`haiku`, `local_ds8b`, `local_tulu8b`, `local_meta8b`). Each sets fields from `ModelConfig`.
 - `configs/crawler/*.yaml` — crawler presets (`default` for production, `debug` for small-scale testing). Each sets fields from `CrawlerRunConfig`.
 - `configs/prompts/*.yaml` — prompt templates (`baseline`, `user_seeded`, `jailbreak`, `default`). Each sets fields from `PromptsConfig`.
+- `configs/aggregation/*.yaml` — post-crawl aggregation presets (`default`, plus per-model sweep sets like `olmo3_default`). Each sets fields from `AggregationConfig` (input paths, `aggregation_model`, batch sizes, `max_final_topics`). The `default` preset uses `aggregation_model: google/gemini-3.1-flash`.
 
 The override chain is: **dataclass defaults** → **YAML preset** → **CLI overrides**.
 
@@ -397,9 +398,11 @@ one tmux session. With `--reviewer-out-dir` omitted, the controller reads
 `artifacts/out/runpod_latest_reviewer_ablation.txt` on the pod and points
 the driver at the most recent 2x2 output. The driver auto-discovers one
 `crawler_out_*_<cell>.json` per cell, passes them to
-`src/aggregation/run_aggregation.py` as the Hydra `experiments.input_paths`
+`src/aggregation/run_aggregation.py` as the Hydra `aggregation.input_paths`
 list, and records the resulting aggregation dir in
-`artifacts/out/runpod_latest_aggregation.txt`.
+`artifacts/out/runpod_latest_aggregation.txt`. The aggregation model defaults
+to `google/gemini-3.1-flash` (fast and reliable on the long reduction JSON);
+override it with `--agg-llm`.
 
 Tuning knobs (all optional):
 
@@ -411,7 +414,7 @@ python3 scripts/runpod_control.py start \
   --input-batch-size 50 \
   --output-batch-size 25 \
   --agg-model-config gemini-31fl_remote \
-  --agg-llm moonshotai/kimi-k2-0905 \
+  --agg-llm google/gemini-3.1-flash \
   --session ds70b_aggregation
 ```
 
@@ -718,12 +721,12 @@ This runs 4 prompts × 5 tags = 20 sequential crawls in a single tmux session. S
 
 ### Aggregation
 
-`scripts/run_aggregation.sh` merges discovered topics across multiple crawler runs into deduplicated clusters. Each experiment config in `configs/experiments/` specifies its `input_paths`.
+`scripts/run_aggregation.sh` merges discovered topics across multiple crawler runs into deduplicated clusters. Each aggregation config in `configs/aggregation/` specifies its `input_paths`.
 
-To aggregate each prompt config separately after a sweep, use multirun over experiment configs:
+To aggregate each prompt config separately after a sweep, use multirun over aggregation configs:
 
 ```bash
-./scripts/run_aggregation.sh -m experiments=olmo3_default,olmo3_baseline,olmo3_baseline_crawl,olmo3_jailbreak
+./scripts/run_aggregation.sh -m aggregation=olmo3_default,olmo3_baseline,olmo3_baseline_crawl,olmo3_jailbreak
 ```
 
 Each aggregation writes to `artifacts/aggregation/<timestamp>/` with cluster titles, a merge log, and an interactive HTML explorer.

@@ -302,7 +302,7 @@ Return ONLY a JSON object where keys are output topics and values are lists of i
 
 
 @dataclass
-class ExperimentsConfig:
+class AggregationConfig:
     input_paths: List[str] = field(default_factory=list)
     aggregation_model: str = "local"
     input_batch_size: int = 80
@@ -327,8 +327,8 @@ class CrawlerConfig:
     # Nested prompts config (all prompt templates)
     prompts: PromptsConfig = field(default_factory=PromptsConfig)
 
-    # Nested experiments config (aggregation parameters)
-    experiments: Optional[ExperimentsConfig] = field(default_factory=ExperimentsConfig)
+    # Nested aggregation config (aggregation parameters)
+    aggregation: Optional[AggregationConfig] = field(default_factory=AggregationConfig)
 
     # Hardcoded/static fields (not YAML-driven)
     initial_topics: List[str] = field(default_factory=lambda: INITIAL_TOPICS)
@@ -348,8 +348,8 @@ class CrawlerConfig:
             self.crawler = CrawlerRunConfig(**self.crawler)
         if isinstance(self.prompts, dict):
             self.prompts = PromptsConfig(**self.prompts)
-        if isinstance(self.experiments, dict):
-            self.experiments = ExperimentsConfig(**self.experiments)
+        if isinstance(self.aggregation, dict):
+            self.aggregation = AggregationConfig(**self.aggregation)
 
     # saving
     def to_dict(self):
@@ -360,8 +360,8 @@ class CrawlerConfig:
             d["crawler"] = d["crawler"].__dict__.copy()
         if isinstance(d.get("prompts"), PromptsConfig):
             d["prompts"] = d["prompts"].__dict__.copy()
-        if isinstance(d.get("experiments"), ExperimentsConfig):
-            d["experiments"] = d["experiments"].__dict__.copy()
+        if isinstance(d.get("aggregation"), AggregationConfig):
+            d["aggregation"] = d["aggregation"].__dict__.copy()
         return d
 
     def save(self, filename: str):

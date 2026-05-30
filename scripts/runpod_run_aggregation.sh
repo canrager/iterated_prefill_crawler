@@ -12,10 +12,10 @@
 #   INPUT_PATHS        Hydra JSON list, e.g. '["a.json","b.json","c.json","d.json"]'
 # Optional env vars:
 #   AGG_MODEL_CONFIG   Hydra model= override (default: gemini-31fl_remote)
-#   AGG_LLM            experiments.aggregation_model (default: moonshotai/kimi-k2-0905)
-#   MAX_FINAL_TOPICS   experiments.max_final_topics (default: 80)
-#   INPUT_BATCH_SIZE   experiments.input_batch_size (default: 50)
-#   OUTPUT_BATCH_SIZE  experiments.output_batch_size (default: 25)
+#   AGG_LLM            aggregation.aggregation_model (default: google/gemini-3.1-flash)
+#   MAX_FINAL_TOPICS   aggregation.max_final_topics (default: 80)
+#   INPUT_BATCH_SIZE   aggregation.input_batch_size (default: 50)
+#   OUTPUT_BATCH_SIZE  aggregation.output_batch_size (default: 25)
 #   EXTRA_OVERRIDES    Whitespace-separated Hydra overrides pass-through
 #   RUNPOD_LATEST_FILE override for the latest marker path
 
@@ -33,7 +33,7 @@ if [ -f .env ]; then
 fi
 
 AGG_MODEL_CONFIG="${AGG_MODEL_CONFIG:-gemini-31fl_remote}"
-AGG_LLM="${AGG_LLM:-moonshotai/kimi-k2-0905}"
+AGG_LLM="${AGG_LLM:-google/gemini-3.1-flash}"
 MAX_FINAL_TOPICS="${MAX_FINAL_TOPICS:-80}"
 INPUT_BATCH_SIZE="${INPUT_BATCH_SIZE:-50}"
 OUTPUT_BATCH_SIZE="${OUTPUT_BATCH_SIZE:-25}"
@@ -82,11 +82,11 @@ fi
 
 ARGS=(
     "model=$AGG_MODEL_CONFIG"
-    "experiments.aggregation_model=$AGG_LLM"
-    "experiments.input_paths=$INPUT_PATHS"
-    "experiments.max_final_topics=$MAX_FINAL_TOPICS"
-    "experiments.input_batch_size=$INPUT_BATCH_SIZE"
-    "experiments.output_batch_size=$OUTPUT_BATCH_SIZE"
+    "aggregation.aggregation_model=$AGG_LLM"
+    "aggregation.input_paths=$INPUT_PATHS"
+    "aggregation.max_final_topics=$MAX_FINAL_TOPICS"
+    "aggregation.input_batch_size=$INPUT_BATCH_SIZE"
+    "aggregation.output_batch_size=$OUTPUT_BATCH_SIZE"
     "hydra.run.dir=$OUT_DIR"
 )
 

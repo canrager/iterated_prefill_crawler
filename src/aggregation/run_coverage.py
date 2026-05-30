@@ -35,19 +35,19 @@ from src.transcript_logger import init_transcript_log
 @hydra.main(version_base=None, config_path=str(CONFIG_DIR), config_name="config")
 def main(cfg: DictConfig) -> None:
     crawler_config = CrawlerConfig(**OmegaConf.to_container(cfg, resolve=True))
-    exp = crawler_config.experiments
+    exp = crawler_config.aggregation
 
     # Validate inputs
     input_paths = exp.input_paths
     if not input_paths:
         raise ValueError(
-            "experiments.input_paths is required. Set in YAML or pass as: "
-            "experiments.input_paths='[path1.json,path2.json]'"
+            "aggregation.input_paths is required. Set in YAML or pass as: "
+            "aggregation.input_paths='[path1.json,path2.json]'"
         )
     if not exp.ground_truth_reference:
         raise ValueError(
-            "experiments.ground_truth_reference is required. Set in YAML or pass as: "
-            "experiments.ground_truth_reference='path/to/ground_truth.json'"
+            "aggregation.ground_truth_reference is required. Set in YAML or pass as: "
+            "aggregation.ground_truth_reference='path/to/ground_truth.json'"
         )
 
     # Resolve model
@@ -55,7 +55,7 @@ def main(cfg: DictConfig) -> None:
     if agg_model_name == "local":
         if cfg.model.local_model is None:
             raise ValueError(
-                "experiments.aggregation_model is 'local' but model.local_model is not set"
+                "aggregation.aggregation_model is 'local' but model.local_model is not set"
             )
         cache_dir_path = resolve_cache_dir(cfg.model.cache_dir)
         model, tokenizer = load_model_and_tokenizer(
@@ -78,7 +78,7 @@ def main(cfg: DictConfig) -> None:
 
     # Prepare output dir and transcript log
     hydra_choices = HydraConfig.get().runtime.choices
-    exp_name = hydra_choices.get("experiments", "default")
+    exp_name = hydra_choices.get("aggregation", "default")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(str(ROOT_DIR), "artifacts", "coverage", f"{exp_name}_{timestamp}")
     os.makedirs(output_dir, exist_ok=True)

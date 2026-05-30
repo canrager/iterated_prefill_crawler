@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from src.crawler.config import CrawlerConfig, ExperimentsConfig
+from src.crawler.config import AggregationConfig, CrawlerConfig
 from src.generation_utils import batch_generate
 
 
@@ -169,7 +169,7 @@ def _build_trajectory(
 class TopicAggregator:
     def __init__(self, config: CrawlerConfig):
         self.config = config
-        self.exp: ExperimentsConfig = config.experiments
+        self.exp: AggregationConfig = config.aggregation
         self.reduction_log: Optional[ReductionLog] = None
 
     def load_topics(

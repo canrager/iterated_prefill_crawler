@@ -650,19 +650,19 @@ def make_parser() -> argparse.ArgumentParser:
         "--max-final-topics",
         type=int,
         default=None,
-        help="(aggregation) experiments.max_final_topics.",
+        help="(aggregation) aggregation.max_final_topics.",
     )
     start.add_argument(
         "--input-batch-size",
         type=int,
         default=None,
-        help="(aggregation) experiments.input_batch_size.",
+        help="(aggregation) aggregation.input_batch_size.",
     )
     start.add_argument(
         "--output-batch-size",
         type=int,
         default=None,
-        help="(aggregation) experiments.output_batch_size.",
+        help="(aggregation) aggregation.output_batch_size.",
     )
     start.add_argument(
         "--agg-model-config",
@@ -672,7 +672,7 @@ def make_parser() -> argparse.ArgumentParser:
     start.add_argument(
         "--agg-llm",
         default=None,
-        help="(aggregation) experiments.aggregation_model.",
+        help="(aggregation) aggregation.aggregation_model (default: google/gemini-3.1-flash).",
     )
     start.add_argument(
         "--aggregation-dir",

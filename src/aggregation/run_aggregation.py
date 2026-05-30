@@ -28,14 +28,14 @@ from src.transcript_logger import init_transcript_log
 @hydra.main(version_base=None, config_path=str(CONFIG_DIR), config_name="config")
 def main(cfg: DictConfig) -> None:
     crawler_config = CrawlerConfig(**OmegaConf.to_container(cfg, resolve=True))
-    exp = crawler_config.experiments
+    exp = crawler_config.aggregation
 
-    # Validate input_paths (lives in experiments config)
+    # Validate input_paths (lives in aggregation config)
     input_paths = exp.input_paths
     if not input_paths:
         raise ValueError(
-            "experiments.input_paths is required. Set in YAML or pass as: "
-            "experiments.input_paths='[path1.json,path2.json]'"
+            "aggregation.input_paths is required. Set in YAML or pass as: "
+            "aggregation.input_paths='[path1.json,path2.json]'"
         )
 
     # Resolve the aggregation model
@@ -43,7 +43,7 @@ def main(cfg: DictConfig) -> None:
     if agg_model_name == "local":
         if cfg.model.local_model is None:
             raise ValueError(
-                "experiments.aggregation_model is 'local' but model.local_model is not set"
+                "aggregation.aggregation_model is 'local' but model.local_model is not set"
             )
         cache_dir_path = resolve_cache_dir(cfg.model.cache_dir)
         model, tokenizer = load_model_and_tokenizer(
