@@ -173,16 +173,87 @@ class TopicAggregator:
         self.exp: AggregationConfig = config.aggregation
         self.reduction_log: Optional[ReductionLog] = None
 
+    @staticmethod
+    def _build_label_id_map(
+        head_topics: List[dict], fields: Tuple[str, ...]
+    ) -> Dict[str, int]:
+        """Map normalized topic label -> minimum discovery id across matches.
+
+        For each head topic, every non-empty value in `fields` (e.g. english,
+        shortened, summary) is registered as a label pointing at that topic's
+        `id`. When several topics share a label, the smallest id wins (= the
+        first discovery), matching "first occurrence".
+        """
+        label_to_id: Dict[str, int] = {}
+        for t in head_topics:
+            tid = t.get("id")
+            if tid is None:
+                continue
+            for field in fields:
+                val = t.get(field)
+                if not val:
+                    continue
+                key = str(val).strip().lower()
+                if not key:
+                    continue
+                if key not in label_to_id or tid < label_to_id[key]:
+                    label_to_id[key] = tid
+        return label_to_id
+
+    def _resolve_topic_ids(
+        self, data: dict
+    ) -> Tuple[Dict[str, int], Optional[int]]:
+        """Recover discovery ids and the run's total topic count for one file.
+
+        Returns (label_to_id, num_total_topics). The current q8p4 aggregation
+        inputs repurpose `head_refusal_topics_summaries` into plain label
+        strings and drop ids; we recover them by following
+        `q8p4_candidate_export.source_file` back to the original raw crawl and
+        joining labels to its `head_topics`. For ordinary crawler outputs the
+        file's own `head_topics` already carry ids. Either may be absent, in
+        which case we return ({}, None) and ids degrade gracefully to blank.
+        """
+        from src.directory_config import ROOT_DIR
+
+        export = data.get("q8p4_candidate_export") or {}
+        source_file = export.get("source_file")
+        source = data
+        if source_file:
+            src_path = os.path.join(str(ROOT_DIR), source_file)
+            if not os.path.exists(src_path):
+                src_path = source_file
+            try:
+                with open(src_path, "r") as f:
+                    source = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                print(f"  WARNING: could not load source_file for ids: {e}")
+                return {}, None
+
+        head_topics = (
+            source.get("queue", {}).get("topics", {}).get("head_topics", [])
+        )
+        label_to_id = self._build_label_id_map(
+            head_topics, ("english", "shortened", "summary")
+        )
+        total = source.get("queue", {}).get("stats", {}).get("num_total_topics")
+        return label_to_id, total
+
     def load_topics(
         self, input_paths: List[str]
-    ) -> Tuple[List[str], Dict[str, set]]:
+    ) -> Tuple[List[str], Dict[str, set], Dict[str, Dict[int, int]], List[Optional[int]]]:
         """Load and deduplicate summaries from one or more crawler JSONs.
 
         Returns:
-            (deduped_topics, topic_sources) where topic_sources maps
-            normalized topic string -> set of run indices it appeared in.
+            (deduped_topics, topic_sources, topic_ids, run_totals) where:
+            - topic_sources maps normalized topic -> set of run indices.
+            - topic_ids maps normalized topic -> {run_idx: first-occurrence
+              discovery id in that run} (min id when a label has several).
+            - run_totals[run_idx] is that run's num_total_topics (or None).
         """
         all_topics: List[Tuple[str, int]] = []
+        # Per-run label->id lookups and totals, populated alongside loading.
+        run_label_ids: List[Dict[str, int]] = []
+        run_totals: List[Optional[int]] = []
         for run_idx, path in enumerate(input_paths):
             with open(path, "r") as f:
                 data = json.load(f)
@@ -203,8 +274,12 @@ class TopicAggregator:
                     if t.get("summary") and t.get("parent_id") != -5
                 ]
             all_topics.extend((s, run_idx) for s in summaries)
-        # Deduplicate preserving order, tracking source runs
+            label_to_id, total = self._resolve_topic_ids(data)
+            run_label_ids.append(label_to_id)
+            run_totals.append(total)
+        # Deduplicate preserving order, tracking source runs and discovery ids
         seen: Dict[str, set] = {}
+        topic_ids: Dict[str, Dict[int, int]] = {}
         deduped = []
         for t, run_idx in all_topics:
             t_norm = t.strip().lower()
@@ -215,7 +290,12 @@ class TopicAggregator:
                 deduped.append(t.strip())
             else:
                 seen[t_norm].add(run_idx)
-        return deduped, seen
+            tid = run_label_ids[run_idx].get(t_norm)
+            if tid is not None:
+                per_run = topic_ids.setdefault(t_norm, {})
+                if run_idx not in per_run or tid < per_run[run_idx]:
+                    per_run[run_idx] = tid
+        return deduped, seen, topic_ids, run_totals
 
     def _generate_single(self, model, tokenizer, prompt: str) -> str:
         """Run a single-prompt LLM call via batch_generate and return the response text."""
@@ -761,6 +841,8 @@ class TopicAggregator:
         final_topics: Dict[str, List[str]],
         topic_sources: Dict[str, set],
         input_paths: List[str],
+        topic_ids: Optional[Dict[str, Dict[int, int]]] = None,
+        run_totals: Optional[List[Optional[int]]] = None,
     ):
         """Write a per-topic x per-cell contribution matrix (counts + presence).
 
@@ -768,22 +850,48 @@ class TopicAggregator:
         came from each input cell, and which cells contributed at all. Because a
         single input topic can appear in several cells and be assigned to several
         fixed topics, per-cell counts sum to more than the number of inputs.
+
+        Also reports, per cell, the first-occurrence discovery index of the
+        cluster: the minimum raw topic id among the cluster's inputs that
+        appeared in that cell (`first_abs`), and that id divided by the cell's
+        total topics discovered (`first_rel`). Blank when no id is available.
         """
         cell_names = [
             os.path.splitext(os.path.basename(p))[0] for p in input_paths
         ]
         num_runs = len(input_paths)
+        topic_ids = topic_ids or {}
+        run_totals = run_totals or [None] * num_runs
 
         rows = []
         for topic in sorted(final_topics.keys()):
             inputs = final_topics[topic]
             counts = [0] * num_runs
+            first_abs: List[Optional[int]] = [None] * num_runs
             for inp in inputs:
-                for c in topic_sources.get(inp.strip().lower(), set()):
+                key = inp.strip().lower()
+                for c in topic_sources.get(key, set()):
                     if 0 <= c < num_runs:
                         counts[c] += 1
+                for c, tid in topic_ids.get(key, {}).items():
+                    if 0 <= c < num_runs and (
+                        first_abs[c] is None or tid < first_abs[c]
+                    ):
+                        first_abs[c] = tid
+            first_rel: List[Optional[float]] = [
+                (first_abs[c] / run_totals[c])
+                if (first_abs[c] is not None and run_totals[c])
+                else None
+                for c in range(num_runs)
+            ]
             presence = [1 if c > 0 else 0 for c in counts]
-            rows.append((topic, len(inputs), counts, presence))
+            rows.append((topic, len(inputs), counts, presence, first_abs, first_rel))
+
+        def _abs_str(v: Optional[int]) -> str:
+            return "" if v is None else str(v)
+
+        def _rel_str(v: Optional[float]) -> str:
+            return "" if v is None else f"{v:.4f}"
 
         # CSV
         csv_path = os.path.join(output_dir, "topic_cell_matrix.csv")
@@ -794,11 +902,15 @@ class TopicAggregator:
                 + [f"count_{c}" for c in cell_names]
                 + [f"present_{c}" for c in cell_names]
                 + ["n_cells_present"]
+                + [f"first_abs_{c}" for c in cell_names]
+                + [f"first_rel_{c}" for c in cell_names]
             )
             writer.writerow(header)
-            for topic, n_inputs, counts, presence in rows:
+            for topic, n_inputs, counts, presence, fabs, frel in rows:
                 writer.writerow(
                     [topic, n_inputs] + counts + presence + [sum(presence)]
+                    + [_abs_str(v) for v in fabs]
+                    + [_rel_str(v) for v in frel]
                 )
 
         # Markdown (human-readable)
@@ -811,25 +923,124 @@ class TopicAggregator:
                 "cells is counted once per cell, so row counts can exceed "
                 "`n_unique_inputs`.\n\n"
             )
+            f.write(
+                "`first_abs_<cell>` = smallest raw discovery id (the topic id in "
+                "the source crawl) among the cluster's inputs seen in that cell, "
+                "i.e. how early the cluster first appeared. `first_rel_<cell>` = "
+                "that id divided by the cell's total topics discovered "
+                "(`num_total_topics`). Blank when no id could be recovered.\n\n"
+            )
             f.write("Cells:\n")
             for i, c in enumerate(cell_names):
                 f.write(f"- {i}: `{c}`\n")
             f.write("\n")
+            first_cols = []
+            for c in cell_names:
+                first_cols.append(f"first_abs_{c}")
+                first_cols.append(f"first_rel_{c}")
             f.write(
                 "| Fixed topic | inputs | "
                 + " | ".join(cell_names)
-                + " | cells |\n"
+                + " | cells | "
+                + " | ".join(first_cols)
+                + " |\n"
             )
             f.write(
-                "|---|---|" + "---|" * num_runs + "---|\n"
+                "|---|---|" + "---|" * num_runs + "---|" + "---|" * (2 * num_runs) + "\n"
             )
-            for topic, n_inputs, counts, presence in rows:
+            for topic, n_inputs, counts, presence, fabs, frel in rows:
                 cells_str = " | ".join(str(c) for c in counts)
+                first_str = " | ".join(
+                    s
+                    for c in range(num_runs)
+                    for s in (_abs_str(fabs[c]), _rel_str(frel[c]))
+                )
                 f.write(
-                    f"| {topic} | {n_inputs} | {cells_str} | {sum(presence)} |\n"
+                    f"| {topic} | {n_inputs} | {cells_str} | {sum(presence)} | "
+                    f"{first_str} |\n"
                 )
 
         print(f"  topic_cell_matrix.csv, topic_cell_matrix.md")
+
+    def save_cluster_discovery_plot(
+        self,
+        output_dir: str,
+        final_topics: Dict[str, List[str]],
+        topic_ids: Dict[str, Dict[int, int]],
+        run_totals: List[Optional[int]],
+        input_paths: List[str],
+    ):
+        """Plot, per cell, a cumulative step curve of clusters discovered vs topic id.
+
+        For each crawl cell, every cluster (fixed topic) is "discovered" at the
+        smallest raw topic id among its inputs seen in that cell (its
+        first-occurrence id). Sorting those ids and stepping up by one at each
+        gives the cumulative number of distinct clusters found as the crawl
+        progresses through topic ids. One step line per cell.
+        """
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        cell_names = [
+            os.path.splitext(os.path.basename(p))[0] for p in input_paths
+        ]
+        num_runs = len(input_paths)
+
+        # Per cell: sorted first-occurrence ids, one per cluster present there.
+        per_cell_ids: List[List[int]] = [[] for _ in range(num_runs)]
+        for inputs in final_topics.values():
+            first_abs: List[Optional[int]] = [None] * num_runs
+            for inp in inputs:
+                for c, tid in topic_ids.get(inp.strip().lower(), {}).items():
+                    if 0 <= c < num_runs and (
+                        first_abs[c] is None or tid < first_abs[c]
+                    ):
+                        first_abs[c] = tid
+            for c in range(num_runs):
+                if first_abs[c] is not None:
+                    per_cell_ids[c].append(first_abs[c])
+
+        plt.figure(figsize=(9, 6))
+        cmap = plt.get_cmap("tab10")
+        plotted = False
+        for c in range(num_runs):
+            ids = sorted(per_cell_ids[c])
+            if not ids:
+                continue
+            n = len(ids)
+            # where="post": y held from x[i] to x[i+1]. Start at (0,0), step up
+            # by one at each discovery, hold the total out to num_total_topics.
+            x = [0] + ids
+            y = [0] + list(range(1, n + 1))
+            total = run_totals[c] if c < len(run_totals) else None
+            if total and total > ids[-1]:
+                x.append(total)
+                y.append(n)
+            plt.step(
+                x, y, where="post", label=f"{cell_names[c]} ({n})",
+                color=cmap(c % 10), alpha=0.85,
+            )
+            plotted = True
+
+        if not plotted:
+            print("  (no discovery ids available; skipping cluster_discovery_curve.png)")
+            plt.close()
+            return
+
+        plt.xlabel("Topic ID (discovery order within crawl)")
+        plt.ylabel("Cumulative distinct clusters discovered")
+        plt.grid(True, linestyle="--", alpha=0.7)
+        plt.legend(
+            loc="upper center", bbox_to_anchor=(0.5, -0.12),
+            ncol=min(num_runs, 4), frameon=False,
+        )
+        plt.tight_layout()
+        out_path = os.path.join(output_dir, "cluster_discovery_curve.png")
+        plt.savefig(out_path, bbox_inches="tight", dpi=200)
+        plt.close()
+        print(f"  cluster_discovery_curve.png")
 
     def save_artifacts(
         self,

@@ -75,7 +75,9 @@ def main(cfg: DictConfig) -> None:
 
     # Load topics and run aggregation
     aggregator = TopicAggregator(crawler_config)
-    topics, topic_sources = aggregator.load_topics(input_paths)
+    topics, topic_sources, topic_ids, run_totals = aggregator.load_topics(
+        input_paths
+    )
     print(f"Loaded {len(topics)} unique topics from {len(input_paths)} file(s)")
 
     # Constrained mode: classify into a fixed taxonomy instead of discovering
@@ -109,7 +111,11 @@ def main(cfg: DictConfig) -> None:
     )
     if fixed_topics_path:
         aggregator.save_cell_matrix(
-            output_dir, final_topics, topic_sources, input_paths
+            output_dir, final_topics, topic_sources, input_paths,
+            topic_ids, run_totals,
+        )
+        aggregator.save_cluster_discovery_plot(
+            output_dir, final_topics, topic_ids, run_totals, input_paths,
         )
 
     # Cleanup vLLM
