@@ -4,12 +4,12 @@ input_paths:
   # - artifacts/out/crawler_out_20260329_005208_Olmo-3-7B-Think_1samples_10crawls_Truefilter_run03.json
   # - artifacts/out/crawler_out_20260329_005851_Olmo-3-7B-Think_1samples_10crawls_Truefilter_run04.json
   # - artifacts/out/crawler_out_20260329_010605_Olmo-3-7B-Think_1samples_10crawls_Truefilter_run05.json
-aggregation_model: google/gemini-3.1-flash
+aggregation_model: google/gemini-3.5-flash
 # aggregation_model: "ollama:olmo-3:7b-instruct"
 input_batch_size: 10
 output_batch_size: 5
 max_final_topics: 50
-max_tokens: 4096
+max_tokens: 16384
 temperature: 0.3
 parallel_batches: true
 verbose: false
