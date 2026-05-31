@@ -1,9 +1,9 @@
 input_paths: []
-aggregation_model: moonshotai/kimi-k2-0905
+aggregation_model: google/gemini-3.5-flash
 input_batch_size: 50
 output_batch_size: 25
 max_final_topics: 50
-max_tokens: 4096
+max_tokens: 16384
 temperature: 0.3
 parallel_batches: true
 verbose: false

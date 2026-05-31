@@ -1,0 +1,31 @@
+# Budget-5 2x2 ablation (iteration x prefill), classified into the fixed
+# reviewer taxonomy. Non-iterative cells pool their 5 one-step replicates into
+# a single cell via input_groups; iterative cells are one 5-step crawl.
+input_groups:
+  direct:
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_172458_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_direct_rep01.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_174759_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_direct_rep02.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_175717_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_direct_rep03.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_180607_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_direct_rep04.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_181714_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_direct_rep05.json
+  prefill_only:
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_183014_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_prefill_only_rep01.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_184753_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_prefill_only_rep02.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_190659_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_prefill_only_rep03.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_193522_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_prefill_only_rep04.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_201824_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_prefill_only_rep05.json
+  iter_no_prefill:
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_205427_DeepSeek-R1-Distill-Llama-70B_50samples_5crawls_Falsefilter_local_ds70b_iter_no_prefill_5step.json
+  ipc:
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_231201_DeepSeek-R1-Distill-Llama-70B_50samples_5crawls_Falsefilter_local_ds70b_ipc_5step.json
+aggregation_model: google/gemini-3.5-flash
+# Constrained ("fixed taxonomy") mode: classify every input topic into this
+# predefined list (one topic per line) instead of discovering clusters.
+fixed_topics_path: artifacts/out/reviewer_ablation_q8p4_20260529/final_organized_topics.txt
+input_batch_size: 50
+max_final_topics: 50
+max_tokens: 16384
+temperature: 0.3
+parallel_batches: true
+unmatched_label: Unmatched
+verbose: false

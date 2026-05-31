@@ -13,7 +13,13 @@ from transformers import (
     AutoModelForCausalLM,
 )
 from src.directory_config import INPUT_DIR, resolve_cache_dir
-from vllm import LLM
+
+# vLLM is optional: only needed for loading local GPU models. On CPU/API-only
+# installs it stays None; load_vllm_model raises only if actually called.
+try:
+    from vllm import LLM
+except ImportError:
+    LLM = None
 
 
 def load_model_and_tokenizer(
@@ -92,6 +98,12 @@ def load_vllm_model(
         LLM: vLLM model instance
         AutoTokenizer: HuggingFace tokenizer
     """
+    if LLM is None:
+        raise RuntimeError(
+            "vLLM is not installed, so local GPU model loading is unavailable. "
+            "This build is CPU/API-only; use an API aggregation_model instead."
+        )
+
     # Load tokenizer separately (vLLM also loads it internally but we need it for preprocessing)
     tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
 

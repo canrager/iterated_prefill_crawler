@@ -15,7 +15,11 @@ outputs
 docs
 hf_models
 *.json
+*.tar.gz
 multirun
+
+# Local ablation run data (raw crawls; large, not committed)
+/reviewer_ablation_*/
 
 # agent-trio files
 AGENTS.md

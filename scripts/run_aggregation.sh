@@ -1,26 +1,26 @@
 #!/bin/bash
 
 # Post-crawl topic aggregation via iterative merge
-# Usage: ./scripts/run_aggregation.sh [--tmux] [experiments=<name>] [overrides...]
+# Usage: ./scripts/run_aggregation.sh [--tmux] [aggregation=<name>] [overrides...]
 #
 # Config selection:
-#   experiments=default      # aggregation parameters (default: default)
+#   aggregation=default      # aggregation parameters (default: default)
 #   model=local_ds8b         # only needed if aggregation_model="local"
 #
 # Field overrides (dot notation):
-#   experiments.batch_size=40
-#   experiments.max_clusters=20
-#   experiments.aggregation_model="anthropic/claude-3.5-haiku"
+#   aggregation.batch_size=40
+#   aggregation.max_clusters=20
+#   aggregation.aggregation_model="anthropic/claude-3.5-haiku"
 #
 # Flags:
 #   --tmux         Run in a tmux session with logging
-#   --all          Run aggregation for every config in configs/experiments/
+#   --all          Run aggregation for every config in configs/aggregation/
 #
 # Examples:
 #   ./scripts/run_aggregation.sh
-#   ./scripts/run_aggregation.sh experiments=olmo3_default
+#   ./scripts/run_aggregation.sh aggregation=olmo3_default
 #   ./scripts/run_aggregation.sh --all
-#   ./scripts/run_aggregation.sh --tmux model=local_ds8b experiments.aggregation_model=local
+#   ./scripts/run_aggregation.sh --tmux model=local_ds8b aggregation.aggregation_model=local
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
@@ -45,7 +45,7 @@ run_single() {
     # Extract experiment name from args for naming
     local EXP_NAME="default"
     for a in "$@"; do
-        case "$a" in experiments=*) EXP_NAME="${a#experiments=}" ;; esac
+        case "$a" in aggregation=*) EXP_NAME="${a#aggregation=}" ;; esac
     done
 
     local PYTHON_CMD="python src/aggregation/run_aggregation.py $@"
@@ -81,12 +81,12 @@ run_single() {
 }
 
 if [ "$RUN_ALL" = true ]; then
-    for yaml in "$PROJECT_ROOT/configs/experiments/"*.yaml; do
+    for yaml in "$PROJECT_ROOT/configs/aggregation/"*.yaml; do
         name="$(basename "$yaml" .yaml)"
         echo "========================================"
-        echo "Running experiments=$name"
+        echo "Running aggregation=$name"
         echo "========================================"
-        run_single "experiments=$name" "${ARGS[@]}"
+        run_single "aggregation=$name" "${ARGS[@]}"
         echo ""
     done
 else

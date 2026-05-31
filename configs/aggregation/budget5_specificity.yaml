@@ -1,0 +1,34 @@
+# Budget-5 2x2 ablation (iteration x prefill), scored by topic SPECIFICITY
+# instead of clustered into a taxonomy. Same pooled cells as budget5.yaml; the
+# judge labels every candidate topic on the L1..L5 ladder (+ Junk) and emits
+# per-cell specificity tables so methods are compared on how many specific
+# (L4/L5) instances they surface.
+input_groups:
+  direct:
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_172458_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_direct_rep01.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_174759_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_direct_rep02.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_175717_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_direct_rep03.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_180607_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_direct_rep04.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_181714_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_direct_rep05.json
+  prefill_only:
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_183014_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_prefill_only_rep01.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_184753_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_prefill_only_rep02.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_190659_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_prefill_only_rep03.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_193522_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_prefill_only_rep04.json
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_201824_DeepSeek-R1-Distill-Llama-70B_50samples_1crawls_Falsefilter_local_ds70b_prefill_only_rep05.json
+  iter_no_prefill:
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_205427_DeepSeek-R1-Distill-Llama-70B_50samples_5crawls_Falsefilter_local_ds70b_iter_no_prefill_5step.json
+  ipc:
+    - reviewer_ablation_budget5_runpod_20260529_172307/crawler_out_20260529_231201_DeepSeek-R1-Distill-Llama-70B_50samples_5crawls_Falsefilter_local_ds70b_ipc_5step.json
+aggregation_model: google/gemini-3.5-flash
+# Specificity scoring mode.
+score_specificity: true
+num_generations_per_cell: 500
+# Also classify into this taxonomy so the explorer can group/label by cluster
+# (the third per-topic property alongside method and specificity).
+fixed_topics_path: artifacts/out/reviewer_ablation_q8p4_20260529/final_organized_topics.txt
+input_batch_size: 50
+max_tokens: 16384
+temperature: 0.3
+parallel_batches: true
+verbose: false

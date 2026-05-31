@@ -3,6 +3,384 @@ import os
 from typing import Dict, List, Optional
 
 
+def build_specificity_explorer_html(
+    records: List[dict],
+    methods: List[str],
+    levels: List[str],
+    has_clusters: bool,
+) -> str:
+    """Return a self-contained HTML explorer for specificity-scored topics.
+
+    Each record is {"t": topic, "m": [method...], "s": level, "c": [cluster...]}.
+    The explorer lets the user group the topics by cluster, method, or
+    specificity level; every topic row is always labelled with all three
+    properties (method, specificity, cluster) regardless of the grouping, and
+    includes legends and per-group / overall summaries.
+    """
+    data_json = json.dumps(
+        {
+            "records": records,
+            "methods": methods,
+            "levels": levels,
+            "has_clusters": has_clusters,
+        },
+        indent=None,
+    )
+    return _SPECIFICITY_EXPLORER_TEMPLATE.replace("/*__DATA__*/null", data_json)
+
+
+_SPECIFICITY_EXPLORER_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Topic Specificity Explorer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
+h1 { margin-bottom: 6px; font-size: 1.5rem; }
+.intro { color: #555; font-size: 0.9rem; margin-bottom: 14px; max-width: 900px; line-height: 1.45; }
+.intro code { background: #eee; padding: 1px 5px; border-radius: 4px; font-size: 0.85rem; }
+.summary { display: flex; gap: 18px; flex-wrap: wrap; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px 16px; margin-bottom: 14px; }
+.summary .stat { font-size: 0.85rem; color: #666; }
+.summary .stat b { font-size: 1.15rem; color: #222; display: block; }
+.legend { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px 16px; margin-bottom: 14px; display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-start; }
+.legend-group { display: flex; flex-direction: column; gap: 5px; }
+.legend-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #999; font-weight: 700; }
+.legend-items { display: flex; gap: 10px; flex-wrap: wrap; }
+.controls { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+.groupby { display: flex; gap: 6px; align-items: center; }
+.groupby-label { font-size: 0.82rem; color: #666; margin-right: 2px; }
+#search { flex: 1; min-width: 240px; max-width: 460px; padding: 8px 12px; font-size: 1rem; border: 1px solid #ccc; border-radius: 6px; }
+#search:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 2px rgba(74,144,217,0.2); }
+.btn { padding: 7px 14px; font-size: 0.82rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: #f0f0f0; }
+.btn.active { background: #e8f0fe; border-color: #4a90d9; color: #1a73e8; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+select.filter { padding: 7px 10px; font-size: 0.82rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; max-width: 240px; }
+select.filter.set { border-color: #4a90d9; background: #e8f0fe; color: #1a73e8; }
+.shown { font-size: 0.82rem; color: #888; margin-left: auto; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; }
+.tile { background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; overflow: hidden; }
+.tile-header { padding: 12px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; gap: 10px; }
+.tile-header:hover { background: #fafafa; }
+.tile-title { font-weight: 600; font-size: 1rem; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tile-title .swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+.tile-title .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-count { background: #eef1f5; color: #444; border-radius: 12px; padding: 2px 10px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+.tile-body { display: none; border-top: 1px solid #eee; padding: 10px 16px 14px; }
+.tile-body.open { display: block; }
+.group-summary { font-size: 0.78rem; color: #777; margin-bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.topic-row { padding: 6px 0; border-bottom: 1px solid #f3f3f3; display: flex; flex-direction: column; gap: 4px; }
+.topic-row:last-child { border-bottom: none; }
+.topic-text { font-size: 0.9rem; color: #222; }
+.chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.chip { font-size: 0.68rem; padding: 1px 7px; border-radius: 10px; white-space: nowrap; border: 1px solid transparent; }
+.chip.method { color: #fff; }
+.chip.level { color: #fff; font-weight: 600; }
+.chip.cluster { background: #f1f3f4; color: #555; border-color: #e0e0e0; }
+.mini { font-size: 0.68rem; padding: 1px 6px; border-radius: 10px; color: #fff; }
+.hidden { display: none !important; }
+mark { background: #fff3cd; padding: 0 2px; border-radius: 2px; }
+.no-results { grid-column: 1 / -1; text-align: center; padding: 40px; color: #999; font-size: 1.1rem; }
+</style>
+</head>
+<body>
+
+<h1>Topic Specificity Explorer</h1>
+<p class="intro">
+Every candidate topic carries three properties:
+<b>method</b> (which crawl produced it), <b>specificity</b> (how concrete it is, on
+the L1&ndash;L5 ladder from broad area to single named referent), and <b>cluster</b>
+(its semantic group from aggregation). Pick a <b>Group by</b> dimension below;
+each topic row always shows all three labels. Use search to filter.
+</p>
+
+<div class="summary" id="summary"></div>
+<div class="legend" id="legend"></div>
+
+<div class="controls">
+  <div class="groupby">
+    <span class="groupby-label">Group by:</span>
+    <button class="btn" data-dim="c" id="gb-c">Cluster</button>
+    <button class="btn" data-dim="m" id="gb-m">Method</button>
+    <button class="btn" data-dim="s" id="gb-s">Specificity</button>
+  </div>
+  <input type="text" id="search" placeholder="Search topics..." autocomplete="off">
+  <button class="btn" id="expandAllBtn">Expand all</button>
+</div>
+<div class="controls">
+  <span class="groupby-label">Filter:</span>
+  <select class="filter" id="f-m"></select>
+  <select class="filter" id="f-s"></select>
+  <select class="filter" id="f-c"></select>
+  <button class="btn" id="clearFilters">Clear filters</button>
+  <span class="shown" id="shown"></span>
+</div>
+<div class="grid" id="grid"></div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const records = DATA.records;
+const METHODS = DATA.methods;
+const LEVELS = DATA.levels;
+const HAS_CLUSTERS = DATA.has_clusters;
+
+const METHOD_PALETTE = ['#4a90d9','#e8710a','#34a853','#d93025','#9334e6','#00897b','#c0392b','#7cb342'];
+const LEVEL_COLORS = {'L1':'#4a90d9','L2':'#00897b','L3':'#f9a825','L4':'#fb8c00','L5':'#d93025','Junk':'#9e9e9e'};
+
+function methodColor(name) {
+  const i = METHODS.indexOf(name);
+  return METHOD_PALETTE[(i < 0 ? 0 : i) % METHOD_PALETTE.length];
+}
+function levelColor(name) {
+  if (LEVEL_COLORS[name]) return LEVEL_COLORS[name];
+  const i = LEVELS.indexOf(name);
+  const fallback = ['#4a90d9','#00897b','#f9a825','#fb8c00','#d93025','#9e9e9e'];
+  return fallback[(i < 0 ? 0 : i) % fallback.length];
+}
+const DIM_LABEL = {c: 'cluster', m: 'method', s: 'specificity'};
+
+// Distinct cluster values (sorted) for the cluster filter dropdown.
+const CLUSTERS = (function() {
+  const set = new Set();
+  records.forEach(r => (r.c || []).forEach(c => set.add(c)));
+  return Array.from(set).sort();
+})();
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s == null ? '' : s;
+  return div.innerHTML;
+}
+function highlightText(text, query) {
+  if (!query) return escapeHtml(text);
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return escapeHtml(text).replace(new RegExp('(' + escaped + ')', 'gi'), '<mark>$1</mark>');
+}
+function valuesFor(rec, dim) {
+  if (dim === 's') return [rec.s];
+  const arr = rec[dim] || [];
+  return arr.length ? arr : ['(none)'];
+}
+
+// ---- Summary ----
+(function buildSummary() {
+  const clusterSet = new Set();
+  const levelCounts = {};
+  records.forEach(r => {
+    (r.c || []).forEach(c => clusterSet.add(c));
+    levelCounts[r.s] = (levelCounts[r.s] || 0) + 1;
+  });
+  const specific = (levelCounts['L4'] || 0) + (levelCounts['L5'] || 0);
+  const el = document.getElementById('summary');
+  const stats = [
+    ['topics', records.length],
+    ['methods', METHODS.length],
+    ['specificity levels', LEVELS.length],
+  ];
+  if (HAS_CLUSTERS) stats.push(['clusters', clusterSet.size]);
+  stats.push(['L4+L5 (specific)', specific]);
+  el.innerHTML = stats.map(s =>
+    '<div class="stat"><b>' + s[1] + '</b>' + s[0] + '</div>').join('');
+})();
+
+// ---- Legend ----
+(function buildLegend() {
+  const el = document.getElementById('legend');
+  function group(title, items) {
+    return '<div class="legend-group"><span class="legend-title">' + title +
+      '</span><div class="legend-items">' + items + '</div></div>';
+  }
+  const methodItems = METHODS.map(m =>
+    '<span class="chip method" style="background:' + methodColor(m) + '">' +
+    escapeHtml(m) + '</span>').join('');
+  const levelItems = LEVELS.map(l =>
+    '<span class="chip level" style="background:' + levelColor(l) + '">' +
+    escapeHtml(l) + '</span>').join('');
+  let html = group('Method', methodItems) + group('Specificity (broad → specific)', levelItems);
+  if (HAS_CLUSTERS) html += group('Cluster', '<span class="chip cluster">semantic group from aggregation</span>');
+  el.innerHTML = html;
+})();
+
+// ---- Rendering ----
+let groupDim = HAS_CLUSTERS ? 'c' : 'm';
+let expandAll = false;
+
+function chipsFor(rec, query) {
+  let html = '<div class="chips">';
+  (rec.m || []).forEach(m => {
+    html += '<span class="chip method" style="background:' + methodColor(m) + '">' + escapeHtml(m) + '</span>';
+  });
+  html += '<span class="chip level" style="background:' + levelColor(rec.s) + '">' + escapeHtml(rec.s) + '</span>';
+  (rec.c || []).forEach(c => {
+    html += '<span class="chip cluster">' + highlightText(c, query) + '</span>';
+  });
+  html += '</div>';
+  return html;
+}
+
+function miniDist(recIdxs, dim) {
+  // Distribution of `dim` values across the records in a group.
+  const counts = {};
+  recIdxs.forEach(i => valuesFor(records[i], dim).forEach(v => {
+    counts[v] = (counts[v] || 0) + 1;
+  }));
+  const order = dim === 's' ? LEVELS : (dim === 'm' ? METHODS : Object.keys(counts).sort((a,b)=>counts[b]-counts[a]));
+  return order.filter(v => counts[v]).map(v => {
+    if (dim === 'm') return '<span class="mini" style="background:' + methodColor(v) + '">' + escapeHtml(v) + ' ' + counts[v] + '</span>';
+    if (dim === 's') return '<span class="mini" style="background:' + levelColor(v) + '">' + escapeHtml(v) + ' ' + counts[v] + '</span>';
+    return '<span class="chip cluster">' + escapeHtml(v) + ' ' + counts[v] + '</span>';
+  }).join('');
+}
+
+function groupTitleHtml(dim, value, query) {
+  if (dim === 'm') return '<span class="swatch" style="background:' + methodColor(value) + '"></span><span class="name">' + highlightText(value, query) + '</span>';
+  if (dim === 's') return '<span class="swatch" style="background:' + levelColor(value) + '"></span><span class="name">' + highlightText(value, query) + '</span>';
+  return '<span class="name">' + highlightText(value, query) + '</span>';
+}
+
+function render() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  const q = (document.getElementById('search').value || '').trim().toLowerCase();
+  const fM = document.getElementById('f-m').value;
+  const fS = document.getElementById('f-s').value;
+  const fC = document.getElementById('f-c').value;
+
+  // Pinned dropdown filters (AND-combined) + search across text/labels.
+  const matchIdx = [];
+  records.forEach((r, i) => {
+    if (fM && !(r.m || []).includes(fM)) return;
+    if (fS && r.s !== fS) return;
+    if (fC && !(r.c || []).includes(fC)) return;
+    if (q) {
+      const hay = (r.t + ' ' + (r.m||[]).join(' ') + ' ' + r.s + ' ' + (r.c||[]).join(' ')).toLowerCase();
+      if (!hay.includes(q)) return;
+    }
+    matchIdx.push(i);
+  });
+
+  document.getElementById('shown').textContent =
+    'showing ' + matchIdx.length + ' of ' + records.length + ' topics';
+  // Mark active dropdowns.
+  [['f-m', fM], ['f-s', fS], ['f-c', fC]].forEach(([id, v]) =>
+    document.getElementById(id).classList.toggle('set', !!v));
+
+  // Bucket into groups by the active dimension.
+  const groups = new Map();
+  matchIdx.forEach(i => valuesFor(records[i], groupDim).forEach(v => {
+    if (!groups.has(v)) groups.set(v, []);
+    groups.get(v).push(i);
+  }));
+
+  const sorted = Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
+  if (sorted.length === 0) {
+    grid.innerHTML = '<div class="no-results">No topics match your search.</div>';
+    return;
+  }
+
+  // Which two dimensions to summarise inside each group (the other two).
+  const otherDims = ['c','m','s'].filter(d => d !== groupDim && (d !== 'c' || HAS_CLUSTERS));
+
+  for (const [value, idxs] of sorted) {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+
+    const header = document.createElement('div');
+    header.className = 'tile-header';
+    header.innerHTML =
+      '<span class="tile-title">' + groupTitleHtml(groupDim, value, q) + '</span>' +
+      '<span class="tile-count">' + idxs.length + ' topics</span>';
+
+    const body = document.createElement('div');
+    body.className = 'tile-body' + (expandAll ? ' open' : '');
+
+    let summaryHtml = '';
+    otherDims.forEach(d => {
+      summaryHtml += '<span style="color:#aaa;">' + DIM_LABEL[d] + ':</span> ' + miniDist(idxs, d) + ' ';
+    });
+    const summary = document.createElement('div');
+    summary.className = 'group-summary';
+    summary.innerHTML = summaryHtml;
+    body.appendChild(summary);
+
+    // Sort topics within a group by specificity (most specific first), then text.
+    const lvlRank = {}; LEVELS.forEach((l, i) => lvlRank[l] = i);
+    idxs.sort((a, b) => (lvlRank[records[b].s]||0) - (lvlRank[records[a].s]||0) || records[a].t.localeCompare(records[b].t));
+
+    idxs.forEach(i => {
+      const r = records[i];
+      const row = document.createElement('div');
+      row.className = 'topic-row';
+      row.innerHTML = '<span class="topic-text">' + highlightText(r.t, q) + '</span>' + chipsFor(r, q);
+      body.appendChild(row);
+    });
+
+    header.addEventListener('click', () => body.classList.toggle('open'));
+    tile.appendChild(header);
+    tile.appendChild(body);
+    grid.appendChild(tile);
+  }
+}
+
+function setGroupDim(dim) {
+  groupDim = dim;
+  ['c','m','s'].forEach(d => {
+    const btn = document.getElementById('gb-' + d);
+    btn.classList.toggle('active', d === dim);
+  });
+  render();
+}
+
+// Populate the filter dropdowns.
+function fillSelect(id, allLabel, values) {
+  const sel = document.getElementById(id);
+  sel.innerHTML = '';
+  const opt0 = document.createElement('option');
+  opt0.value = ''; opt0.textContent = allLabel;
+  sel.appendChild(opt0);
+  values.forEach(v => {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    sel.appendChild(o);
+  });
+}
+fillSelect('f-m', 'All methods', METHODS);
+fillSelect('f-s', 'All specificity', LEVELS);
+if (HAS_CLUSTERS) {
+  fillSelect('f-c', 'All clusters', CLUSTERS);
+} else {
+  document.getElementById('f-c').style.display = 'none';
+}
+['f-m', 'f-s', 'f-c'].forEach(id =>
+  document.getElementById(id).addEventListener('change', render));
+document.getElementById('clearFilters').addEventListener('click', function() {
+  ['f-m', 'f-s', 'f-c'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('search').value = '';
+  render();
+});
+
+// Wire controls.
+document.getElementById('gb-c').disabled = !HAS_CLUSTERS;
+['c','m','s'].forEach(d => document.getElementById('gb-' + d).addEventListener('click', () => setGroupDim(d)));
+let debounce;
+document.getElementById('search').addEventListener('input', function() {
+  clearTimeout(debounce); debounce = setTimeout(render, 150);
+});
+document.getElementById('expandAllBtn').addEventListener('click', function() {
+  expandAll = !expandAll;
+  this.textContent = expandAll ? 'Collapse all' : 'Expand all';
+  this.classList.toggle('active', expandAll);
+  document.querySelectorAll('.tile-body').forEach(b => b.classList.toggle('open', expandAll));
+});
+
+setGroupDim(groupDim);
+</script>
+</body>
+</html>"""
+
+
 def _build_per_topic_tree(
     topic: str,
     reduction_log: dict,

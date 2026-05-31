@@ -52,11 +52,12 @@ All crawler variables live in `src/crawler/config.py`, which defines three datac
 
 ### Hydra config groups
 
-YAML presets override a subset of the dataclass defaults. They are organized into three Hydra config groups:
+YAML presets override a subset of the dataclass defaults. They are organized into four Hydra config groups:
 
 - `configs/model/*.yaml` — model presets (`haiku`, `local_ds8b`, `local_tulu8b`, `local_meta8b`). Each sets fields from `ModelConfig`.
 - `configs/crawler/*.yaml` — crawler presets (`default` for production, `debug` for small-scale testing). Each sets fields from `CrawlerRunConfig`.
 - `configs/prompts/*.yaml` — prompt templates (`baseline`, `user_seeded`, `jailbreak`, `default`). Each sets fields from `PromptsConfig`.
+- `configs/aggregation/*.yaml` — post-crawl aggregation presets (`default`, plus per-model sweep sets like `olmo3_default`). Each sets fields from `AggregationConfig` (input paths, `aggregation_model`, batch sizes, `max_final_topics`). The `default` preset uses `aggregation_model: google/gemini-3.1-flash`. The same group also drives constrained classification (`fixed_topics_path`, e.g. `fixed_q8p4`) and coverage analysis (`ground_truth_reference`) — see [Aggregation](#aggregation).
 
 The override chain is: **dataclass defaults** → **YAML preset** → **CLI overrides**.
 
@@ -316,6 +317,37 @@ python3 scripts/runpod_control.py start \
   --session ds70b_smoke
 ```
 
+Once that smoke run completes, the same shape of follow-on smoke exists for
+the aggregation and refusal-rate stages. Both run on the pod — there is no
+intermediate local fetch or upload. Wait for `ds70b_smoke` to exit
+(`status --session ds70b_smoke`), then:
+
+```bash
+# Aggregate the four smoke 2x2 cells. With --reviewer-out-dir omitted the
+# controller picks the latest reviewer_ablation marker on the pod.
+python3 scripts/runpod_control.py start \
+  --task aggregation \
+  --max-final-topics 10 \
+  --input-batch-size 10 \
+  --output-batch-size 5 \
+  --session ds70b_smoke_agg
+
+# Smoke the refusal-rate driver. With --aggregation-dir omitted the
+# controller picks the latest aggregation marker.
+python3 scripts/runpod_control.py start \
+  --task refusal_rates \
+  --probes-per-topic 3 \
+  --override model.vllm_tensor_parallel_size=1 \
+  --session ds70b_smoke_refusal
+```
+
+Each stage records its own latest-output marker on the pod, so the next
+stage's `start` command finds its input automatically. The full smoke loop
+on a single-GPU pod typically finishes within a few minutes per stage and
+exercises every code path of `scripts/runpod_run_aggregation.sh`,
+`src/run_refusal_rates.py`, and the `--task` dispatch in
+`scripts/runpod_control.py`.
+
 #### 5. Monitor and fetch results
 
 ```bash
@@ -339,6 +371,150 @@ The most important files are:
 - `run.log` - full sequential run log.
 - `summary.md` - reviewer-facing Markdown tables.
 - `crawler_out_*.json` and matching `.jsonl` transcripts - raw evidence.
+
+### Post-Hoc Refusal-Rate Table
+
+The reviewer-ready 2x2 surfaces *candidate* topics per cell (refusal filtering
+off). To turn those candidates into a reviewer table sorted by behaviorally
+confirmed refusal rate, aggregate the four cells into one cluster space and
+then probe each aggregated cluster against the same target model. Both stages
+run on the pod through the same `runpod_control.py start --task ...` shape
+used for the 2x2 itself — there is no intermediate local fetch or upload.
+
+The aggregator reads each cell's `crawler_out_*.json` directly: it pulls
+candidate cluster heads from `queue.topics.head_topics[].summary`, so the
+discovery-mode default (`do_filter_refusals=false`) needs no backfill.
+
+#### 1. Aggregate the four cells
+
+```bash
+python3 scripts/runpod_control.py start \
+  --task aggregation \
+  --session ds70b_aggregation
+```
+
+`start --task aggregation` launches `scripts/runpod_run_aggregation.sh` in
+one tmux session. With `--reviewer-out-dir` omitted, the controller reads
+`artifacts/out/runpod_latest_reviewer_ablation.txt` on the pod and points
+the driver at the most recent 2x2 output. The driver auto-discovers one
+`crawler_out_*_<cell>.json` per cell, passes them to
+`src/aggregation/run_aggregation.py` as the Hydra `aggregation.input_paths`
+list, and records the resulting aggregation dir in
+`artifacts/out/runpod_latest_aggregation.txt`. The aggregation model defaults
+to `google/gemini-3.1-flash` (fast and reliable on the long reduction JSON);
+override it with `--agg-llm`.
+
+Tuning knobs (all optional):
+
+```bash
+python3 scripts/runpod_control.py start \
+  --task aggregation \
+  --reviewer-out-dir artifacts/out/reviewer_ablation_runpod_<ts> \
+  --max-final-topics 80 \
+  --input-batch-size 50 \
+  --output-batch-size 25 \
+  --agg-model-config gemini-31fl_remote \
+  --agg-llm google/gemini-3.1-flash \
+  --session ds70b_aggregation
+```
+
+Outputs land under `artifacts/aggregation/<timestamp>/`:
+
+- `final_topics.txt` - newline-separated cluster heads, the row labels of the reviewer table.
+- `reduction_log.json` - includes `consistency.source_sets` (head → run indices) and `input_paths` (ordered).
+- `explorer.html` - interactive cluster trajectory viewer.
+
+#### 2. Start the refusal-rate driver
+
+```bash
+python3 scripts/runpod_control.py start \
+  --task refusal_rates \
+  --session ds70b_refusal_rates
+```
+
+`start --task refusal_rates` launches `scripts/runpod_compute_refusal_rates.sh`
+in one tmux session. With `--aggregation-dir` omitted, the controller reads
+`artifacts/out/runpod_latest_aggregation.txt` on the pod and points the
+driver at the most recent aggregation output. The driver runs
+`python src/run_refusal_rates.py` with the configured target model
+(`local_ds70b` by default), generates probes for each (cluster, language)
+pair, queries the target through the existing refusal cascade (regex →
+classifier → LLM judge), and records the latest output directory in
+`artifacts/out/runpod_latest_refusal_rates.txt`.
+
+Tuning knobs (all optional):
+
+```bash
+python3 scripts/runpod_control.py start \
+  --task refusal_rates \
+  --aggregation-dir artifacts/aggregation/<timestamp> \
+  --probes-per-topic 10 \
+  --threshold 0.25 \
+  --override model.vllm_tensor_parallel_size=1 \
+  --session ds70b_refusal_rates
+```
+
+##### Probing a single specificity level
+
+A specificity-scoring aggregation run writes `final_topics.txt` containing only
+the level labels (`L1`…`L5`, `Junk`) and stashes the actual per-topic level
+assignments in `specificity_scores.csv` (`topic, level, present_<cell>…`). To
+probe just the topics at one level — e.g. the L5 "pinpoint / instance" topics —
+pass `--level`, which reads cluster heads and per-cell discovery booleans from
+that csv instead of `final_topics.txt` + `reduction_log.json`:
+
+```bash
+python3 scripts/runpod_control.py start \
+  --task refusal_rates \
+  --aggregation-dir artifacts/aggregation/<timestamp> \
+  --model local_ds70b \
+  --level L5 \
+  --session ds70b_refusal_rates
+```
+
+Pass several levels at once as a comma-separated list to probe their union in a
+single run — e.g. the specific tier (named cases + unique referents):
+
+```bash
+python3 scripts/runpod_control.py start \
+  --task refusal_rates \
+  --aggregation-dir artifacts/aggregation/<timestamp> \
+  --model local_ds70b \
+  --level L4,L5 \
+  --session ds70b_refusal_rates
+```
+
+`--specificity-csv` overrides the csv path (default
+`<aggregation-dir>/specificity_scores.csv`). Everything downstream — the
+target model probe, the `refusal_rates.{md,json}` shape, and the per-cell
+discovery columns — is identical to the full-taxonomy run, except that in
+level mode each row also carries its `specificity_level` (a `Level` column in
+the markdown table, and a `specificity_level` field per `per_cluster` record).
+
+#### 3. Monitor and fetch results
+
+```bash
+# Show tmux state, latest output marker, and recent log tail.
+python3 scripts/runpod_control.py status --task refusal_rates
+
+# Follow the remote run log.
+python3 scripts/runpod_control.py tail --task refusal_rates
+
+# Fetch the latest recorded refusal-rate output directory.
+python3 scripts/runpod_control.py fetch --task refusal_rates
+```
+
+Fetched results land under `artifacts/runpod/<remote-output-name>/`. The key
+files are:
+
+- `refusal_rates.md` - reviewer table sorted by refusal rate descending. Columns: cluster, one boolean per 2x2 cell, refusal rate, refusals / probes.
+- `refusal_rates.json` - same shape as the sanity-check `reviewer_refusal_probe.json`: `metadata`, `per_cluster[]` (with `discovery.{direct,prefill_only,iter_no_prefill,ipc}`), and `per_topic[]` (per-language per-probe records).
+- `config.json` - resolved Hydra config used for the run.
+- `run.log` - tee'd stdout/stderr.
+- `refusal_rates_*.jsonl` - per-call transcript from `batch_generate`.
+
+The driver runs against the same target model as the 2x2 cells, so the
+refusal-rate column is directly comparable to the discovery booleans.
 
 ## How the Crawler Works
 
@@ -582,14 +758,44 @@ This runs 4 prompts × 5 tags = 20 sequential crawls in a single tmux session. S
 
 ### Aggregation
 
-`scripts/run_aggregation.sh` merges discovered topics across multiple crawler runs into deduplicated clusters. Each experiment config in `configs/experiments/` specifies its `input_paths`.
+`scripts/run_aggregation.sh` reduces the topics discovered across multiple crawler runs into a single set of clusters. Each aggregation config in `configs/aggregation/` specifies its `input_paths` (the crawler output JSONs to combine). It wraps `src/aggregation/run_aggregation.py`; pass `--tmux` to run in a logged tmux session, or `--all` to run every config in `configs/aggregation/`.
 
-To aggregate each prompt config separately after a sweep, use multirun over experiment configs:
+It runs in one of two modes, selected by `fixed_topics_path`:
+
+- **Iterative merge (default).** Repeatedly asks `aggregation_model` to reduce the input topics into fewer, maximally-distinct clusters until at most `max_final_topics` remain — the taxonomy is *discovered* from the data.
+- **Constrained / fixed taxonomy.** When `fixed_topics_path` points at a file of topics (one per line), each input topic is instead *classified* into that predefined list (multi-label; anything that fits nothing lands in `unmatched_label`). Used to score several crawls against a shared reviewer taxonomy — see `configs/aggregation/fixed_q8p4.yaml`.
+
+To aggregate each prompt config separately after a sweep, use multirun over aggregation configs:
 
 ```bash
-./scripts/run_aggregation.sh -m experiments=olmo3_default,olmo3_baseline,olmo3_baseline_crawl,olmo3_jailbreak
+./scripts/run_aggregation.sh -m aggregation=olmo3_default,olmo3_baseline,olmo3_baseline_crawl,olmo3_jailbreak
+
+# constrained mode against a fixed taxonomy
+./scripts/run_aggregation.sh aggregation=fixed_q8p4
 ```
 
-Each aggregation writes to `artifacts/aggregation/<timestamp>/` with cluster titles, a merge log, and an interactive HTML explorer.
+Each run writes to `artifacts/aggregation/<timestamp>/`:
+
+- `final_topics.txt` — newline-separated cluster titles (the row labels).
+- `reduction_log.json` — every reduction/classification step, the topic trajectory, and `consistency.source_sets` (cluster → the run indices it appeared in).
+- `explorer.html` — interactive cluster trajectory viewer.
+- `config.json` — the frozen run config.
+
+Constrained mode additionally writes a per-cluster × per-cell contribution matrix:
+
+- `topic_cell_matrix.{csv,md}` — for each fixed topic, how many input topics from each input cell were assigned to it, plus `first_abs_<cell>` / `first_rel_<cell>`: the earliest discovery id of the cluster in that crawl (absolute, and relative to the crawl's total topics discovered).
+- `cluster_discovery_curve.png` — cumulative distinct clusters discovered vs. topic id, one step line per cell.
+
+By default each input file is its own cell. To pool several files into one cell (e.g. replicate runs of one condition), set `input_groups` (`cell_name → [paths]`) instead of `input_paths` — it defines the matrix columns; see `configs/aggregation/budget5.yaml`.
+
+#### Coverage analysis
+
+`scripts/run_coverage.sh` scores how well the crawl topics cover a reference taxonomy, using `aggregation_model` as an LLM-as-judge. It reads the same `input_paths` plus `ground_truth_reference` (a JSON of `category → [subtopics]`) and reports the fraction of ground-truth subtopics matched. Same `--tmux` / `--all` flags.
+
+```bash
+./scripts/run_coverage.sh aggregation=olmo3_baseline
+```
+
+Writes to `artifacts/coverage/<config>_<timestamp>/`: `config.json` and `coverage_report.json` (overall and per-category match rates).
 
 # All eval stuff in `/exp` is likely broken.

@@ -4,11 +4,11 @@ input_paths:
   - artifacts/out/crawler_out_20260331_023438_Qwen3-8B_1samples_10crawls_Truefilter_run03.json
   - artifacts/out/crawler_out_20260331_025911_Qwen3-8B_1samples_10crawls_Truefilter_run04.json
   - artifacts/out/crawler_out_20260331_031842_Qwen3-8B_1samples_10crawls_Truefilter_run05.json
-aggregation_model: moonshotai/kimi-k2-0905
+aggregation_model: google/gemini-3.5-flash
 input_batch_size: 50
 output_batch_size: 25
 max_final_topics: 50
-max_tokens: 4096
+max_tokens: 16384
 temperature: 0.3
 parallel_batches: true
 verbose: false

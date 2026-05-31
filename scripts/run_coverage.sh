@@ -1,25 +1,25 @@
 #!/bin/bash
 
 # Ground truth coverage analysis via LLM-as-judge
-# Usage: ./scripts/run_coverage.sh [--tmux] [experiments=<name>] [overrides...]
+# Usage: ./scripts/run_coverage.sh [--tmux] [aggregation=<name>] [overrides...]
 #
 # Config selection:
-#   experiments=default      # experiment parameters (default: default)
+#   aggregation=default      # experiment parameters (default: default)
 #   model=local_ds8b         # only needed if aggregation_model="local"
 #
 # Field overrides (dot notation):
-#   experiments.ground_truth_reference="path/to/gt.json"
-#   experiments.aggregation_model="anthropic/claude-3.5-haiku"
+#   aggregation.ground_truth_reference="path/to/gt.json"
+#   aggregation.aggregation_model="anthropic/claude-3.5-haiku"
 #
 # Flags:
 #   --tmux         Run in a tmux session with logging
-#   --all          Run coverage for every config in configs/experiments/
+#   --all          Run coverage for every config in configs/aggregation/
 #
 # Examples:
 #   ./scripts/run_coverage.sh
-#   ./scripts/run_coverage.sh experiments=olmo3_default
+#   ./scripts/run_coverage.sh aggregation=olmo3_default
 #   ./scripts/run_coverage.sh --all
-#   ./scripts/run_coverage.sh --tmux experiments.aggregation_model="openai/gpt-4o-mini"
+#   ./scripts/run_coverage.sh --tmux aggregation.aggregation_model="openai/gpt-4o-mini"
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
@@ -44,7 +44,7 @@ run_single() {
     # Extract experiment name from args for naming
     local EXP_NAME="default"
     for a in "$@"; do
-        case "$a" in experiments=*) EXP_NAME="${a#experiments=}" ;; esac
+        case "$a" in aggregation=*) EXP_NAME="${a#aggregation=}" ;; esac
     done
 
     local PYTHON_CMD="python src/aggregation/run_coverage.py $@"
@@ -80,12 +80,12 @@ run_single() {
 }
 
 if [ "$RUN_ALL" = true ]; then
-    for yaml in "$PROJECT_ROOT/configs/experiments/"*.yaml; do
+    for yaml in "$PROJECT_ROOT/configs/aggregation/"*.yaml; do
         name="$(basename "$yaml" .yaml)"
         echo "========================================"
-        echo "Running experiments=$name"
+        echo "Running aggregation=$name"
         echo "========================================"
-        run_single "experiments=$name" "${ARGS[@]}"
+        run_single "aggregation=$name" "${ARGS[@]}"
         echo ""
     done
 else

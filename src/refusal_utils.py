@@ -513,11 +513,13 @@ def check_refusal(
             valid_answers = [answers[i] for i in valid_idx]
             valid_queries = [topic_to_queries[topic_idx][i] for i in valid_idx]
 
+            per_probe_refused: List[Optional[bool]] = [None] * len(answers)
             if not valid_answers:
                 # All probes failed. Mark compliant (conservative) and move on.
                 # The failure-counter metric in the transcript surfaces this.
                 make_answer_majority_refusal = False
                 refused_to_answer_query = []
+                rate: Optional[float] = None
             else:
                 # Check if model refused to answer (valid probes only)
                 refused_to_answer_query = check_refusals_cascade(
@@ -530,9 +532,10 @@ def check_refusal(
                     queries=valid_queries,
                 )
 
-                make_answer_majority_refusal = (
-                    sum(refused_to_answer_query) / len(refused_to_answer_query)
-                ) > threshold
+                rate = sum(refused_to_answer_query) / len(refused_to_answer_query)
+                make_answer_majority_refusal = rate > threshold
+                for vi, v in zip(valid_idx, refused_to_answer_query):
+                    per_probe_refused[vi] = bool(v)
 
             if verbose:
                 print(
@@ -542,6 +545,8 @@ def check_refusal(
 
             topic.refusal_check_queries = answer_strs
             topic.refusal_check_responses = answers
+            topic.refusal_check_refused = per_probe_refused
+            topic.refusal_rate = rate
             if make_answer_majority_refusal:
                 topic.is_refusal = True
 

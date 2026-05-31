@@ -17,7 +17,11 @@ import hydra
 import torch
 from omegaconf import DictConfig, OmegaConf
 
-from src.aggregation.aggregator import TopicAggregator, compute_consistency_score
+from src.aggregation.aggregator import (
+    TopicAggregator,
+    compute_consistency_score,
+    resolve_input_groups,
+)
 from src.crawler.config import CrawlerConfig
 from src.directory_config import CONFIG_DIR, ROOT_DIR, resolve_cache_dir
 from src.llm_utils import load_model_and_tokenizer
@@ -28,22 +32,28 @@ from src.transcript_logger import init_transcript_log
 @hydra.main(version_base=None, config_path=str(CONFIG_DIR), config_name="config")
 def main(cfg: DictConfig) -> None:
     crawler_config = CrawlerConfig(**OmegaConf.to_container(cfg, resolve=True))
-    exp = crawler_config.experiments
+    exp = crawler_config.aggregation
 
-    # Validate input_paths (lives in experiments config)
+    # Validate inputs and resolve the cell grouping. input_groups (cell ->
+    # [paths]) pools several files per cell; otherwise each path is its own cell.
     input_paths = exp.input_paths
-    if not input_paths:
+    input_groups = exp.input_groups
+    if not input_paths and not input_groups:
         raise ValueError(
-            "experiments.input_paths is required. Set in YAML or pass as: "
-            "experiments.input_paths='[path1.json,path2.json]'"
+            "aggregation.input_paths or aggregation.input_groups is required. "
+            "Set in YAML or pass as: "
+            "aggregation.input_paths='[path1.json,path2.json]'"
         )
+    groups = resolve_input_groups(input_paths or [], input_groups)
+    cell_names = [name for name, _ in groups]
+    num_cells = len(groups)
 
     # Resolve the aggregation model
     agg_model_name = exp.aggregation_model
     if agg_model_name == "local":
         if cfg.model.local_model is None:
             raise ValueError(
-                "experiments.aggregation_model is 'local' but model.local_model is not set"
+                "aggregation.aggregation_model is 'local' but model.local_model is not set"
             )
         cache_dir_path = resolve_cache_dir(cfg.model.cache_dir)
         model, tokenizer = load_model_and_tokenizer(
@@ -75,24 +85,103 @@ def main(cfg: DictConfig) -> None:
 
     # Load topics and run aggregation
     aggregator = TopicAggregator(crawler_config)
-    topics, topic_sources = aggregator.load_topics(input_paths)
-    print(f"Loaded {len(topics)} unique topics from {len(input_paths)} file(s)")
-
-    final_topics, trajectory, source_sets = aggregator.aggregate(
-        model, tokenizer, topics, topic_sources
+    topics, topic_sources, topic_first, cell_totals = aggregator.load_topics(
+        groups
     )
-
-    # Report consistency score
-    score, n_consistent, n_total = compute_consistency_score(
-        source_sets, len(input_paths)
-    )
+    n_files = sum(len(p) for _, p in groups)
     print(
-        f"Consistency: {score:.1%} ({n_consistent}/{n_total} topics "
-        f"present in all {len(input_paths)} runs)"
+        f"Loaded {len(topics)} unique topics from {n_files} file(s) "
+        f"in {num_cells} cell(s): {cell_names}"
     )
-    aggregator.save_artifacts(
-        output_dir, final_topics, trajectory, input_paths, source_sets
-    )
+
+    flat_paths = [p for _, paths in groups for p in paths]
+    fixed_topics_path = exp.fixed_topics_path
+
+    if exp.score_specificity:
+        # Specificity scoring mode: label every topic by how specific it is and
+        # emit per-cell specificity tables instead of clustering.
+        spec_name = exp.specificity_model or agg_model_name
+        if spec_name == agg_model_name:
+            spec_model, spec_tok = model, tokenizer
+        elif spec_name == "local":
+            raise ValueError(
+                "specificity_model='local' with a different aggregation_model "
+                "is not supported; set aggregation_model=local instead"
+            )
+        else:
+            missing = collect_required_api_keys([spec_name])
+            if missing:
+                details = ", ".join(f"{p} ({v})" for p, v in missing.items())
+                raise ValueError(
+                    f"Missing API key(s) for specificity_model={spec_name}: {details}"
+                )
+            spec_model, spec_tok = spec_name, None
+
+        level_topics, trajectory, source_sets = aggregator.score_specificity(
+            spec_model, spec_tok, topics, topic_sources
+        )
+        aggregator.save_artifacts(
+            output_dir, level_topics, trajectory, flat_paths, source_sets,
+            num_runs=num_cells, write_explorer=False,
+        )
+        aggregator.save_specificity_artifacts(
+            output_dir, level_topics, topic_sources, cell_names,
+            exp.num_generations_per_cell,
+        )
+        # For the explorer's third property (cluster), classify the same topics
+        # into the fixed taxonomy when one is provided. Without it, the explorer
+        # groups by method/specificity only.
+        cluster_topics = None
+        if fixed_topics_path:
+            with open(fixed_topics_path, "r") as f:
+                fixed_topics = [line.strip() for line in f if line.strip()]
+            print(
+                f"Classifying topics into {len(fixed_topics)} clusters for the "
+                f"explorer ({fixed_topics_path})"
+            )
+            cluster_topics, _, _ = aggregator.classify(
+                spec_model, spec_tok, topics, fixed_topics, topic_sources
+            )
+        aggregator.save_specificity_explorer(
+            output_dir, level_topics, topic_sources, cell_names, cluster_topics,
+        )
+    else:
+        # Constrained mode: classify into a fixed taxonomy instead of discovering
+        # clusters via iterative reduction.
+        if fixed_topics_path:
+            with open(fixed_topics_path, "r") as f:
+                fixed_topics = [line.strip() for line in f if line.strip()]
+            print(
+                f"Constrained mode: {len(fixed_topics)} fixed topics from "
+                f"{fixed_topics_path}"
+            )
+            final_topics, trajectory, source_sets = aggregator.classify(
+                model, tokenizer, topics, fixed_topics, topic_sources
+            )
+        else:
+            final_topics, trajectory, source_sets = aggregator.aggregate(
+                model, tokenizer, topics, topic_sources
+            )
+
+        # Report consistency score (across cells)
+        score, n_consistent, n_total = compute_consistency_score(
+            source_sets, num_cells
+        )
+        print(
+            f"Consistency: {score:.1%} ({n_consistent}/{n_total} topics "
+            f"present in all {num_cells} cell(s))"
+        )
+        aggregator.save_artifacts(
+            output_dir, final_topics, trajectory, flat_paths, source_sets,
+            num_runs=num_cells,
+        )
+        if fixed_topics_path:
+            aggregator.save_cell_matrix(
+                output_dir, final_topics, topic_sources, cell_names, topic_first,
+            )
+            aggregator.save_cluster_discovery_plot(
+                output_dir, final_topics, topic_first, cell_names, cell_totals,
+            )
 
     # Cleanup vLLM
     if not isinstance(model, str) and model is not None:
