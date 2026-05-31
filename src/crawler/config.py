@@ -325,6 +325,11 @@ Return ONLY a JSON object where keys are fixed topics (verbatim) and values are 
 @dataclass
 class AggregationConfig:
     input_paths: List[str] = field(default_factory=list)
+    # Optional cell grouping: maps a cell name -> list of crawler output paths
+    # pooled into that single cell (e.g. replicate runs of one condition). When
+    # set, it takes precedence over input_paths and defines the matrix columns;
+    # otherwise each path in input_paths is its own cell.
+    input_groups: Optional[Dict[str, List[str]]] = None
     aggregation_model: str = "local"
     input_batch_size: int = 80
     output_batch_size: int = 20

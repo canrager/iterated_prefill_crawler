@@ -17,7 +17,11 @@ import hydra
 import torch
 from omegaconf import DictConfig, OmegaConf
 
-from src.aggregation.aggregator import TopicAggregator, compute_consistency_score
+from src.aggregation.aggregator import (
+    TopicAggregator,
+    compute_consistency_score,
+    resolve_input_groups,
+)
 from src.crawler.config import CrawlerConfig
 from src.directory_config import CONFIG_DIR, ROOT_DIR, resolve_cache_dir
 from src.llm_utils import load_model_and_tokenizer
@@ -30,13 +34,19 @@ def main(cfg: DictConfig) -> None:
     crawler_config = CrawlerConfig(**OmegaConf.to_container(cfg, resolve=True))
     exp = crawler_config.aggregation
 
-    # Validate input_paths (lives in aggregation config)
+    # Validate inputs and resolve the cell grouping. input_groups (cell ->
+    # [paths]) pools several files per cell; otherwise each path is its own cell.
     input_paths = exp.input_paths
-    if not input_paths:
+    input_groups = exp.input_groups
+    if not input_paths and not input_groups:
         raise ValueError(
-            "aggregation.input_paths is required. Set in YAML or pass as: "
+            "aggregation.input_paths or aggregation.input_groups is required. "
+            "Set in YAML or pass as: "
             "aggregation.input_paths='[path1.json,path2.json]'"
         )
+    groups = resolve_input_groups(input_paths or [], input_groups)
+    cell_names = [name for name, _ in groups]
+    num_cells = len(groups)
 
     # Resolve the aggregation model
     agg_model_name = exp.aggregation_model
@@ -75,10 +85,14 @@ def main(cfg: DictConfig) -> None:
 
     # Load topics and run aggregation
     aggregator = TopicAggregator(crawler_config)
-    topics, topic_sources, topic_ids, run_totals = aggregator.load_topics(
-        input_paths
+    topics, topic_sources, topic_first, cell_totals = aggregator.load_topics(
+        groups
     )
-    print(f"Loaded {len(topics)} unique topics from {len(input_paths)} file(s)")
+    n_files = sum(len(p) for _, p in groups)
+    print(
+        f"Loaded {len(topics)} unique topics from {n_files} file(s) "
+        f"in {num_cells} cell(s): {cell_names}"
+    )
 
     # Constrained mode: classify into a fixed taxonomy instead of discovering
     # clusters via iterative reduction.
@@ -98,24 +112,25 @@ def main(cfg: DictConfig) -> None:
             model, tokenizer, topics, topic_sources
         )
 
-    # Report consistency score
+    # Report consistency score (across cells)
     score, n_consistent, n_total = compute_consistency_score(
-        source_sets, len(input_paths)
+        source_sets, num_cells
     )
     print(
         f"Consistency: {score:.1%} ({n_consistent}/{n_total} topics "
-        f"present in all {len(input_paths)} runs)"
+        f"present in all {num_cells} cell(s))"
     )
+    flat_paths = [p for _, paths in groups for p in paths]
     aggregator.save_artifacts(
-        output_dir, final_topics, trajectory, input_paths, source_sets
+        output_dir, final_topics, trajectory, flat_paths, source_sets,
+        num_runs=num_cells,
     )
     if fixed_topics_path:
         aggregator.save_cell_matrix(
-            output_dir, final_topics, topic_sources, input_paths,
-            topic_ids, run_totals,
+            output_dir, final_topics, topic_sources, cell_names, topic_first,
         )
         aggregator.save_cluster_discovery_plot(
-            output_dir, final_topics, topic_ids, run_totals, input_paths,
+            output_dir, final_topics, topic_first, cell_names, cell_totals,
         )
 
     # Cleanup vLLM

@@ -57,7 +57,7 @@ YAML presets override a subset of the dataclass defaults. They are organized int
 - `configs/model/*.yaml` — model presets (`haiku`, `local_ds8b`, `local_tulu8b`, `local_meta8b`). Each sets fields from `ModelConfig`.
 - `configs/crawler/*.yaml` — crawler presets (`default` for production, `debug` for small-scale testing). Each sets fields from `CrawlerRunConfig`.
 - `configs/prompts/*.yaml` — prompt templates (`baseline`, `user_seeded`, `jailbreak`, `default`). Each sets fields from `PromptsConfig`.
-- `configs/aggregation/*.yaml` — post-crawl aggregation presets (`default`, plus per-model sweep sets like `olmo3_default`). Each sets fields from `AggregationConfig` (input paths, `aggregation_model`, batch sizes, `max_final_topics`). The `default` preset uses `aggregation_model: google/gemini-3.1-flash`.
+- `configs/aggregation/*.yaml` — post-crawl aggregation presets (`default`, plus per-model sweep sets like `olmo3_default`). Each sets fields from `AggregationConfig` (input paths, `aggregation_model`, batch sizes, `max_final_topics`). The `default` preset uses `aggregation_model: google/gemini-3.1-flash`. The same group also drives constrained classification (`fixed_topics_path`, e.g. `fixed_q8p4`) and coverage analysis (`ground_truth_reference`) — see [Aggregation](#aggregation).
 
 The override chain is: **dataclass defaults** → **YAML preset** → **CLI overrides**.
 
@@ -721,14 +721,44 @@ This runs 4 prompts × 5 tags = 20 sequential crawls in a single tmux session. S
 
 ### Aggregation
 
-`scripts/run_aggregation.sh` merges discovered topics across multiple crawler runs into deduplicated clusters. Each aggregation config in `configs/aggregation/` specifies its `input_paths`.
+`scripts/run_aggregation.sh` reduces the topics discovered across multiple crawler runs into a single set of clusters. Each aggregation config in `configs/aggregation/` specifies its `input_paths` (the crawler output JSONs to combine). It wraps `src/aggregation/run_aggregation.py`; pass `--tmux` to run in a logged tmux session, or `--all` to run every config in `configs/aggregation/`.
+
+It runs in one of two modes, selected by `fixed_topics_path`:
+
+- **Iterative merge (default).** Repeatedly asks `aggregation_model` to reduce the input topics into fewer, maximally-distinct clusters until at most `max_final_topics` remain — the taxonomy is *discovered* from the data.
+- **Constrained / fixed taxonomy.** When `fixed_topics_path` points at a file of topics (one per line), each input topic is instead *classified* into that predefined list (multi-label; anything that fits nothing lands in `unmatched_label`). Used to score several crawls against a shared reviewer taxonomy — see `configs/aggregation/fixed_q8p4.yaml`.
 
 To aggregate each prompt config separately after a sweep, use multirun over aggregation configs:
 
 ```bash
 ./scripts/run_aggregation.sh -m aggregation=olmo3_default,olmo3_baseline,olmo3_baseline_crawl,olmo3_jailbreak
+
+# constrained mode against a fixed taxonomy
+./scripts/run_aggregation.sh aggregation=fixed_q8p4
 ```
 
-Each aggregation writes to `artifacts/aggregation/<timestamp>/` with cluster titles, a merge log, and an interactive HTML explorer.
+Each run writes to `artifacts/aggregation/<timestamp>/`:
+
+- `final_topics.txt` — newline-separated cluster titles (the row labels).
+- `reduction_log.json` — every reduction/classification step, the topic trajectory, and `consistency.source_sets` (cluster → the run indices it appeared in).
+- `explorer.html` — interactive cluster trajectory viewer.
+- `config.json` — the frozen run config.
+
+Constrained mode additionally writes a per-cluster × per-cell contribution matrix:
+
+- `topic_cell_matrix.{csv,md}` — for each fixed topic, how many input topics from each input cell were assigned to it, plus `first_abs_<cell>` / `first_rel_<cell>`: the earliest discovery id of the cluster in that crawl (absolute, and relative to the crawl's total topics discovered).
+- `cluster_discovery_curve.png` — cumulative distinct clusters discovered vs. topic id, one step line per cell.
+
+By default each input file is its own cell. To pool several files into one cell (e.g. replicate runs of one condition), set `input_groups` (`cell_name → [paths]`) instead of `input_paths` — it defines the matrix columns; see `configs/aggregation/budget5.yaml`.
+
+#### Coverage analysis
+
+`scripts/run_coverage.sh` scores how well the crawl topics cover a reference taxonomy, using `aggregation_model` as an LLM-as-judge. It reads the same `input_paths` plus `ground_truth_reference` (a JSON of `category → [subtopics]`) and reports the fraction of ground-truth subtopics matched. Same `--tmux` / `--all` flags.
+
+```bash
+./scripts/run_coverage.sh aggregation=olmo3_baseline
+```
+
+Writes to `artifacts/coverage/<config>_<timestamp>/`: `config.json` and `coverage_report.json` (overall and per-category match rates).
 
 # All eval stuff in `/exp` is likely broken.

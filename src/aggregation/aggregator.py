@@ -239,63 +239,100 @@ class TopicAggregator:
         return label_to_id, total
 
     def load_topics(
-        self, input_paths: List[str]
-    ) -> Tuple[List[str], Dict[str, set], Dict[str, Dict[int, int]], List[Optional[int]]]:
-        """Load and deduplicate summaries from one or more crawler JSONs.
+        self, groups: List[Tuple[str, List[str]]]
+    ) -> Tuple[
+        List[str],
+        Dict[str, set],
+        Dict[str, Dict[int, Tuple[int, Optional[int]]]],
+        List[Optional[int]],
+    ]:
+        """Load and deduplicate summaries, grouped into cells.
 
-        Returns:
-            (deduped_topics, topic_sources, topic_ids, run_totals) where:
-            - topic_sources maps normalized topic -> set of run indices.
-            - topic_ids maps normalized topic -> {run_idx: first-occurrence
-              discovery id in that run} (min id when a label has several).
-            - run_totals[run_idx] is that run's num_total_topics (or None).
+        `groups` is an ordered list of (cell_name, [crawler_json_paths]); each
+        cell pools one or more files (e.g. replicate runs of one condition).
+
+        Returns (deduped_topics, topic_sources, topic_first, cell_totals):
+            - topic_sources maps normalized topic -> set of cell indices.
+            - topic_first maps normalized topic -> {cell_idx: (abs_id, total)},
+              the earliest occurrence (smallest abs_id/total) of the topic in
+              that cell. `total` is the source crawl's num_total_topics (or None
+              when unrecoverable). When a cell pools several files, the file
+              giving the smallest relative position wins.
+            - cell_totals[cell_idx] = max num_total_topics across the cell's
+              files (used as the discovery-curve x-extent).
         """
         all_topics: List[Tuple[str, int]] = []
-        # Per-run label->id lookups and totals, populated alongside loading.
-        run_label_ids: List[Dict[str, int]] = []
-        run_totals: List[Optional[int]] = []
-        for run_idx, path in enumerate(input_paths):
-            with open(path, "r") as f:
-                data = json.load(f)
-            summaries = data.get("head_refusal_topics_summaries", [])
-            if not summaries:
-                # Discovery-mode crawls (do_filter_refusals=false) leave
-                # head_refusal_topics_summaries empty. Fall back to all
-                # candidate cluster heads so the same aggregator works
-                # without a separate backfill step.
-                head_topics = (
-                    data.get("queue", {})
-                    .get("topics", {})
-                    .get("head_topics", [])
-                )
-                summaries = [
-                    t["summary"]
-                    for t in head_topics
-                    if t.get("summary") and t.get("parent_id") != -5
-                ]
-            all_topics.extend((s, run_idx) for s in summaries)
-            label_to_id, total = self._resolve_topic_ids(data)
-            run_label_ids.append(label_to_id)
-            run_totals.append(total)
-        # Deduplicate preserving order, tracking source runs and discovery ids
+        # Per cell: list of (label->id, total) lookups, one per pooled file.
+        cell_file_lookups: List[List[Tuple[Dict[str, int], Optional[int]]]] = []
+        cell_totals: List[Optional[int]] = []
+        for cell_idx, (_name, paths) in enumerate(groups):
+            file_lookups: List[Tuple[Dict[str, int], Optional[int]]] = []
+            max_total: Optional[int] = None
+            for path in paths:
+                with open(path, "r") as f:
+                    data = json.load(f)
+                summaries = data.get("head_refusal_topics_summaries", [])
+                if not summaries:
+                    # Discovery-mode crawls (do_filter_refusals=false) leave
+                    # head_refusal_topics_summaries empty. Fall back to all
+                    # candidate cluster heads so the same aggregator works
+                    # without a separate backfill step. Raw crawls store the
+                    # label in `english`/`shortened` (summary is often unset), so
+                    # take the best available label (matches _build_label_id_map).
+                    head_topics = (
+                        data.get("queue", {})
+                        .get("topics", {})
+                        .get("head_topics", [])
+                    )
+                    summaries = [
+                        label
+                        for t in head_topics
+                        if t.get("parent_id") != -5
+                        and (
+                            label := (
+                                t.get("summary")
+                                or t.get("english")
+                                or t.get("shortened")
+                            )
+                        )
+                    ]
+                all_topics.extend((s, cell_idx) for s in summaries)
+                label_to_id, total = self._resolve_topic_ids(data)
+                file_lookups.append((label_to_id, total))
+                if total is not None:
+                    max_total = total if max_total is None else max(max_total, total)
+            cell_file_lookups.append(file_lookups)
+            cell_totals.append(max_total)
+
+        def occ_rel(occ: Tuple[int, Optional[int]]) -> Tuple[float, int]:
+            abs_id, total = occ
+            # Prefer occurrences with a known total (smaller relative position);
+            # break ties by absolute id.
+            return (abs_id / total if total else float("inf"), abs_id)
+
+        # Deduplicate preserving order, tracking source cells and first occurrence
         seen: Dict[str, set] = {}
-        topic_ids: Dict[str, Dict[int, int]] = {}
+        topic_first: Dict[str, Dict[int, Tuple[int, Optional[int]]]] = {}
         deduped = []
-        for t, run_idx in all_topics:
+        for t, cell_idx in all_topics:
             t_norm = t.strip().lower()
             if not t_norm:
                 continue
             if t_norm not in seen:
-                seen[t_norm] = {run_idx}
+                seen[t_norm] = {cell_idx}
                 deduped.append(t.strip())
             else:
-                seen[t_norm].add(run_idx)
-            tid = run_label_ids[run_idx].get(t_norm)
-            if tid is not None:
-                per_run = topic_ids.setdefault(t_norm, {})
-                if run_idx not in per_run or tid < per_run[run_idx]:
-                    per_run[run_idx] = tid
-        return deduped, seen, topic_ids, run_totals
+                seen[t_norm].add(cell_idx)
+            for label_to_id, total in cell_file_lookups[cell_idx]:
+                tid = label_to_id.get(t_norm)
+                if tid is None:
+                    continue
+                occ = (tid, total)
+                per_cell = topic_first.setdefault(t_norm, {})
+                cur = per_cell.get(cell_idx)
+                if cur is None or occ_rel(occ) < occ_rel(cur):
+                    per_cell[cell_idx] = occ
+        return deduped, seen, topic_first, cell_totals
 
     def _generate_single(self, model, tokenizer, prompt: str) -> str:
         """Run a single-prompt LLM call via batch_generate and return the response text."""
@@ -840,9 +877,8 @@ class TopicAggregator:
         output_dir: str,
         final_topics: Dict[str, List[str]],
         topic_sources: Dict[str, set],
-        input_paths: List[str],
-        topic_ids: Optional[Dict[str, Dict[int, int]]] = None,
-        run_totals: Optional[List[Optional[int]]] = None,
+        cell_names: List[str],
+        topic_first: Optional[Dict[str, Dict[int, Tuple[int, Optional[int]]]]] = None,
     ):
         """Write a per-topic x per-cell contribution matrix (counts + presence).
 
@@ -852,37 +888,38 @@ class TopicAggregator:
         fixed topics, per-cell counts sum to more than the number of inputs.
 
         Also reports, per cell, the first-occurrence discovery index of the
-        cluster: the minimum raw topic id among the cluster's inputs that
-        appeared in that cell (`first_abs`), and that id divided by the cell's
-        total topics discovered (`first_rel`). Blank when no id is available.
+        cluster: among the cluster's inputs seen in that cell, the earliest
+        (smallest relative position) occurrence's raw topic id (`first_abs`) and
+        its position relative to the crawl's total topics (`first_rel`). Blank
+        when no id is available.
         """
-        cell_names = [
-            os.path.splitext(os.path.basename(p))[0] for p in input_paths
-        ]
-        num_runs = len(input_paths)
-        topic_ids = topic_ids or {}
-        run_totals = run_totals or [None] * num_runs
+        num_runs = len(cell_names)
+        topic_first = topic_first or {}
 
         rows = []
         for topic in sorted(final_topics.keys()):
             inputs = final_topics[topic]
             counts = [0] * num_runs
-            first_abs: List[Optional[int]] = [None] * num_runs
+            # Per cell, track the earliest (min relative) occurrence as
+            # (rel_key, abs_id, rel) so first_abs and first_rel stay consistent.
+            best: List[Optional[Tuple[float, int, Optional[float]]]] = [None] * num_runs
             for inp in inputs:
                 key = inp.strip().lower()
                 for c in topic_sources.get(key, set()):
                     if 0 <= c < num_runs:
                         counts[c] += 1
-                for c, tid in topic_ids.get(key, {}).items():
-                    if 0 <= c < num_runs and (
-                        first_abs[c] is None or tid < first_abs[c]
-                    ):
-                        first_abs[c] = tid
+                for c, (abs_id, total) in topic_first.get(key, {}).items():
+                    if not (0 <= c < num_runs):
+                        continue
+                    rel = (abs_id / total) if total else None
+                    rel_key = rel if rel is not None else float("inf")
+                    if best[c] is None or rel_key < best[c][0]:
+                        best[c] = (rel_key, abs_id, rel)
+            first_abs: List[Optional[int]] = [
+                None if best[c] is None else best[c][1] for c in range(num_runs)
+            ]
             first_rel: List[Optional[float]] = [
-                (first_abs[c] / run_totals[c])
-                if (first_abs[c] is not None and run_totals[c])
-                else None
-                for c in range(num_runs)
+                None if best[c] is None else best[c][2] for c in range(num_runs)
             ]
             presence = [1 if c > 0 else 0 for c in counts]
             rows.append((topic, len(inputs), counts, presence, first_abs, first_rel))
@@ -966,14 +1003,14 @@ class TopicAggregator:
         self,
         output_dir: str,
         final_topics: Dict[str, List[str]],
-        topic_ids: Dict[str, Dict[int, int]],
-        run_totals: List[Optional[int]],
-        input_paths: List[str],
+        topic_first: Dict[str, Dict[int, Tuple[int, Optional[int]]]],
+        cell_names: List[str],
+        cell_totals: List[Optional[int]],
     ):
         """Plot, per cell, a cumulative step curve of clusters discovered vs topic id.
 
         For each crawl cell, every cluster (fixed topic) is "discovered" at the
-        smallest raw topic id among its inputs seen in that cell (its
+        earliest topic id among its inputs seen in that cell (its
         first-occurrence id). Sorting those ids and stepping up by one at each
         gives the cumulative number of distinct clusters found as the crawl
         progresses through topic ids. One step line per cell.
@@ -983,24 +1020,22 @@ class TopicAggregator:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        cell_names = [
-            os.path.splitext(os.path.basename(p))[0] for p in input_paths
-        ]
-        num_runs = len(input_paths)
+        num_runs = len(cell_names)
 
         # Per cell: sorted first-occurrence ids, one per cluster present there.
         per_cell_ids: List[List[int]] = [[] for _ in range(num_runs)]
         for inputs in final_topics.values():
-            first_abs: List[Optional[int]] = [None] * num_runs
+            best: List[Optional[Tuple[float, int]]] = [None] * num_runs
             for inp in inputs:
-                for c, tid in topic_ids.get(inp.strip().lower(), {}).items():
-                    if 0 <= c < num_runs and (
-                        first_abs[c] is None or tid < first_abs[c]
-                    ):
-                        first_abs[c] = tid
+                for c, (abs_id, total) in topic_first.get(inp.strip().lower(), {}).items():
+                    if not (0 <= c < num_runs):
+                        continue
+                    rel_key = (abs_id / total) if total else float("inf")
+                    if best[c] is None or rel_key < best[c][0]:
+                        best[c] = (rel_key, abs_id)
             for c in range(num_runs):
-                if first_abs[c] is not None:
-                    per_cell_ids[c].append(first_abs[c])
+                if best[c] is not None:
+                    per_cell_ids[c].append(best[c][1])
 
         plt.figure(figsize=(9, 6))
         cmap = plt.get_cmap("tab10")
@@ -1014,7 +1049,7 @@ class TopicAggregator:
             # by one at each discovery, hold the total out to num_total_topics.
             x = [0] + ids
             y = [0] + list(range(1, n + 1))
-            total = run_totals[c] if c < len(run_totals) else None
+            total = cell_totals[c] if c < len(cell_totals) else None
             if total and total > ids[-1]:
                 x.append(total)
                 y.append(n)
@@ -1049,12 +1084,18 @@ class TopicAggregator:
         trajectory: Dict[str, List[str]],
         input_paths: List[str],
         source_sets: Optional[Dict[str, set]] = None,
+        num_runs: Optional[int] = None,
     ):
-        """Save all artifacts to output_dir."""
+        """Save all artifacts to output_dir.
+
+        `num_runs` is the number of cells (defaults to len(input_paths) for the
+        one-file-per-cell case; pass explicitly when cells pool several files).
+        """
         from src.aggregation.html_builder import build_explorer_html
 
         os.makedirs(output_dir, exist_ok=True)
-        num_runs = len(input_paths)
+        if num_runs is None:
+            num_runs = len(input_paths)
 
         # 1. config.json
         config_path = os.path.join(output_dir, "config.json")
@@ -1099,6 +1140,23 @@ class TopicAggregator:
 
         print(f"Artifacts saved to {output_dir}/")
         print(f"  config.json, final_topics.txt, reduction_log.json, explorer.html")
+
+
+def resolve_input_groups(
+    input_paths: List[str],
+    input_groups: Optional[Dict[str, List[str]]] = None,
+) -> List[Tuple[str, List[str]]]:
+    """Normalize the input spec into ordered (cell_name, [paths]) groups.
+
+    When `input_groups` is set, each key is a cell pooling its listed files.
+    Otherwise every path in `input_paths` is its own cell, named by its
+    filename stem (preserving the previous one-file-per-cell behavior).
+    """
+    if input_groups:
+        return [(name, list(paths)) for name, paths in input_groups.items()]
+    return [
+        (os.path.splitext(os.path.basename(p))[0], [p]) for p in input_paths
+    ]
 
 
 def compute_consistency_score(
