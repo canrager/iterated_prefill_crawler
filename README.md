@@ -454,6 +454,43 @@ python3 scripts/runpod_control.py start \
   --session ds70b_refusal_rates
 ```
 
+##### Probing a single specificity level
+
+A specificity-scoring aggregation run writes `final_topics.txt` containing only
+the level labels (`L1`…`L5`, `Junk`) and stashes the actual per-topic level
+assignments in `specificity_scores.csv` (`topic, level, present_<cell>…`). To
+probe just the topics at one level — e.g. the L5 "pinpoint / instance" topics —
+pass `--level`, which reads cluster heads and per-cell discovery booleans from
+that csv instead of `final_topics.txt` + `reduction_log.json`:
+
+```bash
+python3 scripts/runpod_control.py start \
+  --task refusal_rates \
+  --aggregation-dir artifacts/aggregation/<timestamp> \
+  --model local_ds70b \
+  --level L5 \
+  --session ds70b_refusal_rates
+```
+
+Pass several levels at once as a comma-separated list to probe their union in a
+single run — e.g. the specific tier (named cases + unique referents):
+
+```bash
+python3 scripts/runpod_control.py start \
+  --task refusal_rates \
+  --aggregation-dir artifacts/aggregation/<timestamp> \
+  --model local_ds70b \
+  --level L4,L5 \
+  --session ds70b_refusal_rates
+```
+
+`--specificity-csv` overrides the csv path (default
+`<aggregation-dir>/specificity_scores.csv`). Everything downstream — the
+target model probe, the `refusal_rates.{md,json}` shape, and the per-cell
+discovery columns — is identical to the full-taxonomy run, except that in
+level mode each row also carries its `specificity_level` (a `Level` column in
+the markdown table, and a `specificity_level` field per `per_cluster` record).
+
 #### 3. Monitor and fetch results
 
 ```bash

@@ -10,6 +10,11 @@
 #   OUT_DIR           Output dir (default: artifacts/refusal_rates/<UTC ts>)
 #   PROBES_PER_TOPIC  -> crawler.num_refusal_checks_per_topic (default: 10)
 #   THRESHOLD         -> crawler.is_refusal_threshold (default: 0.25)
+#   SPECIFICITY_LEVEL Probe only topics at these levels (e.g. L5, or "L4,L5"
+#                     / "L4 L5" for several) from specificity_scores.csv
+#                     instead of final_topics.txt.
+#   SPECIFICITY_CSV   Override the specificity csv path (default:
+#                     $AGGREGATION_DIR/specificity_scores.csv).
 #   EXTRA_OVERRIDES   Whitespace-separated Hydra overrides pass-through
 #   RUNPOD_LATEST_FILE override for the latest marker path
 
@@ -31,6 +36,8 @@ AGGREGATION_DIR="${AGGREGATION_DIR:?AGGREGATION_DIR is required (pod-relative pa
 OUT_DIR="${OUT_DIR:-artifacts/refusal_rates/$(date -u +%Y%m%d_%H%M%S)}"
 PROBES_PER_TOPIC="${PROBES_PER_TOPIC:-10}"
 THRESHOLD="${THRESHOLD:-0.25}"
+SPECIFICITY_LEVEL="${SPECIFICITY_LEVEL:-}"
+SPECIFICITY_CSV="${SPECIFICITY_CSV:-}"
 EXTRA_OVERRIDES="${EXTRA_OVERRIDES:-}"
 LATEST_MARKER="${RUNPOD_LATEST_FILE:-artifacts/out/runpod_latest_refusal_rates.txt}"
 
@@ -62,6 +69,17 @@ ARGS=(
     "crawler.is_refusal_threshold=$THRESHOLD"
 )
 
+if [ -n "$SPECIFICITY_LEVEL" ]; then
+    # Accept comma/space separated levels; pass as a Hydra list so commas are
+    # not parsed as a (multirun) sweep. Single level -> [L5], multi -> [L4,L5].
+    LEVELS_CSV=$(printf '%s' "$SPECIFICITY_LEVEL" | tr ' ' ',')
+    ARGS+=("+specificity_level=[$LEVELS_CSV]")
+fi
+
+if [ -n "$SPECIFICITY_CSV" ]; then
+    ARGS+=("+specificity_csv=$SPECIFICITY_CSV")
+fi
+
 if [ -n "$EXTRA_OVERRIDES" ]; then
     read -r -a EXTRA_OVERRIDE_ITEMS <<< "$EXTRA_OVERRIDES"
     ARGS+=("${EXTRA_OVERRIDE_ITEMS[@]}")
@@ -74,6 +92,8 @@ echo "Aggregation dir:  $AGGREGATION_DIR"
 echo "Out dir:          $OUT_DIR"
 echo "Probes per topic: $PROBES_PER_TOPIC"
 echo "Threshold:        $THRESHOLD"
+echo "Specificity level: ${SPECIFICITY_LEVEL:-none (all final_topics)}"
+echo "Specificity csv:  ${SPECIFICITY_CSV:-default ($AGGREGATION_DIR/specificity_scores.csv)}"
 echo "Extra overrides:  ${EXTRA_OVERRIDES:-none}"
 echo "Latest marker:    $LATEST_MARKER"
 echo "Timestamp:        $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -84,7 +104,14 @@ if [ -z "${OPENROUTER_API_KEY:-}" ]; then
     exit 1
 fi
 
-if [ ! -f "$AGGREGATION_DIR/final_topics.txt" ] || [ ! -f "$AGGREGATION_DIR/reduction_log.json" ]; then
+if [ -n "$SPECIFICITY_LEVEL" ]; then
+    CSV_PATH="${SPECIFICITY_CSV:-$AGGREGATION_DIR/specificity_scores.csv}"
+    if [ ! -f "$CSV_PATH" ]; then
+        echo "Error: specificity csv not found for level $SPECIFICITY_LEVEL."
+        echo "Checked: $CSV_PATH"
+        exit 1
+    fi
+elif [ ! -f "$AGGREGATION_DIR/final_topics.txt" ] || [ ! -f "$AGGREGATION_DIR/reduction_log.json" ]; then
     echo "Error: AGGREGATION_DIR is missing final_topics.txt or reduction_log.json."
     echo "Checked: $AGGREGATION_DIR"
     exit 1

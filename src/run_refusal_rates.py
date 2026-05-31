@@ -4,6 +4,15 @@ Reads an aggregation output directory (final_topics.txt + reduction_log.json),
 drives ``check_refusal`` once per (cluster head, language) Topic against the
 configured target model, and writes a reviewer-table-shaped artifact bundle:
 
+Alternatively, pass ``+specificity_level=L5`` (or several levels at once as
+``+specificity_level=[L4,L5]``; optionally ``+specificity_csv=<path>``,
+defaulting to ``<aggregation_dir>/specificity_scores.csv``) to probe only the
+topics scored at those specificity levels by a specificity-scoring aggregation
+run. In that mode cluster heads and per-cell discovery booleans come from the
+csv's ``topic`` / ``present_<cell>`` columns instead of final_topics.txt +
+reduction_log.json, and each row carries its ``specificity_level``.
+
+
     refusal_rates.json   schema parity with reviewer_refusal_probe.json
     refusal_rates.md     markdown table sorted by refusal rate desc
     config.json          resolved Hydra config
@@ -30,11 +39,12 @@ try:
 except RuntimeError:
     pass
 
+import csv
 import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import hydra
 import torch
@@ -59,6 +69,59 @@ _CANDIDATE_SUFFIX_RE = re.compile(
 def _read_final_topics(path: Path) -> List[str]:
     lines = path.read_text().splitlines()
     return [line.strip() for line in lines if line.strip()]
+
+
+def _normalize_levels(value: object) -> List[str]:
+    """Coerce a Hydra ``specificity_level`` override into a list of levels.
+
+    Accepts a list/ListConfig (``[L4, L5]``) or a comma/space-separated string
+    (``"L4,L5"``, ``"L4 L5"``, or a single ``"L5"``). Returns ``[]`` when unset.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = re.split(r"[,\s]+", value.strip())
+    else:
+        parts = [str(v) for v in value]
+    return [p for p in (s.strip() for s in parts) if p]
+
+
+def _read_specificity_csv(
+    path: Path, levels: Sequence[str]
+) -> Tuple[List[str], Dict[str, Dict[str, bool]], List[str], Dict[str, str]]:
+    """Select topics at one or more specificity levels from a scores csv.
+
+    Returns ``(topics, head_lower -> {cell: bool}, cell_names,
+    head_lower -> level)``. The csv has columns ``topic, level,
+    present_<cell>...``; discovery booleans come straight from the
+    ``present_<cell>`` columns, so no reduction_log is needed in this mode
+    (this is the analogue of ``_read_final_topics`` + ``_read_discovery`` for a
+    specificity-scoring aggregation run). With several levels the selected
+    topics are the union across them, in csv row order.
+    """
+    wanted = {lv.strip() for lv in levels}
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        present_cols = [c for c in fieldnames if c.startswith("present_")]
+        cell_names = [c[len("present_") :] for c in present_cols]
+        topics: List[str] = []
+        discovery: Dict[str, Dict[str, bool]] = {}
+        head_levels: Dict[str, str] = {}
+        for row in reader:
+            level = (row.get("level") or "").strip()
+            if level not in wanted:
+                continue
+            topic = (row.get("topic") or "").strip()
+            if not topic:
+                continue
+            topics.append(topic)
+            discovery[topic.lower()] = {
+                cell: ((row.get(col) or "").strip() not in ("", "0"))
+                for cell, col in zip(cell_names, present_cols)
+            }
+            head_levels[topic.lower()] = level
+    return topics, discovery, cell_names, head_levels
 
 
 def _cell_from_input_path(path: str) -> Optional[str]:
@@ -142,11 +205,12 @@ def _cluster_record(
     cluster: str,
     discovery: Dict[str, bool],
     language_records: List[Dict[str, object]],
+    level: Optional[str] = None,
 ) -> Dict[str, object]:
     total_refusals = sum(r["total_refusals"] for r in language_records)
     total_probes = sum(r["total_probes"] for r in language_records)
     rate = total_refusals / total_probes if total_probes else None
-    return {
+    record: Dict[str, object] = {
         "cluster": cluster,
         "discovery": discovery,
         "refusal_rate": rate,
@@ -154,6 +218,11 @@ def _cluster_record(
         "total_probes": total_probes,
         "language_records": language_records,
     }
+    # Only present in specificity-level mode; preserves schema parity with
+    # reviewer_refusal_probe.json for the default final_topics path.
+    if level is not None:
+        record["specificity_level"] = level
+    return record
 
 
 def _write_markdown(
@@ -167,10 +236,14 @@ def _write_markdown(
         return (-(rate if rate is not None else -1.0), rec["cluster"].lower())
 
     sorted_records = sorted(cluster_records, key=_sort_key)
+    # Show a Level column only in specificity-level mode (where it's populated).
+    show_level = any(rec.get("specificity_level") for rec in cluster_records)
+    level_h = "Level | " if show_level else ""
+    level_sep = "---|" if show_level else ""
     cell_headers = " | ".join(name.replace("_", " ") for name in cell_names)
     header = (
-        f"| Cluster | {cell_headers} | Refusal rate | Refusals / probes |\n"
-        f"|---|{'|'.join(['---'] * len(cell_names))}|---|---|\n"
+        f"| Cluster | {level_h}{cell_headers} | Refusal rate | Refusals / probes |\n"
+        f"|---|{level_sep}{'|'.join(['---'] * len(cell_names))}|---|---|\n"
     )
     rows = []
     for rec in sorted_records:
@@ -180,8 +253,9 @@ def _write_markdown(
             ("✓" if rec["discovery"].get(name) else "")
             for name in cell_names
         )
+        level_cell = f"{rec.get('specificity_level', '')} | " if show_level else ""
         rows.append(
-            f"| {rec['cluster']} | {cell_cells} | {rate_str} | "
+            f"| {rec['cluster']} | {level_cell}{cell_cells} | {rate_str} | "
             f"{rec['total_refusals']} / {rec['total_probes']} |"
         )
     out_path.write_text(header + "\n".join(rows) + "\n")
@@ -226,13 +300,28 @@ def main(cfg: DictConfig) -> None:
     )
     print(f"Transcript log: {transcript_path}")
 
-    # Load aggregator outputs
-    cluster_heads = _read_final_topics(aggregation_dir / "final_topics.txt")
-    discovery, cell_names = _read_discovery(aggregation_dir / "reduction_log.json")
-    print(
-        f"Loaded {len(cluster_heads)} cluster heads "
-        f"from {aggregation_dir}; cells: {cell_names}"
-    )
+    # Load aggregator outputs — either a specificity-level subset (read from
+    # specificity_scores.csv) or the full final_topics.txt cluster-head set.
+    specificity_levels = _normalize_levels(cfg.get("specificity_level"))
+    head_levels: Dict[str, str] = {}
+    if specificity_levels:
+        csv_path = Path(
+            cfg.get("specificity_csv") or aggregation_dir / "specificity_scores.csv"
+        )
+        cluster_heads, discovery, cell_names, head_levels = _read_specificity_csv(
+            csv_path, specificity_levels
+        )
+        print(
+            f"Loaded {len(cluster_heads)} topics at {specificity_levels} "
+            f"from {csv_path}; cells: {cell_names}"
+        )
+    else:
+        cluster_heads = _read_final_topics(aggregation_dir / "final_topics.txt")
+        discovery, cell_names = _read_discovery(aggregation_dir / "reduction_log.json")
+        print(
+            f"Loaded {len(cluster_heads)} cluster heads "
+            f"from {aggregation_dir}; cells: {cell_names}"
+        )
 
     # Load local model (if configured) — required for local_ds70b target.
     if cfg.model.local_model is not None:
@@ -272,7 +361,14 @@ def main(cfg: DictConfig) -> None:
             rec = _topic_record(head, lang, topic)
             language_records.append(rec)
             per_topic.append(rec)
-        per_cluster.append(_cluster_record(head, head_discovery, language_records))
+        per_cluster.append(
+            _cluster_record(
+                head,
+                head_discovery,
+                language_records,
+                head_levels.get(head.strip().lower()),
+            )
+        )
 
     metadata = {
         "model_config": cfg.model.target_model,

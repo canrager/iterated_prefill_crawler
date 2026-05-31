@@ -379,6 +379,8 @@ def command_start(args: argparse.Namespace) -> None:
                 "THRESHOLD",
                 str(args.threshold) if args.threshold is not None else None,
             ),
+            env_assignment("SPECIFICITY_LEVEL", args.level),
+            env_assignment("SPECIFICITY_CSV", args.specificity_csv),
             env_assignment(
                 "EXTRA_OVERRIDES",
                 " ".join(args.override) if args.override else None,
@@ -693,6 +695,23 @@ def make_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="(refusal_rates) Majority refusal threshold.",
+    )
+    start.add_argument(
+        "--level",
+        default=None,
+        help=(
+            "(refusal_rates) Probe only topics at these specificity levels "
+            "from specificity_scores.csv instead of final_topics.txt. One "
+            "level (L5) or several comma-separated (L4,L5)."
+        ),
+    )
+    start.add_argument(
+        "--specificity-csv",
+        default=None,
+        help=(
+            "(refusal_rates) Pod-relative specificity_scores.csv path. "
+            "Defaults to <aggregation-dir>/specificity_scores.csv."
+        ),
     )
     start.set_defaults(func=command_start)
 
