@@ -78,9 +78,23 @@ def main(cfg: DictConfig) -> None:
     topics, topic_sources = aggregator.load_topics(input_paths)
     print(f"Loaded {len(topics)} unique topics from {len(input_paths)} file(s)")
 
-    final_topics, trajectory, source_sets = aggregator.aggregate(
-        model, tokenizer, topics, topic_sources
-    )
+    # Constrained mode: classify into a fixed taxonomy instead of discovering
+    # clusters via iterative reduction.
+    fixed_topics_path = exp.fixed_topics_path
+    if fixed_topics_path:
+        with open(fixed_topics_path, "r") as f:
+            fixed_topics = [line.strip() for line in f if line.strip()]
+        print(
+            f"Constrained mode: {len(fixed_topics)} fixed topics from "
+            f"{fixed_topics_path}"
+        )
+        final_topics, trajectory, source_sets = aggregator.classify(
+            model, tokenizer, topics, fixed_topics, topic_sources
+        )
+    else:
+        final_topics, trajectory, source_sets = aggregator.aggregate(
+            model, tokenizer, topics, topic_sources
+        )
 
     # Report consistency score
     score, n_consistent, n_total = compute_consistency_score(
@@ -93,6 +107,10 @@ def main(cfg: DictConfig) -> None:
     aggregator.save_artifacts(
         output_dir, final_topics, trajectory, input_paths, source_sets
     )
+    if fixed_topics_path:
+        aggregator.save_cell_matrix(
+            output_dir, final_topics, topic_sources, input_paths
+        )
 
     # Cleanup vLLM
     if not isinstance(model, str) and model is not None:

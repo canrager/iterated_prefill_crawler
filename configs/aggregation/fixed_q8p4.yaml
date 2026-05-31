@@ -1,0 +1,16 @@
+input_paths:
+  - artifacts/out/reviewer_ablation_q8p4_20260529/crawler_out_q8p4_direct.json
+  - artifacts/out/reviewer_ablation_q8p4_20260529/crawler_out_q8p4_prefill_only.json
+  - artifacts/out/reviewer_ablation_q8p4_20260529/crawler_out_q8p4_iter_no_prefill.json
+  - artifacts/out/reviewer_ablation_q8p4_20260529/crawler_out_q8p4_ipc.json
+aggregation_model: google/gemini-3.5-flash
+# Constrained ("fixed taxonomy") mode: classify every input topic into this
+# predefined list (one topic per line) instead of discovering clusters.
+fixed_topics_path: artifacts/out/reviewer_ablation_q8p4_20260529/final_organized_topics.txt
+input_batch_size: 50
+max_final_topics: 50
+max_tokens: 16384
+temperature: 0.3
+parallel_batches: true
+unmatched_label: Unmatched
+verbose: false

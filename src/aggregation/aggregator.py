@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import re
@@ -525,6 +526,310 @@ class TopicAggregator:
 
         print(f"Aggregation complete: {len(final_topics)} final topics")
         return final_topics, trajectory, current_sources
+
+    # ------------------------------------------------------------------
+    # Constrained ("fixed taxonomy") classification mode
+    # ------------------------------------------------------------------
+
+    def _build_classification_prompt(
+        self, topics: List[str], fixed_topics: List[str]
+    ) -> str:
+        """Build a prompt that classifies a batch into the fixed taxonomy."""
+        fixed_str = "\n".join(f"- {t}" for t in fixed_topics)
+        topics_str = "\n".join(f"- {t}" for t in topics)
+        return self.exp.classification_prompt.format(
+            fixed_topics=fixed_str,
+            unmatched_label=self.exp.unmatched_label,
+            n_input=len(topics),
+            topics=topics_str,
+        )
+
+    def _constrain_to_fixed(
+        self,
+        mapping: Dict[str, List[str]],
+        fixed_lookup: Dict[str, str],
+        unmatched_label: str,
+    ) -> Dict[str, List[str]]:
+        """Force every output key onto the fixed taxonomy.
+
+        fixed_lookup maps lowercased fixed label -> canonical fixed label.
+        Keys matching a fixed label (case-insensitive) are canonicalized; the
+        unmatched label is preserved; any other (hallucinated) key has its
+        inputs redirected to the unmatched bucket.
+        """
+        unmatched_lower = unmatched_label.strip().lower()
+        constrained: Dict[str, List[str]] = {}
+        for key, vals in mapping.items():
+            k_lower = key.strip().lower()
+            if k_lower in fixed_lookup:
+                target = fixed_lookup[k_lower]
+            else:
+                target = unmatched_label  # unmatched or hallucinated key
+            bucket = constrained.setdefault(target, [])
+            seen = set(t.strip().lower() for t in bucket)
+            for v in vals:
+                if v.strip().lower() not in seen:
+                    bucket.append(v)
+                    seen.add(v.strip().lower())
+        return constrained
+
+    @staticmethod
+    def _filter_values_to_batch(
+        mapping: Dict[str, List[str]], batch: List[str]
+    ) -> Dict[str, List[str]]:
+        """Keep only values that are actual batch inputs (drop hallucinations)."""
+        batch_lookup = {t.strip().lower(): t.strip() for t in batch}
+        out: Dict[str, List[str]] = {}
+        for k, vals in mapping.items():
+            kept: List[str] = []
+            seen: set = set()
+            for v in vals:
+                vl = v.strip().lower()
+                if vl in batch_lookup and vl not in seen:
+                    kept.append(batch_lookup[vl])
+                    seen.add(vl)
+            if kept:
+                out[k] = kept
+        return out
+
+    def _classify_batch(
+        self, model, tokenizer, batch: List[str],
+        fixed_topics: List[str], fixed_lookup: Dict[str, str],
+    ) -> Tuple[Dict[str, List[str]], str]:
+        """Single-prompt classification of a batch into the fixed taxonomy."""
+        prompt = self._build_classification_prompt(batch, fixed_topics)
+        raw_response = self._generate_single(model, tokenizer, prompt)
+        try:
+            mapping = _parse_json_from_response(raw_response)
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"  WARNING: JSON parse failed: {e}")
+            mapping = {}
+        mapping = self._constrain_to_fixed(
+            mapping, fixed_lookup, self.exp.unmatched_label
+        )
+        mapping = self._filter_values_to_batch(mapping, batch)
+        return mapping, raw_response
+
+    def _classify_batches_parallel(
+        self, model, tokenizer, batches: List[List[str]], fixed_topics: List[str],
+        fixed_lookup: Dict[str, str],
+    ) -> List[Tuple[Dict[str, List[str]], str]]:
+        """Classify all batches in a single batch_generate call."""
+        prompts = [
+            self._build_classification_prompt(batch, fixed_topics)
+            for batch in batches
+        ]
+        messages = [[{"role": "user", "content": p}] for p in prompts]
+        generated_texts, _ = batch_generate(
+            model=model,
+            tokenizer=tokenizer,
+            messages=messages,
+            max_new_tokens=self.exp.max_tokens,
+            temperature=self.exp.temperature,
+            verbose=self.exp.verbose,
+        )
+        results = []
+        for raw_response, batch in zip(generated_texts, batches):
+            try:
+                mapping = _parse_json_from_response(raw_response)
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"  WARNING: JSON parse failed: {e}")
+                mapping = {}
+            mapping = self._constrain_to_fixed(
+                mapping, fixed_lookup, self.exp.unmatched_label
+            )
+            mapping = self._filter_values_to_batch(mapping, batch)
+            results.append((mapping, raw_response))
+        return results
+
+    def classify(
+        self,
+        model,
+        tokenizer,
+        topics: List[str],
+        fixed_topics: List[str],
+        topic_sources: Optional[Dict[str, set]] = None,
+    ) -> Tuple[Dict[str, List[str]], Dict[str, List[str]], Dict[str, set]]:
+        """Single-pass classification of topics into a fixed taxonomy (multi-label).
+
+        Each input topic is assigned to one or more of the fixed topics, or to
+        the unmatched bucket. Returns the same (final_topics, trajectory,
+        source_sets) shape as aggregate() so the standard artifacts apply.
+        """
+        unmatched_label = self.exp.unmatched_label
+        fixed_lookup = {t.strip().lower(): t.strip() for t in fixed_topics}
+        current_sources: Dict[str, set] = topic_sources or {}
+
+        self.reduction_log = ReductionLog(topics)
+        self.reduction_log.start_iteration(0, topics)
+
+        batches = [
+            topics[i : i + self.exp.input_batch_size]
+            for i in range(0, len(topics), self.exp.input_batch_size)
+        ]
+        print(
+            f"Classifying {len(topics)} topics into {len(fixed_topics)} fixed "
+            f"topics over {len(batches)} batches "
+            f"(input_batch_size={self.exp.input_batch_size})"
+        )
+
+        all_output_mappings: Dict[str, List[str]] = {}
+        all_output_sources: Dict[str, set] = {}
+        max_retries = 3
+
+        if self.exp.parallel_batches:
+            print(f"  Classifying {len(batches)} batches in parallel...")
+            results = self._classify_batches_parallel(
+                model, tokenizer, batches, fixed_topics, fixed_lookup
+            )
+        else:
+            results = [
+                self._classify_batch(
+                    model, tokenizer, batch, fixed_topics, fixed_lookup
+                )
+                for batch in batches
+            ]
+
+        for batch_idx, ((mapping, raw_response), batch) in enumerate(
+            zip(results, batches)
+        ):
+            missing = self._validate_batch_coverage(batch, mapping, batch_idx)
+            for retry in range(max_retries):
+                if not missing:
+                    break
+                print(
+                    f"  Retrying batch {batch_idx} (attempt {retry + 1}/{max_retries})..."
+                )
+                mapping, raw_response = self._classify_batch(
+                    model, tokenizer, batch, fixed_topics, fixed_lookup
+                )
+                missing = self._validate_batch_coverage(batch, mapping, batch_idx)
+            if missing:
+                print(
+                    f"  Routing {len(missing)} uncovered topics to "
+                    f"'{unmatched_label}' after {max_retries} retries: "
+                    f"{missing[:5]}" + ("..." if len(missing) > 5 else "")
+                )
+                bucket = mapping.setdefault(unmatched_label, [])
+                seen = set(t.strip().lower() for t in bucket)
+                for t in missing:
+                    if t.strip().lower() not in seen:
+                        bucket.append(t)
+                        seen.add(t.strip().lower())
+            self.reduction_log.log_reduce_batch(
+                batch_idx, batch, mapping, raw_response
+            )
+            self._merge_into_output_mappings(all_output_mappings, mapping)
+            batch_sources = self._propagate_sources(mapping, current_sources)
+            for k, v in batch_sources.items():
+                if k in all_output_sources:
+                    all_output_sources[k] |= v
+                else:
+                    all_output_sources[k] = v
+
+        # Ensure every fixed topic is present as a row, even with zero matches.
+        for t in fixed_topics:
+            all_output_mappings.setdefault(t.strip(), [])
+            all_output_sources.setdefault(t.strip().lower(), set())
+
+        # Final topics keyed original-case; dedup values.
+        final_topics = {
+            k: sorted(set(v)) for k, v in all_output_mappings.items()
+        }
+        # Single-level taxonomy: trajectory == direct assignment.
+        trajectory = {k: list(v) for k, v in final_topics.items()}
+
+        n_matched = sum(
+            1 for t in topics
+            if any(
+                t.strip().lower() in {x.strip().lower() for x in v}
+                for k, v in final_topics.items()
+                if k.strip().lower() != unmatched_label.strip().lower()
+            )
+        )
+        n_unmatched = len(final_topics.get(unmatched_label, []))
+        print(
+            f"Classification complete: {len(final_topics)} fixed topics | "
+            f"{n_matched}/{len(topics)} inputs matched >=1 fixed topic | "
+            f"{n_unmatched} in '{unmatched_label}'"
+        )
+        return final_topics, trajectory, all_output_sources
+
+    def save_cell_matrix(
+        self,
+        output_dir: str,
+        final_topics: Dict[str, List[str]],
+        topic_sources: Dict[str, set],
+        input_paths: List[str],
+    ):
+        """Write a per-topic x per-cell contribution matrix (counts + presence).
+
+        For each fixed topic, counts how many unique input topics assigned to it
+        came from each input cell, and which cells contributed at all. Because a
+        single input topic can appear in several cells and be assigned to several
+        fixed topics, per-cell counts sum to more than the number of inputs.
+        """
+        cell_names = [
+            os.path.splitext(os.path.basename(p))[0] for p in input_paths
+        ]
+        num_runs = len(input_paths)
+
+        rows = []
+        for topic in sorted(final_topics.keys()):
+            inputs = final_topics[topic]
+            counts = [0] * num_runs
+            for inp in inputs:
+                for c in topic_sources.get(inp.strip().lower(), set()):
+                    if 0 <= c < num_runs:
+                        counts[c] += 1
+            presence = [1 if c > 0 else 0 for c in counts]
+            rows.append((topic, len(inputs), counts, presence))
+
+        # CSV
+        csv_path = os.path.join(output_dir, "topic_cell_matrix.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            header = (
+                ["fixed_topic", "n_unique_inputs"]
+                + [f"count_{c}" for c in cell_names]
+                + [f"present_{c}" for c in cell_names]
+                + ["n_cells_present"]
+            )
+            writer.writerow(header)
+            for topic, n_inputs, counts, presence in rows:
+                writer.writerow(
+                    [topic, n_inputs] + counts + presence + [sum(presence)]
+                )
+
+        # Markdown (human-readable)
+        md_path = os.path.join(output_dir, "topic_cell_matrix.md")
+        with open(md_path, "w") as f:
+            f.write("# Fixed topic x cell contribution matrix\n\n")
+            f.write(
+                "Counts = number of unique input topics assigned to the fixed "
+                "topic that appeared in each cell. A topic present in multiple "
+                "cells is counted once per cell, so row counts can exceed "
+                "`n_unique_inputs`.\n\n"
+            )
+            f.write("Cells:\n")
+            for i, c in enumerate(cell_names):
+                f.write(f"- {i}: `{c}`\n")
+            f.write("\n")
+            f.write(
+                "| Fixed topic | inputs | "
+                + " | ".join(cell_names)
+                + " | cells |\n"
+            )
+            f.write(
+                "|---|---|" + "---|" * num_runs + "---|\n"
+            )
+            for topic, n_inputs, counts, presence in rows:
+                cells_str = " | ".join(str(c) for c in counts)
+                f.write(
+                    f"| {topic} | {n_inputs} | {cells_str} | {sum(presence)} |\n"
+                )
+
+        print(f"  topic_cell_matrix.csv, topic_cell_matrix.md")
 
     def save_artifacts(
         self,

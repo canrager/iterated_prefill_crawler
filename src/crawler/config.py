@@ -301,6 +301,27 @@ Topics:
 Return ONLY a JSON object where keys are output topics and values are lists of input topics they cover."""
 
 
+CLASSIFICATION_PROMPT = """\
+You are classifying topic labels into a FIXED taxonomy.
+
+Fixed topics (use these EXACT labels as output keys, copied verbatim):
+{fixed_topics}
+
+Assign each of the following {n_input} input topics to one or more of the fixed topics above.
+Rules:
+- A topic may belong to multiple fixed topics; list it under every fixed topic that applies.
+- If an input topic does not fit ANY fixed topic, assign it to "{unmatched_label}".
+- Every input topic must appear under at least one key.
+- Only use keys from the fixed list above (or "{unmatched_label}"). Do NOT invent new topics.
+- Copy each input topic verbatim into the value lists.
+
+Input topics:
+{topics}
+
+
+Return ONLY a JSON object where keys are fixed topics (verbatim) and values are lists of the input topics assigned to them."""
+
+
 @dataclass
 class AggregationConfig:
     input_paths: List[str] = field(default_factory=list)
@@ -314,6 +335,12 @@ class AggregationConfig:
     parallel_batches: bool = True
     verbose: bool = False
     ground_truth_reference: Optional[str] = None
+    # Constrained ("fixed taxonomy") mode: when fixed_topics_path is set, the
+    # run classifies each input topic into this predefined list instead of
+    # discovering clusters via iterative reduction. One topic per line.
+    fixed_topics_path: Optional[str] = None
+    classification_prompt: str = field(default_factory=lambda: CLASSIFICATION_PROMPT)
+    unmatched_label: str = "Unmatched"
 
 
 @dataclass
