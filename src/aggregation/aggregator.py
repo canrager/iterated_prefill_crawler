@@ -649,14 +649,23 @@ class TopicAggregator:
     # ------------------------------------------------------------------
 
     def _build_classification_prompt(
-        self, topics: List[str], fixed_topics: List[str]
+        self,
+        topics: List[str],
+        fixed_topics: List[str],
+        prompt_template: Optional[str] = None,
+        fallback_label: Optional[str] = None,
     ) -> str:
-        """Build a prompt that classifies a batch into the fixed taxonomy."""
+        """Build a prompt that classifies a batch into the fixed taxonomy.
+
+        prompt_template / fallback_label override the defaults so the same
+        machinery can drive other label sets (e.g. specificity levels).
+        """
         fixed_str = "\n".join(f"- {t}" for t in fixed_topics)
         topics_str = "\n".join(f"- {t}" for t in topics)
-        return self.exp.classification_prompt.format(
+        template = prompt_template or self.exp.classification_prompt
+        return template.format(
             fixed_topics=fixed_str,
-            unmatched_label=self.exp.unmatched_label,
+            unmatched_label=fallback_label or self.exp.unmatched_label,
             n_input=len(topics),
             topics=topics_str,
         )
@@ -712,28 +721,36 @@ class TopicAggregator:
     def _classify_batch(
         self, model, tokenizer, batch: List[str],
         fixed_topics: List[str], fixed_lookup: Dict[str, str],
+        prompt_template: Optional[str] = None,
+        fallback_label: Optional[str] = None,
     ) -> Tuple[Dict[str, List[str]], str]:
         """Single-prompt classification of a batch into the fixed taxonomy."""
-        prompt = self._build_classification_prompt(batch, fixed_topics)
+        label = fallback_label or self.exp.unmatched_label
+        prompt = self._build_classification_prompt(
+            batch, fixed_topics, prompt_template, label
+        )
         raw_response = self._generate_single(model, tokenizer, prompt)
         try:
             mapping = _parse_json_from_response(raw_response)
         except (json.JSONDecodeError, ValueError) as e:
             print(f"  WARNING: JSON parse failed: {e}")
             mapping = {}
-        mapping = self._constrain_to_fixed(
-            mapping, fixed_lookup, self.exp.unmatched_label
-        )
+        mapping = self._constrain_to_fixed(mapping, fixed_lookup, label)
         mapping = self._filter_values_to_batch(mapping, batch)
         return mapping, raw_response
 
     def _classify_batches_parallel(
         self, model, tokenizer, batches: List[List[str]], fixed_topics: List[str],
         fixed_lookup: Dict[str, str],
+        prompt_template: Optional[str] = None,
+        fallback_label: Optional[str] = None,
     ) -> List[Tuple[Dict[str, List[str]], str]]:
         """Classify all batches in a single batch_generate call."""
+        label = fallback_label or self.exp.unmatched_label
         prompts = [
-            self._build_classification_prompt(batch, fixed_topics)
+            self._build_classification_prompt(
+                batch, fixed_topics, prompt_template, label
+            )
             for batch in batches
         ]
         messages = [[{"role": "user", "content": p}] for p in prompts]
@@ -752,28 +769,28 @@ class TopicAggregator:
             except (json.JSONDecodeError, ValueError) as e:
                 print(f"  WARNING: JSON parse failed: {e}")
                 mapping = {}
-            mapping = self._constrain_to_fixed(
-                mapping, fixed_lookup, self.exp.unmatched_label
-            )
+            mapping = self._constrain_to_fixed(mapping, fixed_lookup, label)
             mapping = self._filter_values_to_batch(mapping, batch)
             results.append((mapping, raw_response))
         return results
 
-    def classify(
+    def _classify_into(
         self,
         model,
         tokenizer,
         topics: List[str],
         fixed_topics: List[str],
+        prompt_template: str,
+        fallback_label: str,
         topic_sources: Optional[Dict[str, set]] = None,
     ) -> Tuple[Dict[str, List[str]], Dict[str, List[str]], Dict[str, set]]:
-        """Single-pass classification of topics into a fixed taxonomy (multi-label).
+        """Assign each topic to one or more of a fixed label set via the LLM.
 
-        Each input topic is assigned to one or more of the fixed topics, or to
-        the unmatched bucket. Returns the same (final_topics, trajectory,
-        source_sets) shape as aggregate() so the standard artifacts apply.
+        Shared core behind classify() (taxonomy labels + classification prompt)
+        and score_specificity() (ladder levels + specificity prompt). Topics
+        uncovered after retries are routed to fallback_label. Returns the
+        (final_topics, trajectory, source_sets) shape used by the artifacts.
         """
-        unmatched_label = self.exp.unmatched_label
         fixed_lookup = {t.strip().lower(): t.strip() for t in fixed_topics}
         current_sources: Dict[str, set] = topic_sources or {}
 
@@ -797,12 +814,14 @@ class TopicAggregator:
         if self.exp.parallel_batches:
             print(f"  Classifying {len(batches)} batches in parallel...")
             results = self._classify_batches_parallel(
-                model, tokenizer, batches, fixed_topics, fixed_lookup
+                model, tokenizer, batches, fixed_topics, fixed_lookup,
+                prompt_template, fallback_label,
             )
         else:
             results = [
                 self._classify_batch(
-                    model, tokenizer, batch, fixed_topics, fixed_lookup
+                    model, tokenizer, batch, fixed_topics, fixed_lookup,
+                    prompt_template, fallback_label,
                 )
                 for batch in batches
             ]
@@ -818,16 +837,17 @@ class TopicAggregator:
                     f"  Retrying batch {batch_idx} (attempt {retry + 1}/{max_retries})..."
                 )
                 mapping, raw_response = self._classify_batch(
-                    model, tokenizer, batch, fixed_topics, fixed_lookup
+                    model, tokenizer, batch, fixed_topics, fixed_lookup,
+                    prompt_template, fallback_label,
                 )
                 missing = self._validate_batch_coverage(batch, mapping, batch_idx)
             if missing:
                 print(
                     f"  Routing {len(missing)} uncovered topics to "
-                    f"'{unmatched_label}' after {max_retries} retries: "
+                    f"'{fallback_label}' after {max_retries} retries: "
                     f"{missing[:5]}" + ("..." if len(missing) > 5 else "")
                 )
-                bucket = mapping.setdefault(unmatched_label, [])
+                bucket = mapping.setdefault(fallback_label, [])
                 seen = set(t.strip().lower() for t in bucket)
                 for t in missing:
                     if t.strip().lower() not in seen:
@@ -844,7 +864,7 @@ class TopicAggregator:
                 else:
                     all_output_sources[k] = v
 
-        # Ensure every fixed topic is present as a row, even with zero matches.
+        # Ensure every fixed label is present as a row, even with zero matches.
         for t in fixed_topics:
             all_output_mappings.setdefault(t.strip(), [])
             all_output_sources.setdefault(t.strip().lower(), set())
@@ -855,6 +875,27 @@ class TopicAggregator:
         }
         # Single-level taxonomy: trajectory == direct assignment.
         trajectory = {k: list(v) for k, v in final_topics.items()}
+        return final_topics, trajectory, all_output_sources
+
+    def classify(
+        self,
+        model,
+        tokenizer,
+        topics: List[str],
+        fixed_topics: List[str],
+        topic_sources: Optional[Dict[str, set]] = None,
+    ) -> Tuple[Dict[str, List[str]], Dict[str, List[str]], Dict[str, set]]:
+        """Single-pass classification of topics into a fixed taxonomy (multi-label).
+
+        Each input topic is assigned to one or more of the fixed topics, or to
+        the unmatched bucket. Returns the same (final_topics, trajectory,
+        source_sets) shape as aggregate() so the standard artifacts apply.
+        """
+        unmatched_label = self.exp.unmatched_label
+        final_topics, trajectory, all_output_sources = self._classify_into(
+            model, tokenizer, topics, fixed_topics,
+            self.exp.classification_prompt, unmatched_label, topic_sources,
+        )
 
         n_matched = sum(
             1 for t in topics
@@ -871,6 +912,312 @@ class TopicAggregator:
             f"{n_unmatched} in '{unmatched_label}'"
         )
         return final_topics, trajectory, all_output_sources
+
+    def score_specificity(
+        self,
+        model,
+        tokenizer,
+        topics: List[str],
+        topic_sources: Optional[Dict[str, set]] = None,
+    ) -> Tuple[Dict[str, List[str]], Dict[str, List[str]], Dict[str, set]]:
+        """Label each topic by how specific it is (the specificity ladder).
+
+        Reuses the classification machinery with the ladder levels as the label
+        set and the specificity prompt. Each topic is forced to a SINGLE level
+        (the most specific it was assigned to), so the per-cell level counts are
+        a clean partition. Returns (level_topics, trajectory, source_sets).
+        """
+        levels = list(self.exp.specificity_levels)
+        fallback = self.exp.unmatched_label
+        if fallback not in levels:
+            # The judge prompt uses unmatched_label as the junk key; if the
+            # configured levels name their own junk bin, prefer that.
+            fallback = levels[-1]
+        level_topics, _, _ = self._classify_into(
+            model, tokenizer, topics, levels,
+            self.exp.specificity_prompt, fallback, topic_sources,
+        )
+        level_topics = self._enforce_single_level(level_topics, levels, fallback)
+
+        # Recompute per-level source sets after the single-level reassignment.
+        sources = topic_sources or {}
+        source_sets: Dict[str, set] = {}
+        for level, ts in level_topics.items():
+            merged: set = set()
+            for t in ts:
+                merged |= sources.get(t.strip().lower(), set())
+            source_sets[level.strip().lower()] = merged
+
+        trajectory = {k: list(v) for k, v in level_topics.items()}
+        summary = " ".join(
+            f"{lvl}={len(level_topics.get(lvl, []))}" for lvl in levels
+        )
+        n_scored = sum(len(v) for v in level_topics.values())
+        print(f"Specificity scoring complete: {n_scored} topics | {summary}")
+        return level_topics, trajectory, source_sets
+
+    @staticmethod
+    def _enforce_single_level(
+        level_topics: Dict[str, List[str]],
+        ordered_levels: List[str],
+        fallback_label: str,
+    ) -> Dict[str, List[str]]:
+        """Collapse multi-assigned topics to their single most-specific level.
+
+        Priority follows ordered_levels (later = more specific), except the
+        junk/fallback bin which is always lowest priority.
+        """
+        priority = {lvl: i for i, lvl in enumerate(ordered_levels)}
+        priority[fallback_label] = -1
+        # topic_lower -> (priority, level, original_topic)
+        best: Dict[str, Tuple[int, str, str]] = {}
+        for level, topics in level_topics.items():
+            p = priority.get(level, -1)
+            for t in topics:
+                tl = t.strip().lower()
+                if tl not in best or p > best[tl][0]:
+                    best[tl] = (p, level, t)
+        out: Dict[str, List[str]] = {lvl: [] for lvl in ordered_levels}
+        for _, level, t in best.values():
+            out.setdefault(level, []).append(t)
+        return {lvl: sorted(set(v)) for lvl, v in out.items()}
+
+    def save_specificity_artifacts(
+        self,
+        output_dir: str,
+        level_topics: Dict[str, List[str]],
+        topic_sources: Dict[str, set],
+        cell_names: List[str],
+        num_generations_per_cell: Optional[int] = None,
+    ):
+        """Write per-topic levels, a per-cell level matrix, and a stacked bar.
+
+        - specificity_scores.csv: one row per topic with its level + cell presence.
+        - specificity_by_cell.{csv,md}: rows = levels (ladder order) + an L4+L5
+          summary; columns = per-cell counts (and fractions of that cell's
+          topics, plus per-generation rates when num_generations_per_cell set).
+        - specificity_by_cell.png: stacked bar of level counts per cell.
+        """
+        ordered_levels = list(self.exp.specificity_levels)
+        num_cells = len(cell_names)
+
+        # Invert to per-topic level (single-label guarantees one level per topic).
+        topic_to_level: Dict[str, str] = {}
+        for level, topics in level_topics.items():
+            for t in topics:
+                topic_to_level[t] = level
+
+        # --- specificity_scores.csv (per-topic) ---
+        scores_path = os.path.join(output_dir, "specificity_scores.csv")
+        with open(scores_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                ["topic", "level", "n_cells"]
+                + [f"present_{c}" for c in cell_names]
+            )
+            for topic in sorted(topic_to_level, key=lambda s: s.lower()):
+                cells = topic_sources.get(topic.strip().lower(), set())
+                present = [1 if c in cells else 0 for c in range(num_cells)]
+                writer.writerow(
+                    [topic, topic_to_level[topic], sum(present)] + present
+                )
+
+        # --- per-cell counts per level ---
+        # counts[level][cell] = # unique topics at that level present in the cell.
+        counts: Dict[str, List[int]] = {
+            lvl: [0] * num_cells for lvl in ordered_levels
+        }
+        for level, topics in level_topics.items():
+            row = counts.setdefault(level, [0] * num_cells)
+            for t in topics:
+                for c in topic_sources.get(t.strip().lower(), set()):
+                    if 0 <= c < num_cells:
+                        row[c] += 1
+        # Per-cell totals across all levels (denominator for fractions).
+        cell_totals = [
+            sum(counts[lvl][c] for lvl in ordered_levels) for c in range(num_cells)
+        ]
+
+        def _row_cells(level: str) -> List[int]:
+            return counts.get(level, [0] * num_cells)
+
+        # L4+L5 summary (the reviewer-relevant "specific" tier). Only sums levels
+        # that actually exist in the configured ladder.
+        specific_levels = [lvl for lvl in ("L4", "L5") if lvl in counts]
+        specific_row = [
+            sum(counts[lvl][c] for lvl in specific_levels)
+            for c in range(num_cells)
+        ]
+
+        def _frac(n: int, total: int) -> str:
+            return "" if not total else f"{n / total:.4f}"
+
+        def _rate(n: int) -> str:
+            if not num_generations_per_cell:
+                return ""
+            return f"{n / num_generations_per_cell:.4f}"
+
+        # --- specificity_by_cell.csv ---
+        csv_path = os.path.join(output_dir, "specificity_by_cell.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            header = (
+                ["level"]
+                + [f"count_{c}" for c in cell_names]
+                + [f"frac_{c}" for c in cell_names]
+            )
+            if num_generations_per_cell:
+                header += [f"per_gen_{c}" for c in cell_names]
+            writer.writerow(header)
+
+            def _write(label: str, row: List[int]):
+                line = [label] + row
+                line += [_frac(row[c], cell_totals[c]) for c in range(num_cells)]
+                if num_generations_per_cell:
+                    line += [_rate(row[c]) for c in range(num_cells)]
+                writer.writerow(line)
+
+            for lvl in ordered_levels:
+                _write(lvl, _row_cells(lvl))
+            if specific_levels:
+                _write("+".join(specific_levels), specific_row)
+            _write("TOTAL", cell_totals)
+
+        # --- specificity_by_cell.md (human-readable) ---
+        md_path = os.path.join(output_dir, "specificity_by_cell.md")
+        with open(md_path, "w") as f:
+            f.write("# Specificity level x cell distribution\n\n")
+            f.write(
+                "`count_<cell>` = number of unique topics at that specificity "
+                "level present in the cell. `frac_<cell>` = that count divided "
+                "by the cell's total scored topics (the level distribution).\n"
+            )
+            if num_generations_per_cell:
+                f.write(
+                    f"`per_gen_<cell>` = count / {num_generations_per_cell} "
+                    "target generations per cell.\n"
+                )
+            f.write(
+                "\n`L4+L5` is the reviewer-relevant specific tier "
+                "(named cases and unique referents).\n\n"
+            )
+            f.write("| level | " + " | ".join(cell_names) + " |\n")
+            f.write("|---|" + "---|" * num_cells + "\n")
+            for lvl in ordered_levels:
+                row = _row_cells(lvl)
+                f.write(f"| {lvl} | " + " | ".join(str(v) for v in row) + " |\n")
+            if specific_levels:
+                f.write(
+                    f"| **{'+'.join(specific_levels)}** | "
+                    + " | ".join(f"**{v}**" for v in specific_row)
+                    + " |\n"
+                )
+            f.write(
+                "| TOTAL | " + " | ".join(str(v) for v in cell_totals) + " |\n"
+            )
+
+        # --- specificity_by_cell.png (stacked bar of level counts per cell) ---
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        plt.figure(figsize=(9, 6))
+        cmap = plt.get_cmap("tab10")
+        bottoms = [0] * num_cells
+        x = list(range(num_cells))
+        for i, lvl in enumerate(ordered_levels):
+            row = _row_cells(lvl)
+            plt.bar(x, row, bottom=bottoms, label=lvl, color=cmap(i % 10))
+            bottoms = [bottoms[c] + row[c] for c in range(num_cells)]
+        plt.xticks(x, cell_names, rotation=20, ha="right")
+        plt.ylabel("Topics scored (stacked by specificity level)")
+        plt.title("Specificity composition per cell")
+        plt.legend(title="level")
+        plt.grid(True, axis="y", linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        png_path = os.path.join(output_dir, "specificity_by_cell.png")
+        plt.savefig(png_path, bbox_inches="tight", dpi=200)
+        plt.close()
+
+        # --- specificity_grouped_bar.png ---
+        # Grouped bars: x-groups = specificity levels (L1..L5, junk excluded),
+        # one bar per cell/method within each group; y = topic count.
+        grouped_levels = [
+            lvl for lvl in ordered_levels if re.fullmatch(r"L\d+", lvl)
+        ] or list(ordered_levels)
+        n_groups = len(grouped_levels)
+        group_w = 0.8
+        bar_w = group_w / max(num_cells, 1)
+        plt.figure(figsize=(10, 6))
+        for ci, cell in enumerate(cell_names):
+            offset = (ci - (num_cells - 1) / 2) * bar_w
+            xs = [g + offset for g in range(n_groups)]
+            heights = [_row_cells(lvl)[ci] for lvl in grouped_levels]
+            plt.bar(xs, heights, width=bar_w, label=cell, color=cmap(ci % 10))
+        plt.xticks(range(n_groups), grouped_levels)
+        plt.xlabel("specificity level (broad L1 -> specific L5)")
+        plt.ylabel("topic count")
+        plt.title("Specificity level by method")
+        plt.legend(title="method")
+        plt.grid(True, axis="y", linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        grouped_path = os.path.join(output_dir, "specificity_grouped_bar.png")
+        plt.savefig(grouped_path, bbox_inches="tight", dpi=200)
+        plt.close()
+
+        print(
+            "  specificity_scores.csv, specificity_by_cell.{csv,md,png}, "
+            "specificity_grouped_bar.png"
+        )
+
+    def save_specificity_explorer(
+        self,
+        output_dir: str,
+        level_topics: Dict[str, List[str]],
+        topic_sources: Dict[str, set],
+        cell_names: List[str],
+        cluster_topics: Optional[Dict[str, List[str]]] = None,
+    ):
+        """Write a per-topic explorer.html grouped by method/specificity/cluster.
+
+        Assembles one record per topic carrying all three properties — method(s)
+        (from topic_sources), specificity level (from level_topics), and
+        cluster(s) (from cluster_topics, if a taxonomy classification was run) —
+        and renders the grouping explorer. Overwrites the generic explorer.html.
+        """
+        from src.aggregation.html_builder import build_specificity_explorer_html
+
+        topic_to_level = {
+            t: lvl for lvl, ts in level_topics.items() for t in ts
+        }
+        topic_to_clusters: Dict[str, List[str]] = {}
+        for cl, ts in (cluster_topics or {}).items():
+            for t in ts:
+                topic_to_clusters.setdefault(t.strip().lower(), []).append(cl)
+
+        records = []
+        for topic, level in topic_to_level.items():
+            key = topic.strip().lower()
+            idxs = sorted(
+                i for i in topic_sources.get(key, set())
+                if 0 <= i < len(cell_names)
+            )
+            records.append({
+                "t": topic,
+                "m": [cell_names[i] for i in idxs],
+                "s": level,
+                "c": sorted(set(topic_to_clusters.get(key, []))),
+            })
+
+        html = build_specificity_explorer_html(
+            records, cell_names, list(self.exp.specificity_levels),
+            has_clusters=bool(cluster_topics),
+        )
+        with open(os.path.join(output_dir, "explorer.html"), "w") as f:
+            f.write(html)
+        grouped = "cluster/method/specificity" if cluster_topics else "method/specificity"
+        print(f"  explorer.html (grouped by {grouped})")
 
     def save_cell_matrix(
         self,
@@ -1085,11 +1432,14 @@ class TopicAggregator:
         input_paths: List[str],
         source_sets: Optional[Dict[str, set]] = None,
         num_runs: Optional[int] = None,
+        write_explorer: bool = True,
     ):
         """Save all artifacts to output_dir.
 
         `num_runs` is the number of cells (defaults to len(input_paths) for the
         one-file-per-cell case; pass explicitly when cells pool several files).
+        Set `write_explorer=False` to skip the reduction-tree explorer (e.g.
+        specificity mode writes its own grouping explorer afterwards).
         """
         from src.aggregation.html_builder import build_explorer_html
 
@@ -1129,17 +1479,20 @@ class TopicAggregator:
         with open(log_path, "w") as f:
             json.dump(log_dict, f, indent=2)
 
-        # 4. explorer.html
-        html = build_explorer_html(
-            log_dict, final_topics, trajectory,
-            source_sets=source_sets, num_runs=num_runs,
-        )
-        html_path = os.path.join(output_dir, "explorer.html")
-        with open(html_path, "w") as f:
-            f.write(html)
+        # 4. explorer.html (skipped when the caller writes its own explorer)
+        artifacts = "config.json, final_topics.txt, reduction_log.json"
+        if write_explorer:
+            html = build_explorer_html(
+                log_dict, final_topics, trajectory,
+                source_sets=source_sets, num_runs=num_runs,
+            )
+            html_path = os.path.join(output_dir, "explorer.html")
+            with open(html_path, "w") as f:
+                f.write(html)
+            artifacts += ", explorer.html"
 
         print(f"Artifacts saved to {output_dir}/")
-        print(f"  config.json, final_topics.txt, reduction_log.json, explorer.html")
+        print(f"  {artifacts}")
 
 
 def resolve_input_groups(

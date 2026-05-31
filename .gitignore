@@ -18,6 +18,9 @@ hf_models
 *.tar.gz
 multirun
 
+# Local ablation run data (raw crawls; large, not committed)
+/reviewer_ablation_*/
+
 # agent-trio files
 AGENTS.md
 CLAUDE.md
